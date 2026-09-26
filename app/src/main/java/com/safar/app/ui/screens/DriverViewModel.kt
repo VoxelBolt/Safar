@@ -59,22 +59,11 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
                 val session = workSessionRepository.getCurrent()
                 Triple(driver, routes, session)
             }.onSuccess { (driver, routes, session) ->
-                val selected = driver?.routeId
-                    ?.let { id -> routes.firstOrNull { it.id == id } }
-                _uiState.value = _uiState.value.copy(
-                    driver = driver,
-                    routes = routes,
-                    selectedRoute = selected,
-                    workSession = session,
-                    loading = false,
-                    error = null,
-                )
+                val selected = driver?.routeId?.let { id -> routes.firstOrNull { it.id == id } }
+                _uiState.value = _uiState.value.copy(driver = driver, routes = routes, selectedRoute = selected, workSession = session, loading = false, error = null)
                 selected?.let { switchPassengerRealtime(it.id) }
             }.onFailure { error ->
-                _uiState.value = _uiState.value.copy(
-                    loading = false,
-                    error = error.userMessage(),
-                )
+                _uiState.value = _uiState.value.copy(loading = false, error = error.userMessage())
             }
         }
     }
@@ -82,25 +71,14 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
     fun selectRoute(route: Route) {
         val ui = _uiState.value
         if (ui.actionInProgress || ui.workSession?.status == WorkSessionStatus.ACTIVE || ui.workSession?.status == WorkSessionStatus.PAUSED) return
-
         viewModelScope.launch {
             _uiState.value = ui.copy(actionInProgress = true, error = null)
             runCatching { driverRepository.assignRoute(route.id) }
                 .onSuccess { driver ->
-                    _uiState.value = _uiState.value.copy(
-                        driver = driver,
-                        selectedRoute = route,
-                        passengerLocations = emptyList(),
-                        actionInProgress = false,
-                        error = null,
-                    )
+                    _uiState.value = _uiState.value.copy(driver = driver, selectedRoute = route, passengerLocations = emptyList(), actionInProgress = false, error = null)
                     switchPassengerRealtime(route.id)
-                }
-                .onFailure { error ->
-                    _uiState.value = _uiState.value.copy(
-                        actionInProgress = false,
-                        error = error.userMessage(),
-                    )
+                }.onFailure { error ->
+                    _uiState.value = _uiState.value.copy(actionInProgress = false, error = error.userMessage())
                 }
         }
     }
@@ -116,39 +94,23 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
                     if (_uiState.value.selectedRoute?.id != event.routeId) return@collect
                     applyPassengerEvent(event.passengerId, event.routeId, event.location)
                 }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                if (currentCoroutineContext().isActive) {
-                    _uiState.value = _uiState.value.copy(
-                        error = error.message ?: "Realtime недоступен",
-                    )
-                }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) {
+                if (currentCoroutineContext().isActive) _uiState.value = _uiState.value.copy(error = error.message ?: "Realtime недоступен")
             }
         }
     }
 
-    private fun applyPassengerEvent(
-        passengerId: String,
-        routeId: String,
-        location: PassengerLocation?,
-    ) {
+    private fun applyPassengerEvent(passengerId: String, routeId: String, location: PassengerLocation?) {
         if (_uiState.value.selectedRoute?.id != routeId) return
         val current = _uiState.value.passengerLocations
         if (location == null || !isFresh(location.timestampEpochMs)) {
-            _uiState.value = _uiState.value.copy(
-                passengerLocations = current.filter { it.passengerId != passengerId },
-            )
+            _uiState.value = _uiState.value.copy(passengerLocations = current.filter { it.passengerId != passengerId })
             return
         }
-
         val updated = current.firstOrNull { it.passengerId == passengerId }
         _uiState.value = _uiState.value.copy(
-            passengerLocations = if (updated == null) {
-                current + location
-            } else {
-                current.map { if (it.passengerId == passengerId) location else it }
-            },
+            passengerLocations = if (updated == null) current + location else current.map { if (it.passengerId == passengerId) location else it },
             error = null,
         )
     }
@@ -158,44 +120,23 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
             while (isActive) {
                 delay(PASSENGER_STALE_SWEEP_INTERVAL_MS)
                 val fresh = _uiState.value.passengerLocations.filter { isFresh(it.timestampEpochMs) }
-                if (fresh.size != _uiState.value.passengerLocations.size) {
-                    _uiState.value = _uiState.value.copy(passengerLocations = fresh)
-                }
+                if (fresh.size != _uiState.value.passengerLocations.size) _uiState.value = _uiState.value.copy(passengerLocations = fresh)
             }
         }
     }
 
-    private fun isFresh(timestampEpochMs: Long): Boolean =
-        timestampEpochMs > 0L && System.currentTimeMillis() - timestampEpochMs <= LOCATION_FRESHNESS_MS
+    private fun isFresh(timestampEpochMs: Long): Boolean = timestampEpochMs > 0L && System.currentTimeMillis() - timestampEpochMs <= LOCATION_FRESHNESS_MS
 
     fun startWork() {
         val ui = _uiState.value
         if (ui.actionInProgress) return
-        if (ui.selectedRoute == null) {
-            _uiState.value = ui.copy(error = "Сначала выберите маршрут")
-            return
-        }
-        if (ui.workSession?.status == WorkSessionStatus.ACTIVE || ui.workSession?.status == WorkSessionStatus.PAUSED) {
-            _uiState.value = ui.copy(error = "Текущая рабочая сессия уже существует")
-            return
-        }
-
+        if (ui.selectedRoute == null) { _uiState.value = ui.copy(error = "Сначала выберите маршрут"); return }
+        if (ui.workSession?.status == WorkSessionStatus.ACTIVE || ui.workSession?.status == WorkSessionStatus.PAUSED) { _uiState.value = ui.copy(error = "Текущая рабочая сессия уже существует"); return }
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(actionInProgress = true, error = null)
-            runCatching { workSessionRepository.start() }
-                .onSuccess { session ->
-                    _uiState.value = _uiState.value.copy(
-                        workSession = session,
-                        actionInProgress = false,
-                        error = null,
-                    )
-                }
-                .onFailure { error ->
-                    _uiState.value = _uiState.value.copy(
-                        actionInProgress = false,
-                        error = error.userMessage(),
-                    )
-                }
+            runCatching { workSessionRepository.start() }.onSuccess { session ->
+                _uiState.value = _uiState.value.copy(workSession = session, actionInProgress = false, error = null)
+            }.onFailure { error -> _uiState.value = _uiState.value.copy(actionInProgress = false, error = error.userMessage()) }
         }
     }
 
@@ -203,33 +144,16 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
 
     fun resumeWork() {
         val session = _uiState.value.workSession
-        if (session?.status != WorkSessionStatus.PAUSED) {
-            _uiState.value = _uiState.value.copy(error = "Нет приостановленной рабочей сессии")
-            return
-        }
-
+        if (session?.status != WorkSessionStatus.PAUSED) { _uiState.value = _uiState.value.copy(error = "Нет приостановленной рабочей сессии"); return }
         val pausedAt = session.pauseTimeEpochMs
         if (pausedAt != null && System.currentTimeMillis() - pausedAt > SIX_HOURS_MS) {
             viewModelScope.launch {
                 _uiState.value = _uiState.value.copy(actionInProgress = true, error = null)
-                runCatching { workSessionRepository.finish(session.id) }
-                    .onSuccess {
-                        _uiState.value = _uiState.value.copy(
-                            workSession = null,
-                            actionInProgress = false,
-                            error = "Предыдущая сессия завершена после 6 часов паузы. Начните новую сессию.",
-                        )
-                    }
-                    .onFailure { error ->
-                        _uiState.value = _uiState.value.copy(
-                            actionInProgress = false,
-                            error = error.userMessage(),
-                        )
-                    }
+                runCatching { workSessionRepository.finish(session.id) }.onSuccess {
+                    _uiState.value = _uiState.value.copy(workSession = null, actionInProgress = false, error = "Предыдущая сессия завершена после 6 часов паузы. Начните новую сессию.")
+                }.onFailure { error -> _uiState.value = _uiState.value.copy(actionInProgress = false, error = error.userMessage()) }
             }
-        } else {
-            changeSession { id -> workSessionRepository.resume(id) }
-        }
+        } else changeSession { id -> workSessionRepository.resume(id) }
     }
 
     fun finishWork() = changeSession { id -> workSessionRepository.finish(id) }
@@ -237,31 +161,15 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
     private fun changeSession(action: suspend (String) -> WorkSession) {
         val session = _uiState.value.workSession
         if (_uiState.value.actionInProgress) return
-        if (session == null) {
-            _uiState.value = _uiState.value.copy(error = "Текущей рабочей сессии нет")
-            return
-        }
-
+        if (session == null) { _uiState.value = _uiState.value.copy(error = "Текущей рабочей сессии нет"); return }
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(actionInProgress = true, error = null)
-            runCatching { action(session.id) }
-                .onSuccess { updatedSession ->
-                    _uiState.value = _uiState.value.copy(
-                        workSession = updatedSession,
-                        actionInProgress = false,
-                        error = null,
-                    )
-                }
-                .onFailure { error ->
-                    // Re-read the backend state. This is important when a paused
-                    // session expires after six hours while the app is open.
-                    val refreshed = runCatching { workSessionRepository.getCurrent() }.getOrNull()
-                    _uiState.value = _uiState.value.copy(
-                        workSession = refreshed,
-                        actionInProgress = false,
-                        error = error.userMessage(),
-                    )
-                }
+            runCatching { action(session.id) }.onSuccess { updatedSession ->
+                _uiState.value = _uiState.value.copy(workSession = updatedSession, actionInProgress = false, error = null)
+            }.onFailure { error ->
+                val refreshed = runCatching { workSessionRepository.getCurrent() }.getOrNull()
+                _uiState.value = _uiState.value.copy(workSession = refreshed, actionInProgress = false, error = error.userMessage())
+            }
         }
     }
 
