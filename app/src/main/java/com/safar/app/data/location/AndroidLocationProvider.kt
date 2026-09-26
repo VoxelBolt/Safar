@@ -66,7 +66,7 @@ class AndroidLocationProvider(private val context: Context) {
             locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
         }.getOrDefault(false)
 
-        Log.d(TAG, "locationSamples: gps=$gpsEnabled network=$networkEnabled")
+        Log.d(TAG, "locationSamples: permission=granted gps=$gpsEnabled network=$networkEnabled")
         emitLastKnown()
 
         if (gpsEnabled) {
@@ -78,7 +78,7 @@ class AndroidLocationProvider(private val context: Context) {
                     listener,
                     Looper.getMainLooper(),
                 )
-            }
+            }.onFailure { Log.w(TAG, "GPS requestLocationUpdates failed", it) }
         }
 
         if (networkEnabled) {
@@ -90,7 +90,7 @@ class AndroidLocationProvider(private val context: Context) {
                     listener,
                     Looper.getMainLooper(),
                 )
-            }
+            }.onFailure { Log.w(TAG, "Network requestLocationUpdates failed", it) }
         }
 
         // Fused is retained as a second source, because some Samsung devices
