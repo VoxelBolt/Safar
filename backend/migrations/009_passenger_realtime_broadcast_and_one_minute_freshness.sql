@@ -32,5 +32,5 @@ for insert
 to authenticated
 with check (
     extension = 'broadcast'
-    and topic like 'safar:vehicle-location:route:%'
+    and (select realtime.topic()) like 'safar:vehicle-location:route:%'
 );
