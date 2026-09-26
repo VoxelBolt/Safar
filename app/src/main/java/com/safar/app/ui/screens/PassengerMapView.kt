@@ -351,25 +351,6 @@ private fun setupMapLayers(style: Style) {
             )
         )
     }
-    if (style.getLayer(USER_LOCATION_PULSE_LAYER_ID) == null) {
-        style.addLayer(
-            CircleLayer(USER_LOCATION_PULSE_LAYER_ID, USER_LOCATION_SOURCE_ID).withProperties(
-                circleColor(SafarBlue.toArgb()),
-                circleRadius(16f),
-                circleOpacity(0.16f),
-            )
-        )
-    }
-    if (style.getLayer(USER_LOCATION_CIRCLE_LAYER_ID) == null) {
-        style.addLayer(
-            CircleLayer(USER_LOCATION_CIRCLE_LAYER_ID, USER_LOCATION_SOURCE_ID).withProperties(
-                circleColor(SafarBlue.toArgb()),
-                circleRadius(7f),
-                circleStrokeColor(Color.White.toArgb()),
-                circleStrokeWidth(2.5f),
-            )
-        )
-    }
     if (style.getLayer(VEHICLES_LAYER_ID) == null) {
         style.addLayer(
             CircleLayer(VEHICLES_LAYER_ID, VEHICLES_SOURCE_ID).withProperties(
@@ -390,6 +371,26 @@ private fun setupMapLayers(style: Style) {
                 textHaloWidth(1.2f),
                 textAllowOverlap(true),
                 textIgnorePlacement(true),
+            )
+        )
+    }
+
+    if (style.getLayer(USER_LOCATION_PULSE_LAYER_ID) == null) {
+        style.addLayer(
+            CircleLayer(USER_LOCATION_PULSE_LAYER_ID, USER_LOCATION_SOURCE_ID).withProperties(
+                circleColor(SafarBlue.toArgb()),
+                circleRadius(16f),
+                circleOpacity(0.16f),
+            )
+        )
+    }
+    if (style.getLayer(USER_LOCATION_CIRCLE_LAYER_ID) == null) {
+        style.addLayer(
+            CircleLayer(USER_LOCATION_CIRCLE_LAYER_ID, USER_LOCATION_SOURCE_ID).withProperties(
+                circleColor(SafarBlue.toArgb()),
+                circleRadius(7f),
+                circleStrokeColor(Color.White.toArgb()),
+                circleStrokeWidth(2.5f),
             )
         )
     }
