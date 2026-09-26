@@ -635,7 +635,12 @@ fun DriverMainScreen(state: OnboardingState) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var foregroundLocationGranted by remember { mutableStateOf(hasForegroundLocationPermission(context)) }
-    val trackingReady = foregroundLocationGranted && ui.driver?.routeId != null
+    // The server should receive a driver location only while the driver has an
+    // active work session. Starting the foreground service from the active-session
+    // state also avoids Android background-start restrictions and stale vehicles.
+    val trackingReady = foregroundLocationGranted &&
+        ui.driver?.routeId != null &&
+        ui.workSession?.status == com.safar.app.domain.model.WorkSessionStatus.ACTIVE
 
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -643,8 +648,8 @@ fun DriverMainScreen(state: OnboardingState) {
         foregroundLocationGranted = result[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
             result[Manifest.permission.ACCESS_COARSE_LOCATION] == true ||
             hasForegroundLocationPermission(context)
-        // Starting is driven by trackingReady below so GPS remains independent
-        // from Work Session state and does not start before a route is assigned.
+        // Starting is driven by trackingReady below: GPS publishing starts when
+        // the driver actually begins an ACTIVE work session.
     }
 
     androidx.compose.runtime.DisposableEffect(lifecycleOwner, trackingReady) {
