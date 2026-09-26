@@ -123,6 +123,7 @@ internal fun PassengerMapView(
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
     var styleReady by remember { mutableStateOf(false) }
     var centeredOnUser by remember { mutableStateOf(false) }
+    var locateTarget by remember { mutableStateOf<GeoPoint?>(null) }
     var lastCameraRouteId by remember { mutableStateOf<String?>(null) }
 
     rememberMapLibre(context)
@@ -253,8 +254,9 @@ internal fun PassengerMapView(
         lastCameraRouteId = route.id
     }
 
-    LaunchedEffect(locateRequestId) {
+    LaunchedEffect(locateRequestId, passengerLocation) {
         if (!styleReady || locateRequestId <= 0L || passengerLocation == null) return@LaunchedEffect
+        locateTarget = passengerLocation
         map?.animateCamera(
             CameraUpdateFactory.newLatLngZoom(
                 LatLng(passengerLocation.latitude, passengerLocation.longitude),
@@ -405,6 +407,24 @@ private fun updateUserLocation(style: Style, point: GeoPoint?) {
     source.setGeoJson(
         FeatureCollection.fromFeature(
             Feature.fromGeometry(Point.fromLngLat(point.longitude, point.latitude))
+        )
+    )
+    // Keep the user layer explicitly above every other custom layer.
+    style.removeLayer(USER_LOCATION_PULSE_LAYER_ID)
+    style.removeLayer(USER_LOCATION_CIRCLE_LAYER_ID)
+    style.addLayer(
+        CircleLayer(USER_LOCATION_PULSE_LAYER_ID, USER_LOCATION_SOURCE_ID).withProperties(
+            circleColor(SafarBlue.toArgb()),
+            circleRadius(18f),
+            circleOpacity(0.20f),
+        )
+    )
+    style.addLayer(
+        CircleLayer(USER_LOCATION_CIRCLE_LAYER_ID, USER_LOCATION_SOURCE_ID).withProperties(
+            circleColor(SafarBlue.toArgb()),
+            circleRadius(8f),
+            circleStrokeColor(Color.White.toArgb()),
+            circleStrokeWidth(2.5f),
         )
     )
 }
