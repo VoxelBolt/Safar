@@ -30,21 +30,14 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.time.Instant
 
-/**
- * Foreground service responsible only for driver GPS collection and publishing.
- * It is deliberately independent from WorkSession pause/resume/finish state.
- */
 class DriverLocationService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val locationProvider by lazy { AndroidLocationProvider(applicationContext) }
     private lateinit var connectivityManager: ConnectivityManager
     private var publishingJob: Job? = null
     private val driverSnapshot = AtomicReference<com.safar.app.domain.model.Driver?>(null)
-    @Volatile
-    private var driverSnapshotLoadedAt = 0L
-
-    @Volatile
-    private var networkAvailable = false
+    @Volatile private var driverSnapshotLoadedAt = 0L
+    @Volatile private var networkAvailable = false
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
@@ -52,12 +45,9 @@ class DriverLocationService : Service() {
             updateNotification("Геопозиция передаётся пассажирам")
             publishCurrentLocationOnce()
         }
-
         override fun onLost(network: Network) {
             networkAvailable = isNetworkAvailable()
-            if (!networkAvailable) {
-                updateNotification("Нет интернета — отправка приостановлена")
-            }
+            if (!networkAvailable) updateNotification("Нет интернета — отправка приостановлена")
         }
     }
 
@@ -76,107 +66,61 @@ class DriverLocationService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-
         if (!hasLocationPermission()) {
             updateNotification("Разрешение на геолокацию не предоставлено")
             stopSelf()
             return START_NOT_STICKY
         }
-
         try {
-            val notification = buildNotification(
-                if (networkAvailable) {
-                    "Геопозиция передаётся пассажирам"
-                } else {
-                    "Нет интернета — отправка приостановлена"
-                }
-            )
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(
-                    NOTIFICATION_ID,
-                    notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
-                )
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
-            }
+            val notification = buildNotification(if (networkAvailable) "Геопозиция передаётся пассажирам" else "Нет интернета — отправка приостановлена")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+            else startForeground(NOTIFICATION_ID, notification)
         } catch (_: SecurityException) {
-            // Android may reject a location FGS when started outside an eligible
-            // foreground state or when a required location permission is missing.
             stopSelf()
             return START_NOT_STICKY
         }
-
         startPublishingIfNeeded()
         return START_STICKY
     }
 
     private fun startPublishingIfNeeded() {
         if (publishingJob?.isActive == true) return
-
         publishingJob = scope.launch {
             while (currentCoroutineContext().isActive && hasLocationPermission()) {
                 try {
                     publishCurrentLocationOnce()
                     locationProvider.locationSamples().collect { sample ->
                         if (!networkAvailable) return@collect
-
-                        val recordedAtIso = sample.timestampEpochMs.takeIf { it > 0L }
-                            ?.let { Instant.ofEpochMilli(it).toString() }
-
+                        val recordedAtIso = sample.timestampEpochMs.takeIf { it > 0L }?.let { Instant.ofEpochMilli(it).toString() }
                         try {
-                            publishDriverSample(
-                                latitude = sample.point.latitude,
-                                longitude = sample.point.longitude,
-                                recordedAtIso = recordedAtIso,
-                            )
+                            publishDriverSample(sample.point.latitude, sample.point.longitude, recordedAtIso)
                             updateNotification("Геопозиция передаётся пассажирам")
-                        } catch (error: CancellationException) {
-                            throw error
-                        } catch (error: Exception) {
+                        } catch (error: CancellationException) { throw error }
+                        catch (error: Exception) {
                             android.util.Log.e(TAG, "Driver location publish failed", error)
                             updateNotification("Не удалось передать координату — повторяю автоматически")
                         }
                     }
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (_: SecurityException) {
-                    updateNotification("Нет доступа к геолокации")
-                    break
-                } catch (_: Exception) {
-                    updateNotification("Ошибка получения GPS — повторная попытка позже")
-                }
-
-                if (currentCoroutineContext().isActive && hasLocationPermission()) {
-                    delay(2_000L)
-                }
+                } catch (error: CancellationException) { throw error }
+                catch (_: SecurityException) { updateNotification("Нет доступа к геолокации"); break }
+                catch (_: Exception) { updateNotification("Ошибка получения GPS — повторная попытка позже") }
+                if (currentCoroutineContext().isActive && hasLocationPermission()) delay(2_000L)
             }
-
-            if (!hasLocationPermission()) {
-                stopSelf()
-            }
+            if (!hasLocationPermission()) stopSelf()
         }
     }
 
     private fun publishCurrentLocationOnce() {
         if (!networkAvailable || !hasLocationPermission()) return
-
         locationProvider.currentLocationSample { sample ->
             if (sample == null || !networkAvailable) return@currentLocationSample
-
             scope.launch {
-                val recordedAtIso = sample.timestampEpochMs.takeIf { it > 0L }
-                    ?.let { Instant.ofEpochMilli(it).toString() }
+                val recordedAtIso = sample.timestampEpochMs.takeIf { it > 0L }?.let { Instant.ofEpochMilli(it).toString() }
                 try {
-                    publishDriverSample(
-                        latitude = sample.point.latitude,
-                        longitude = sample.point.longitude,
-                        recordedAtIso = recordedAtIso,
-                    )
+                    publishDriverSample(sample.point.latitude, sample.point.longitude, recordedAtIso)
                     updateNotification("Геопозиция передаётся пассажирам")
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (error: Exception) {
+                } catch (error: CancellationException) { throw error }
+                catch (error: Exception) {
                     android.util.Log.e(TAG, "Driver location publish failed", error)
                     updateNotification("Не удалось передать координату — повторяю автоматически")
                 }
@@ -184,49 +128,26 @@ class DriverLocationService : Service() {
         }
     }
 
-    private suspend fun publishDriverSample(
-        latitude: Double,
-        longitude: Double,
-        recordedAtIso: String?,
-    ) {
+    private suspend fun publishDriverSample(latitude: Double, longitude: Double, recordedAtIso: String?) {
         val now = System.currentTimeMillis()
         if (driverSnapshot.get() == null || now - driverSnapshotLoadedAt >= DRIVER_REFRESH_MS) {
             val driver = AppContainer.driverRepository.getDriver()
             driverSnapshot.set(driver)
             driverSnapshotLoadedAt = now
         }
-
         val driver = driverSnapshot.get() ?: error("Driver profile not found")
         val routeId = driver.routeId ?: error("Driver route is not assigned yet")
         val timestamp = recordedAtIso ?: java.time.Instant.now().toString()
-
-        // Persist the latest state for a passenger who opens the route later.
         try {
-            AppContainer.driverLocationRepository.submitLocation(
-                latitude = latitude,
-                longitude = longitude,
-                recordedAtIso = timestamp,
-            )
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            android.util.Log.e(TAG, "Current vehicle state update failed", error)
-        }
-
-        // Also broadcast directly from the driver. This makes the visible
-        // realtime marker independent of database-trigger delivery latency.
-        AppContainer.realtimeTransport.sendDriverLocation(
-            routeId = routeId,
-            vehicleId = driver.vehicleId,
-            latitude = latitude,
-            longitude = longitude,
-            recordedAtIso = timestamp,
-        )
+            AppContainer.driverLocationRepository.submitLocation(latitude=latitude, longitude=longitude, recordedAtIso=timestamp)
+        } catch (error: CancellationException) { throw error }
+        catch (error: Exception) { android.util.Log.e(TAG, "Current vehicle state update failed", error) }
+        AppContainer.realtimeTransport.sendDriverLocation(routeId=routeId, vehicleId=driver.vehicleId, latitude=latitude, longitude=longitude, recordedAtIso=timestamp)
     }
 
     private fun hasLocationPermission(): Boolean =
         ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
-            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
     private fun isNetworkAvailable(): Boolean {
         val network = connectivityManager.activeNetwork ?: return false
@@ -244,29 +165,17 @@ class DriverLocationService : Service() {
             .build()
 
     private fun updateNotification(content: String) {
-        getSystemService(NotificationManager::class.java).notify(
-            NOTIFICATION_ID,
-            buildNotification(content),
-        )
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(content))
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            manager.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_ID,
-                    "Геолокация водителя",
-                    NotificationManager.IMPORTANCE_LOW,
-                )
-            )
+            manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "Геолокация водителя", NotificationManager.IMPORTANCE_LOW))
         }
     }
 
-    private fun stopPublishing() {
-        publishingJob?.cancel()
-        publishingJob = null
-    }
+    private fun stopPublishing() { publishingJob?.cancel(); publishingJob = null }
 
     override fun onDestroy() {
         stopPublishing()
@@ -283,15 +192,7 @@ class DriverLocationService : Service() {
         private const val ACTION_STOP = "com.safar.app.STOP_DRIVER_LOCATION"
         private const val DRIVER_REFRESH_MS = 30_000L
         private const val TAG = "SafarDriverGPS"
-
-        fun start(context: Context) {
-            val intent = Intent(context, DriverLocationService::class.java)
-            ContextCompat.startForegroundService(context, intent)
-        }
-
-        fun stop(context: Context) {
-            val intent = Intent(context, DriverLocationService::class.java).setAction(ACTION_STOP)
-            context.startService(intent)
-        }
+        fun start(context: Context) { ContextCompat.startForegroundService(context, Intent(context, DriverLocationService::class.java)) }
+        fun stop(context: Context) { context.startService(Intent(context, DriverLocationService::class.java).setAction(ACTION_STOP)) }
     }
 }

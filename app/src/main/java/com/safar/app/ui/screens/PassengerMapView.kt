@@ -1,11 +1,6 @@
 package com.safar.app.ui.screens
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import androidx.compose.ui.graphics.Color
-import android.graphics.Paint
-import android.graphics.Path
 import android.location.Location
 import android.os.Bundle
 import androidx.compose.foundation.background
@@ -24,6 +19,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -32,7 +28,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.safar.app.domain.model.GeoPoint
-import com.safar.app.domain.model.PassengerLocation
 import com.safar.app.domain.model.Route
 import com.safar.app.domain.model.Vehicle
 import com.safar.app.domain.model.VehicleLocation
@@ -60,10 +55,6 @@ import org.maplibre.android.style.layers.PropertyFactory.circleRadius
 import org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor
 import org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth
 import org.maplibre.android.style.layers.PropertyFactory.fillColor
-import org.maplibre.android.style.layers.PropertyFactory.iconAllowOverlap
-import org.maplibre.android.style.layers.PropertyFactory.iconIgnorePlacement
-import org.maplibre.android.style.layers.PropertyFactory.iconImage
-import org.maplibre.android.style.layers.PropertyFactory.iconSize
 import org.maplibre.android.style.layers.PropertyFactory.fillOpacity
 import org.maplibre.android.style.layers.PropertyFactory.lineCap
 import org.maplibre.android.style.layers.PropertyFactory.lineColor
@@ -96,22 +87,12 @@ private const val USER_HEADING_LAYER_ID = "safar-user-heading-layer"
 private const val VEHICLES_SOURCE_ID = "safar-vehicles-source"
 private const val VEHICLES_LAYER_ID = "safar-vehicles-layer"
 private const val VEHICLE_LABEL_LAYER_ID = "safar-vehicle-label-layer"
-private const val PASSENGERS_SOURCE_ID = "safar-passengers-source"
-private const val PASSENGERS_LAYER_ID = "safar-passengers-layer"
-private const val VEHICLE_ICON_IMAGE_ID = "safar-vehicle-icon"
-private const val PASSENGER_ICON_IMAGE_ID = "safar-passenger-icon"
 
 private const val DEFAULT_LATITUDE = 40.2829
 private const val DEFAULT_LONGITUDE = 69.6228
 private const val DEFAULT_ZOOM = 12.0
 private const val USER_FOCUS_ZOOM = 15.5
 
-/**
- * Shared MapLibre map used by both passenger and driver screens.
- * The user is rendered as a blue dot, with a translucent blue heading sector.
- * The three map controls (locate, zoom in, zoom out) are intentionally shared
- * so both roles have exactly the same map interaction.
- */
 @Composable
 internal fun PassengerMapView(
     route: Route?,
@@ -120,7 +101,6 @@ internal fun PassengerMapView(
     locationPermissionGranted: Boolean,
     locateRequestId: Long = 0L,
     vehicleLocations: List<Pair<Vehicle, VehicleLocation>>,
-    passengerLocations: List<PassengerLocation> = emptyList(),
     onLocateUser: () -> Unit = {},
     routeOpacity: Float = 0.78f,
     modifier: Modifier = Modifier,
@@ -213,7 +193,6 @@ internal fun PassengerMapView(
                         updateRouteStation(style, route)
                         updateHeadingSector(style, passengerLocation, headingDegrees)
                         updateVehicles(style, vehicleLocations, route?.number)
-            updatePassengerLocations(style, passengerLocations)
                     }
                 }
             },
@@ -280,17 +259,17 @@ internal fun PassengerMapView(
             if (component.isLocationComponentActivated()) {
                 component.forceLocationUpdate(
                     Location("safar").apply {
-                    latitude = point.latitude
-                    longitude = point.longitude
-                    accuracy = 5f
-                    headingDegrees?.let { bearing = it }
+                        latitude = point.latitude
+                        longitude = point.longitude
+                        accuracy = 5f
+                        headingDegrees?.let { bearing = it }
                     }
                 )
             }
         }
     }
 
-    LaunchedEffect(styleReady, route, passengerLocation, headingDegrees, vehicleLocations, passengerLocations) {
+    LaunchedEffect(styleReady, route, passengerLocation, headingDegrees, vehicleLocations) {
         if (!styleReady) return@LaunchedEffect
         passengerLocation?.let { point ->
             val mapLocation = Location("safar").apply {
@@ -306,11 +285,8 @@ internal fun PassengerMapView(
             updateRouteStation(style, route)
             updateHeadingSector(style, passengerLocation, headingDegrees)
             updateVehicles(style, vehicleLocations, route?.number)
-            updatePassengerLocations(style, passengerLocations)
         }
 
-        // Camera movement is deliberately NOT tied to every state/location update.
-        // Otherwise a GPS update would fight the user's pan/zoom gesture.
         if (passengerLocation != null && !centeredOnUser) {
             map?.animateCamera(
                 CameraUpdateFactory.newLatLngZoom(
@@ -385,18 +361,12 @@ private fun setupMapLayers(style: Style) {
     if (style.getSource(VEHICLES_SOURCE_ID) == null) {
         style.addSource(GeoJsonSource(VEHICLES_SOURCE_ID, FeatureCollection.fromFeatures(emptyArray<Feature>())))
     }
-    if (style.getSource(PASSENGERS_SOURCE_ID) == null) {
-        style.addSource(GeoJsonSource(PASSENGERS_SOURCE_ID, FeatureCollection.fromFeatures(emptyArray<Feature>())))
+    if (style.getSource(ROUTE_STATION_SOURCE_ID) == null) {
+        style.addSource(GeoJsonSource(ROUTE_STATION_SOURCE_ID, FeatureCollection.fromFeatures(emptyArray<Feature>())))
     }
 
     if (style.getImage(VEHICLE_ICON_IMAGE_ID) == null) {
         style.addImage(VEHICLE_ICON_IMAGE_ID, createVehicleMarkerBitmap())
-    }
-    if (style.getImage(PASSENGER_ICON_IMAGE_ID) == null) {
-        style.addImage(PASSENGER_ICON_IMAGE_ID, createPassengerMarkerBitmap())
-    }
-    if (style.getSource(ROUTE_STATION_SOURCE_ID) == null) {
-        style.addSource(GeoJsonSource(ROUTE_STATION_SOURCE_ID, FeatureCollection.fromFeatures(emptyArray<Feature>())))
     }
 
     if (style.getLayer(ROUTE_CASING_LAYER_ID) == null) {
@@ -446,166 +416,99 @@ private fun setupMapLayers(style: Style) {
     if (style.getLayer(VEHICLES_LAYER_ID) == null) {
         style.addLayer(
             SymbolLayer(VEHICLES_LAYER_ID, VEHICLES_SOURCE_ID).withProperties(
-                iconImage(VEHICLE_ICON_IMAGE_ID),
-                iconSize(0.75f),
-                iconAllowOverlap(true),
-                iconIgnorePlacement(true),
-            )
-        )
-    }
-    if (style.getLayer(PASSENGERS_LAYER_ID) == null) {
-        style.addLayer(
-            SymbolLayer(PASSENGERS_LAYER_ID, PASSENGERS_SOURCE_ID).withProperties(
-                iconImage(PASSENGER_ICON_IMAGE_ID),
-                iconSize(0.62f),
-                iconAllowOverlap(true),
-                iconIgnorePlacement(true),
+                org.maplibre.android.style.layers.PropertyFactory.iconImage(VEHICLE_ICON_IMAGE_ID),
+                org.maplibre.android.style.layers.PropertyFactory.iconSize(0.75f),
+                org.maplibre.android.style.layers.PropertyFactory.iconAllowOverlap(true),
+                org.maplibre.android.style.layers.PropertyFactory.iconIgnorePlacement(true),
             )
         )
     }
     if (style.getLayer(VEHICLE_LABEL_LAYER_ID) == null) {
         style.addLayer(
             SymbolLayer(VEHICLE_LABEL_LAYER_ID, VEHICLES_SOURCE_ID).withProperties(
-                textField("{route_number} • {identifier}"),
-                textSize(10f),
-                textColor(SafarBlue.toArgb()),
-                textHaloColor(Color.White.toArgb()),
-                textHaloWidth(1.5f),
+                textField("{vehicle_number}"),
+                textSize(12f),
+                textColor(Color.White.toArgb()),
+                textHaloColor(Color.Black.toArgb()),
+                textHaloWidth(1.2f),
+                textAllowOverlap(true),
+                textIgnorePlacement(true),
             )
         )
     }
 }
 
 private fun updateRoute(style: Style, route: Route?, opacity: Float) {
-    val source = style.getSource(ROUTE_SOURCE_ID) as? GeoJsonSource ?: return
+    val source = style.getSourceAs<GeoJsonSource>(ROUTE_SOURCE_ID) ?: return
     val path = route?.path.orEmpty()
     if (path.size < 2) {
         source.setGeoJson(FeatureCollection.fromFeatures(emptyArray<Feature>()))
         return
     }
-    val line = LineString.fromLngLats(path.map { Point.fromLngLat(it.longitude, it.latitude) })
-    source.setGeoJson(FeatureCollection.fromFeatures(arrayOf(Feature.fromGeometry(line))))
-    style.getLayer(ROUTE_LAYER_ID)?.setProperties(lineOpacity(opacity.coerceIn(0.15f, 1f)))
-    style.getLayer(ROUTE_CASING_LAYER_ID)?.setProperties(lineOpacity((opacity * 0.55f).coerceIn(0.12f, 0.8f)))
+
+    val coordinates = path.map { Point.fromLngLat(it.longitude, it.latitude) }
+    source.setGeoJson(
+        FeatureCollection.fromFeature(
+            Feature.fromGeometry(LineString.fromLngLats(coordinates))
+        )
+    )
+    style.getLayerAs<LineLayer>(ROUTE_LAYER_ID)?.setProperties(lineOpacity(opacity))
 }
 
 private fun updateRouteStation(style: Style, route: Route?) {
-    val source = style.getSource(ROUTE_STATION_SOURCE_ID) as? GeoJsonSource ?: return
-    val station = route?.path?.firstOrNull()
-    if (station == null) {
+    val source = style.getSourceAs<GeoJsonSource>(ROUTE_STATION_SOURCE_ID) ?: return
+    val path = route?.path.orEmpty()
+    if (path.isEmpty()) {
         source.setGeoJson(FeatureCollection.fromFeatures(emptyArray<Feature>()))
         return
     }
-    val point = Point.fromLngLat(station.longitude, station.latitude)
-    source.setGeoJson(FeatureCollection.fromFeatures(arrayOf(Feature.fromGeometry(point))))
+
+    // A small station/start marker placed along the route rather than at the endpoint.
+    val point = path[path.size / 3.coerceAtMost(path.lastIndex)]
+    source.setGeoJson(
+        FeatureCollection.fromFeature(
+            Feature.fromGeometry(Point.fromLngLat(point.longitude, point.latitude))
+        )
+    )
 }
 
-private fun updatePassengerLocations(style: Style, passengerLocations: List<PassengerLocation>) {
-    val source = style.getSource(PASSENGERS_SOURCE_ID) as? GeoJsonSource ?: return
-    val features = passengerLocations.map { passenger ->
-        Feature.fromGeometry(Point.fromLngLat(passenger.longitude, passenger.latitude)).apply {
-            addStringProperty("passenger_id", passenger.passengerId)
-        }
-    }.toTypedArray()
-    source.setGeoJson(FeatureCollection.fromFeatures(features))
-}
-
-private fun createVehicleMarkerBitmap(): Bitmap {
-    val size = 96
-    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-    val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 6f }
-
-    paint.color = Color.White.toArgb()
-    canvas.drawCircle(size / 2f, size / 2f, 42f, paint)
-    paint.color = SafarBlue.toArgb()
-    canvas.drawRoundRect(18f, 28f, 78f, 68f, 10f, 10f, paint)
-    paint.color = Color.White.toArgb()
-    canvas.drawRoundRect(25f, 34f, 47f, 51f, 4f, 4f, paint)
-    canvas.drawRoundRect(50f, 34f, 71f, 51f, 4f, 4f, paint)
-    paint.color = SafarBlue.toArgb()
-    canvas.drawCircle(31f, 70f, 7f, paint)
-    canvas.drawCircle(65f, 70f, 7f, paint)
-    stroke.color = SafarBlue.toArgb()
-    canvas.drawCircle(size / 2f, size / 2f, 42f, stroke)
-    return bitmap
-}
-
-private fun createPassengerMarkerBitmap(): Bitmap {
-    val size = 72
-    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-    val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 5f; strokeCap = Paint.Cap.ROUND }
-
-    paint.color = Color.White.toArgb()
-    canvas.drawCircle(size / 2f, size / 2f, 31f, paint)
-    paint.color = SafarNavy.toArgb()
-    canvas.drawCircle(36f, 25f, 8f, paint)
-    stroke.color = SafarNavy.toArgb()
-    val body = Path().apply {
-        moveTo(20f, 50f)
-        cubicTo(24f, 39f, 30f, 35f, 36f, 35f)
-        cubicTo(42f, 35f, 48f, 39f, 52f, 50f)
-    }
-    canvas.drawPath(body, stroke)
-    stroke.color = SafarBlue.toArgb()
-    canvas.drawCircle(size / 2f, size / 2f, 31f, stroke)
-    return bitmap
-}
-
-private fun updateHeadingSector(style: Style, location: GeoPoint?, headingDegrees: Float?) {
-    val headingSource = style.getSource(USER_HEADING_SOURCE_ID) as? GeoJsonSource ?: return
-    if (location == null || headingDegrees == null) {
-        headingSource.setGeoJson(FeatureCollection.fromFeatures(emptyArray<Feature>()))
+private fun updateHeadingSector(style: Style, center: GeoPoint?, headingDegrees: Float?) {
+    val source = style.getSourceAs<GeoJsonSource>(USER_HEADING_SOURCE_ID) ?: return
+    if (center == null || headingDegrees == null) {
+        source.setGeoJson(FeatureCollection.fromFeatures(emptyArray<Feature>()))
         return
     }
-
-    val sector = buildHeadingSector(location, headingDegrees)
-    headingSource.setGeoJson(
-        FeatureCollection.fromFeatures(arrayOf(Feature.fromGeometry(sector)))
-    )
-}
-
-private fun updateVehicles(style: Style, vehicleLocations: List<Pair<Vehicle, VehicleLocation>>, routeNumber: String?) {
-    val source = style.getSource(VEHICLES_SOURCE_ID) as? GeoJsonSource ?: return
-    val features = vehicleLocations.map { (vehicle, location) ->
-        Feature.fromGeometry(Point.fromLngLat(location.longitude, location.latitude)).apply {
-            addStringProperty("route_number", routeNumber ?: "")
-            addStringProperty("identifier", vehicle.identifier)
-        }
-    }.toTypedArray()
-    source.setGeoJson(FeatureCollection.fromFeatures(features))
-}
-
-/** Builds an ~90m long 50-degree sector in the phone's facing direction. */
-private fun buildHeadingSector(center: GeoPoint, headingDegrees: Float): Polygon {
-    val points = ArrayList<Point>(14)
+    val radius = 0.0009
+    val halfAngle = 30.0
+    val points = mutableListOf<Point>()
     points += Point.fromLngLat(center.longitude, center.latitude)
-    val halfAngle = 25.0
-    val radiusMeters = 90.0
-    for (i in 0..10) {
-        val bearing = headingDegrees - halfAngle + (2.0 * halfAngle * i / 10.0)
-        points += destinationPoint(center, radiusMeters, bearing)
+    for (step in 0..12) {
+        val angle = Math.toRadians((headingDegrees - halfAngle) + (2 * halfAngle * step / 12.0))
+        val lat = center.latitude + radius * Math.cos(angle)
+        val lon = center.longitude + radius * Math.sin(angle) / Math.cos(Math.toRadians(center.latitude))
+        points += Point.fromLngLat(lon, lat)
     }
     points += Point.fromLngLat(center.longitude, center.latitude)
-    return Polygon.fromLngLats(listOf(points))
+    val polygon = Polygon.fromLngLats(listOf(points))
+    source.setGeoJson(FeatureCollection.fromFeature(Feature.fromGeometry(polygon)))
 }
 
-private fun destinationPoint(origin: GeoPoint, distanceMeters: Double, bearingDegrees: Double): Point {
-    val earthRadius = 6_371_000.0
-    val angularDistance = distanceMeters / earthRadius
-    val bearing = Math.toRadians(bearingDegrees)
-    val lat1 = Math.toRadians(origin.latitude)
-    val lon1 = Math.toRadians(origin.longitude)
-    val lat2 = Math.asin(
-        Math.sin(lat1) * Math.cos(angularDistance) +
-            Math.cos(lat1) * Math.sin(angularDistance) * Math.cos(bearing)
-    )
-    val lon2 = lon1 + Math.atan2(
-        Math.sin(bearing) * Math.sin(angularDistance) * Math.cos(lat1),
-        Math.cos(angularDistance) - Math.sin(lat1) * Math.sin(lat2)
-    )
-    return Point.fromLngLat(Math.toDegrees(lon2), Math.toDegrees(lat2))
+private fun updateVehicles(
+    style: Style,
+    locations: List<Pair<Vehicle, VehicleLocation>>,
+    routeNumber: String?,
+) {
+    val source = style.getSourceAs<GeoJsonSource>(VEHICLES_SOURCE_ID) ?: return
+    val filtered = locations.filter { (vehicle, _) ->
+        routeNumber == null || vehicle.routeId != null && vehicle.routeId == routeNumber
+    }
+    val features = filtered.map { (vehicle, location) ->
+        Feature.fromGeometry(
+            Point.fromLngLat(location.longitude, location.latitude)
+        ).apply {
+            addStringProperty("vehicle_id", vehicle.id)
+            addStringProperty("vehicle_number", vehicle.number)
+        }
+    }
+    source.setGeoJson(FeatureCollection.fromFeatures(features.toTypedArray()))
 }
