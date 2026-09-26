@@ -5,6 +5,7 @@ import android.content.Context
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.util.Log
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -39,6 +40,7 @@ class AndroidLocationProvider(private val context: Context) {
             override fun onLocationChanged(location: Location) {
                 if (location.latitude.isFinite() && location.longitude.isFinite()) {
                     emitted = true
+                    Log.d(TAG, "LocationManager fix: ${location.latitude},${location.longitude} accuracy=${location.accuracy}")
                     trySend(location.toLocationSample())
                 }
             }
@@ -64,6 +66,7 @@ class AndroidLocationProvider(private val context: Context) {
             locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
         }.getOrDefault(false)
 
+        Log.d(TAG, "locationSamples: gps=$gpsEnabled network=$networkEnabled")
         emitLastKnown()
 
         if (gpsEnabled) {
@@ -102,6 +105,7 @@ class AndroidLocationProvider(private val context: Context) {
                 result.locations.maxByOrNull { it.elapsedRealtimeNanos }?.let {
                     if (it.latitude.isFinite() && it.longitude.isFinite()) {
                         emitted = true
+                        Log.d(TAG, "Fused fix: ${it.latitude},${it.longitude} accuracy=${it.accuracy}")
                         trySend(it.toLocationSample())
                     }
                 }
@@ -207,6 +211,8 @@ class AndroidLocationProvider(private val context: Context) {
             .addOnSuccessListener { location -> onResult(location?.toGeoPoint()) }
             .addOnFailureListener { onResult(null) }
     }
+
+    private companion object { const val TAG = "SafarGPS" }
 
     private fun Location.toGeoPoint() = GeoPoint(latitude, longitude)
     private fun Location.toLocationSample() = LocationSample(
