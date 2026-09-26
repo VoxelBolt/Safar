@@ -197,14 +197,6 @@ internal fun PassengerMapView(
         ) {
             MapControlButton("⌖") {
                 onLocateUser()
-                passengerLocation?.let { point ->
-                    map?.animateCamera(
-                        CameraUpdateFactory.newLatLngZoom(
-                            LatLng(point.latitude, point.longitude),
-                            USER_FOCUS_ZOOM,
-                        )
-                    )
-                }
             }
             Spacer(Modifier.size(8.dp))
             MapControlButton("+") {
