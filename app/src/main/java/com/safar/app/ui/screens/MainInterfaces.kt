@@ -99,6 +99,7 @@ import com.safar.app.ui.theme.SafarBlue
 import com.safar.app.ui.theme.SafarNavy
 import com.safar.app.ui.theme.SafarWhite
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collect
 
 private val SoftBlue = Color(0xFFEAF2FF)
@@ -757,12 +758,19 @@ private fun DriverHomeScreen(
         driverLocationProvider.currentLocation { point ->
             if (point != null) {
                 driverLocation = point
-                driverLocateRequestId += 1L
             }
         }
 
-        driverLocationProvider.locations().collect { point ->
-            driverLocation = point
+        try {
+            driverLocationProvider.locations().collect { point ->
+                driverLocation = point
+            }
+        } catch (_: CancellationException) {
+            throw
+        } catch (_: Exception) {
+            driverLocationProvider.currentLocation { point ->
+                if (point != null) driverLocation = point
+            }
         }
     }
 
