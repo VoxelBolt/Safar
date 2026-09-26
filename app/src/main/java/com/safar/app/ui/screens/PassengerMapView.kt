@@ -246,12 +246,14 @@ internal fun PassengerMapView(
         lastCameraRouteId = route.id
     }
 
-    LaunchedEffect(locateRequestId, passengerLocation) {
-        if (!styleReady || locateRequestId <= 0L || passengerLocation == null) return@LaunchedEffect
-        locateTarget = passengerLocation
+    LaunchedEffect(locateRequestId) {
+        if (!styleReady || locateRequestId <= 0L) return@LaunchedEffect
+
+        val target = passengerLocation ?: return@LaunchedEffect
+        locateTarget = target
         map?.animateCamera(
             CameraUpdateFactory.newLatLngZoom(
-                LatLng(passengerLocation.latitude, passengerLocation.longitude),
+                LatLng(target.latitude, target.longitude),
                 USER_FOCUS_ZOOM,
             )
         )
