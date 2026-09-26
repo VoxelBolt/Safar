@@ -2,12 +2,13 @@ package com.safar.app.data.location
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.location.Location
+import android.location.LocationListener
 import android.location.LocationManager
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import android.location.Location
 import android.os.Looper
 import android.view.Surface
 import android.view.WindowManager
@@ -20,57 +21,115 @@ import com.google.android.gms.location.Priority
 import com.safar.app.domain.model.GeoPoint
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.FlowPreview
 
 class AndroidLocationProvider(private val context: Context) {
-    private val client = LocationServices.getFusedLocationProviderClient(context)
+    private val fusedClient = LocationServices.getFusedLocationProviderClient(context)
+    private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
     @SuppressLint("MissingPermission")
     fun locationSamples(): Flow<LocationSample> = callbackFlow {
-        val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        val gpsEnabled = runCatching { locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) }.getOrDefault(true)
-        val networkEnabled = runCatching { locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) }.getOrDefault(true)
-        if (!gpsEnabled && !networkEnabled) {
-            close(IllegalStateException("Службы геолокации отключены"))
-            return@callbackFlow
-        }
+        var emitted = false
 
-        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 2_000L)
-            .setMinUpdateIntervalMillis(1_000L)
-            .setMaxUpdateDelayMillis(2_000L)
-            .setWaitForAccurateLocation(false)
-            .build()
-
-        val callback = object : LocationCallback() {
-            override fun onLocationResult(result: LocationResult) {
-                result.locations
-                    .asSequence()
-                    .filter { it.latitude.isFinite() && it.longitude.isFinite() }
-                    .maxByOrNull { it.elapsedRealtimeNanos }
-                    ?.let { location ->
-                        trySend(location.toLocationSample()).isSuccess
-                    }
+        val listener = object : LocationListener {
+            override fun onLocationChanged(location: Location) {
+                if (location.latitude.isFinite() && location.longitude.isFinite()) {
+                    emitted = true
+                    trySend(location.toLocationSample())
+                }
             }
         }
 
-        client.requestLocationUpdates(request, callback, Looper.getMainLooper())
-            .addOnFailureListener { close(it) }
+        fun emitLastKnown() {
+            val candidates = buildList {
+                runCatching { locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER) }
+                    .getOrNull()?.let(::add)
+                runCatching { locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) }
+                    .getOrNull()?.let(::add)
+            }
+            candidates.maxByOrNull { it.elapsedRealtimeNanos }?.let {
+                emitted = true
+                trySend(it.toLocationSample())
+            }
+        }
 
-        awaitClose { client.removeLocationUpdates(callback) }
+        val gpsEnabled = runCatching {
+            locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+        }.getOrDefault(false)
+        val networkEnabled = runCatching {
+            locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        }.getOrDefault(false)
+
+        emitLastKnown()
+
+        if (gpsEnabled) {
+            runCatching {
+                locationManager.requestLocationUpdates(
+                    LocationManager.GPS_PROVIDER,
+                    1_000L,
+                    0f,
+                    listener,
+                    Looper.getMainLooper(),
+                )
+            }
+        }
+
+        if (networkEnabled) {
+            runCatching {
+                locationManager.requestLocationUpdates(
+                    LocationManager.NETWORK_PROVIDER,
+                    1_000L,
+                    0f,
+                    listener,
+                    Looper.getMainLooper(),
+                )
+            }
+        }
+
+        // Fused is retained as a second source, because some Samsung devices
+        // provide a faster fix through Google Play Services.
+        val fusedRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 2_000L)
+            .setMinUpdateIntervalMillis(1_000L)
+            .setWaitForAccurateLocation(false)
+            .build()
+
+        val fusedCallback = object : LocationCallback() {
+            override fun onLocationResult(result: LocationResult) {
+                result.locations.maxByOrNull { it.elapsedRealtimeNanos }?.let {
+                    if (it.latitude.isFinite() && it.longitude.isFinite()) {
+                        emitted = true
+                        trySend(it.toLocationSample())
+                    }
+                }
+            }
+        }
+
+        runCatching {
+            fusedClient.requestLocationUpdates(
+                fusedRequest,
+                fusedCallback,
+                Looper.getMainLooper(),
+            )
+        }
+
+        awaitClose {
+            locationManager.removeUpdates(listener)
+            fusedClient.removeLocationUpdates(fusedCallback)
+        }
     }.distinctUntilChanged()
 
     @SuppressLint("MissingPermission")
     fun locations(): Flow<GeoPoint> = locationSamples().map { it.point }
 
-    @OptIn(FlowPreview::class)
+    @SuppressLint("MissingPermission")
     fun headingDegrees(): Flow<Float> = callbackFlow {
         val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-        val rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR) ?: run { close(); return@callbackFlow }
+        val rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+            ?: run { close(); return@callbackFlow }
         val rotationMatrix = FloatArray(9)
         val orientation = FloatArray(3)
         val listener = object : SensorEventListener {
@@ -97,20 +156,61 @@ class AndroidLocationProvider(private val context: Context) {
     }.distinctUntilChanged().sample(200L)
 
     @SuppressLint("MissingPermission")
-    fun currentLocation(onResult: (GeoPoint?) -> Unit) { currentLocationSample { sample -> onResult(sample?.point) } }
+    fun currentLocation(onResult: (GeoPoint?) -> Unit) {
+        currentLocationSample { sample -> onResult(sample?.point) }
+    }
 
     @SuppressLint("MissingPermission")
     fun currentLocationSample(onResult: (LocationSample?) -> Unit) {
-        client.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, CancellationTokenSource().token)
-            .addOnSuccessListener { location: Location? -> onResult(location?.toLocationSample()) }
-            .addOnFailureListener { onResult(null) }
+        val delivered = booleanArrayOf(false)
+
+        fun deliver(location: Location?) {
+            if (!delivered[0]) {
+                delivered[0] = true
+                onResult(location?.takeIf { it.latitude.isFinite() && it.longitude.isFinite() }?.toLocationSample())
+            }
+        }
+
+        fusedClient.getCurrentLocation(
+            Priority.PRIORITY_HIGH_ACCURACY,
+            CancellationTokenSource().token,
+        ).addOnSuccessListener { location ->
+            deliver(location)
+        }.addOnFailureListener {
+            deliver(null)
+        }
+
+        // Fallback for devices where FusedLocationProvider does not return a fix.
+        val gps = runCatching {
+            locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+        }.getOrNull()
+        val network = runCatching {
+            locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+        }.getOrNull()
+        val fallback = listOfNotNull(gps, network).maxByOrNull { it.elapsedRealtimeNanos }
+        if (fallback != null) deliver(fallback)
     }
 
     @SuppressLint("MissingPermission")
     fun lastKnownLocation(onResult: (GeoPoint?) -> Unit) {
-        client.lastLocation.addOnSuccessListener { location: Location? -> onResult(location?.toGeoPoint()) }.addOnFailureListener { onResult(null) }
+        val candidates = listOfNotNull(
+            runCatching { locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER) }.getOrNull(),
+            runCatching { locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) }.getOrNull(),
+        )
+        val best = candidates.maxByOrNull { it.elapsedRealtimeNanos }
+        if (best != null) {
+            onResult(best.toGeoPoint())
+            return
+        }
+
+        fusedClient.lastLocation
+            .addOnSuccessListener { location -> onResult(location?.toGeoPoint()) }
+            .addOnFailureListener { onResult(null) }
     }
 
     private fun Location.toGeoPoint() = GeoPoint(latitude, longitude)
-    private fun Location.toLocationSample() = LocationSample(point = toGeoPoint(), timestampEpochMs = time)
+    private fun Location.toLocationSample() = LocationSample(
+        point = toGeoPoint(),
+        timestampEpochMs = time,
+    )
 }
