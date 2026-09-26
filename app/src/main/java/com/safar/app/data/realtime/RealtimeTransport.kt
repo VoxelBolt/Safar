@@ -57,7 +57,14 @@ class SupabaseRealtimeTransport(private val client: SupabaseClient = SupabaseCli
         client.auth.awaitInitialization()
         if (client.auth.currentSessionOrNull()==null) client.auth.signInAnonymously()
         check(client.auth.currentSessionOrNull()!=null) { "Supabase authentication is required for realtime." }
-        client.realtime.connect(); client.realtime.setAuth()
+        val accessToken = client.auth.currentAccessTokenOrNull()
+            ?: error("Supabase access token is missing for realtime authorization.")
+        // Explicitly provide the current JWT to Realtime. Private Broadcast channels
+        // use this token for realtime.messages RLS checks. Relying only on implicit
+        // token resolution caused the Android client to receive HTTP 401/Unauthorized
+        // when calling the Broadcast endpoint.
+        client.realtime.setAuth(accessToken)
+        client.realtime.connect()
         val topic="safar:vehicle-location:route:$routeId"
         val realtimeChannel=client.channel(topic){ isPrivate=true }
 
@@ -103,16 +110,26 @@ class SupabaseRealtimeTransport(private val client: SupabaseClient = SupabaseCli
         val realtimeChannel=channel ?: return
         if (connectedRouteId!=routeId) return
         val passengerId=client.auth.currentUserOrNull()?.id ?: return
-        realtimeChannel.broadcast(event="passenger_location",payload=BroadcastPayload.Json(buildJsonObject {
-            put("passenger_id",passengerId); put("route_id",routeId); put("latitude",latitude); put("longitude",longitude); put("recorded_at",recordedAtIso)
-        }))
+        runCatching {
+            realtimeChannel.broadcast(event="passenger_location",payload=BroadcastPayload.Json(buildJsonObject {
+                put("passenger_id",passengerId); put("route_id",routeId); put("latitude",latitude); put("longitude",longitude); put("recorded_at",recordedAtIso)
+            }))
+        }.onFailure { error ->
+            // A transient realtime authorization/network error must never crash the
+            // passenger process. Vehicle realtime remains independently subscribed.
+            android.util.Log.w("SafarRealtime", "Passenger location broadcast failed", error)
+        }
     }
     override suspend fun removePassengerLocation(routeId:String) {
         if (connectedRouteId!=routeId) return
         val passengerId=client.auth.currentUserOrNull()?.id ?: return
-        channel?.broadcast(event="passenger_location_removed",payload=BroadcastPayload.Json(buildJsonObject {
-            put("passenger_id",passengerId); put("route_id",routeId)
-        }))
+        runCatching {
+            channel?.broadcast(event="passenger_location_removed",payload=BroadcastPayload.Json(buildJsonObject {
+                put("passenger_id",passengerId); put("route_id",routeId)
+            }))
+        }.onFailure { error ->
+            android.util.Log.w("SafarRealtime", "Passenger location removal broadcast failed", error)
+        }
     }
     private suspend fun ensureConnected(routeId:String) {
         if (connectedRouteId==routeId && channel!=null && channelJob?.isActive==true) return
