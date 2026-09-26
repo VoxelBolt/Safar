@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.safar.app.data.realtime.RealtimeTransport
+import com.safar.app.data.location.DriverLocationService
 import com.safar.app.di.AppContainer
 import com.safar.app.domain.model.PassengerLocation
 import com.safar.app.domain.model.Driver
@@ -62,6 +63,11 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
                 val selected = driver?.routeId?.let { id -> routes.firstOrNull { it.id == id } }
                 _uiState.value = _uiState.value.copy(driver = driver, routes = routes, selectedRoute = selected, workSession = session, loading = false, error = null)
                 selected?.let { switchPassengerRealtime(it.id) }
+                if (session?.status == WorkSessionStatus.ACTIVE && driver?.routeId != null) {
+                    // The work session is persisted in Supabase, so the GPS foreground
+                    // service must be restored even if Android previously killed the app.
+                    runCatching { DriverLocationService.start(getApplication()) }
+                }
             }.onFailure { error ->
                 _uiState.value = _uiState.value.copy(loading = false, error = error.userMessage())
             }
@@ -136,6 +142,9 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
             _uiState.value = _uiState.value.copy(actionInProgress = true, error = null)
             runCatching { workSessionRepository.start() }.onSuccess { session ->
                 _uiState.value = _uiState.value.copy(workSession = session, actionInProgress = false, error = null)
+                if (session.status == WorkSessionStatus.ACTIVE) {
+                    runCatching { DriverLocationService.start(getApplication()) }
+                }
             }.onFailure { error -> _uiState.value = _uiState.value.copy(actionInProgress = false, error = error.userMessage()) }
         }
     }
@@ -166,9 +175,19 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
             _uiState.value = _uiState.value.copy(actionInProgress = true, error = null)
             runCatching { action(session.id) }.onSuccess { updatedSession ->
                 _uiState.value = _uiState.value.copy(workSession = updatedSession, actionInProgress = false, error = null)
+                if (updatedSession.status == WorkSessionStatus.ACTIVE) {
+                    runCatching { DriverLocationService.start(getApplication()) }
+                } else {
+                    runCatching { DriverLocationService.stop(getApplication()) }
+                }
             }.onFailure { error ->
                 val refreshed = runCatching { workSessionRepository.getCurrent() }.getOrNull()
                 _uiState.value = _uiState.value.copy(workSession = refreshed, actionInProgress = false, error = error.userMessage())
+                if (refreshed?.status == WorkSessionStatus.ACTIVE) {
+                    runCatching { DriverLocationService.start(getApplication()) }
+                } else {
+                    runCatching { DriverLocationService.stop(getApplication()) }
+                }
             }
         }
     }
