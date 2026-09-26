@@ -25,6 +25,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.time.Instant
+import java.time.OffsetDateTime
 
 data class RealtimeVehicleEvent(val vehicleId: String,val routeId: String,val location: VehicleLocation?)
 data class RealtimePassengerEvent(val passengerId: String,val routeId: String,val location: PassengerLocation?)
@@ -35,6 +36,10 @@ data class RealtimePassengerEvent(val passengerId: String,val routeId: String,va
 @Serializable private data class PassengerLocationRemovedBroadcast(@SerialName("passenger_id") val passengerId:String,@SerialName("route_id") val routeId:String)
 
 class SupabaseRealtimeTransport(private val client: SupabaseClient = SupabaseClientProvider.client): RealtimeTransport {
+    private fun parseTimestamp(value: String): Long =
+        runCatching { Instant.parse(value).toEpochMilli() }
+            .getOrElse { OffsetDateTime.parse(value).toInstant().toEpochMilli() }
+
     private val scope = CoroutineScope(SupervisorJob()+Dispatchers.IO)
     private val _vehicleEvents = MutableSharedFlow<RealtimeVehicleEvent>(replay=0,extraBufferCapacity=64)
     private val _passengerEvents = MutableSharedFlow<RealtimePassengerEvent>(replay=0,extraBufferCapacity=128)
@@ -57,7 +62,7 @@ class SupabaseRealtimeTransport(private val client: SupabaseClient = SupabaseCli
         val realtimeChannel=client.channel(topic){ isPrivate=true }
 
         val updates=realtimeChannel.broadcastFlow<VehicleLocationBroadcast>(event="vehicle_location").map { m ->
-            RealtimeVehicleEvent(m.vehicleId,m.routeId,VehicleLocation(m.vehicleId,m.latitude,m.longitude,Instant.parse(m.recordedAt).toEpochMilli()))
+            RealtimeVehicleEvent(m.vehicleId,m.routeId,VehicleLocation(m.vehicleId,m.latitude,m.longitude,parseTimestamp(m.recordedAt)))
         }
         val removals=realtimeChannel.broadcastFlow<VehicleLocationRemovedBroadcast>(event="vehicle_location_removed").map { m ->
             RealtimeVehicleEvent(m.vehicleId,m.routeId,null)
