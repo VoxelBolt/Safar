@@ -16,6 +16,7 @@ import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.time.Instant
+import java.time.OffsetDateTime
 import io.github.jan.supabase.SupabaseClient
 
 class SupabaseSafarApi(
@@ -286,6 +287,10 @@ class SupabaseSafarApi(
             .toDomain()
     }
 
+    private fun parseTimestamp(value: String): Long =
+        runCatching { Instant.parse(value).toEpochMilli() }
+            .getOrElse { OffsetDateTime.parse(value).toInstant().toEpochMilli() }
+
     private fun UserDto.toDomain(): User = User(
         id = id,
         name = name,
@@ -319,7 +324,7 @@ class SupabaseSafarApi(
                 vehicleId = id,
                 latitude = latitude,
                 longitude = longitude,
-                timestampEpochMs = Instant.parse(recordedAt).toEpochMilli(),
+                timestampEpochMs = parseTimestamp(recordedAt),
             )
         } else {
             null
@@ -340,9 +345,9 @@ class SupabaseSafarApi(
     private fun WorkSessionDto.toDomain(): WorkSession = WorkSession(
         id = id,
         driverId = driverId,
-        startTimeEpochMs = startedAt?.let(Instant::parse)?.toEpochMilli(),
-        pauseTimeEpochMs = pausedAt?.let(Instant::parse)?.toEpochMilli(),
-        endTimeEpochMs = finishedAt?.let(Instant::parse)?.toEpochMilli(),
+        startTimeEpochMs = startedAt?.let(::parseTimestamp),
+        pauseTimeEpochMs = pausedAt?.let(::parseTimestamp),
+        endTimeEpochMs = finishedAt?.let(::parseTimestamp),
         durationSeconds = durationSeconds,
         totalPausedSeconds = totalPausedSeconds,
         distanceMeters = distanceMeters,
