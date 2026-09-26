@@ -88,23 +88,25 @@ class DriverLocationService : Service() {
         publishingJob = scope.launch {
             while (currentCoroutineContext().isActive && hasLocationPermission()) {
                 try {
-                    publishCurrentLocationOnce()
-                    locationProvider.locationSamples().collect { sample ->
-                        if (!networkAvailable) return@collect
-                        val recordedAtIso = sample.timestampEpochMs.takeIf { it > 0L }?.let { Instant.ofEpochMilli(it).toString() }
-                        try {
-                            publishDriverSample(sample.point.latitude, sample.point.longitude, recordedAtIso)
-                            updateNotification("Геопозиция передаётся пассажирам")
-                        } catch (error: CancellationException) { throw error }
-                        catch (error: Exception) {
-                            android.util.Log.e(TAG, "Driver location publish failed", error)
-                            updateNotification("Не удалось передать координату — повторяю автоматически")
-                        }
+                    // Do not rely only on the continuous location flow here.
+                    // Some devices can temporarily stop delivering that flow while
+                    // the foreground service is still alive. A periodic fresh-location
+                    // request guarantees that the server heartbeat keeps advancing.
+                    if (networkAvailable) {
+                        publishCurrentLocationOnce()
+                        updateNotification("Геопозиция передаётся пассажирам")
+                    } else {
+                        updateNotification("Нет интернета — отправка приостановлена")
                     }
                 } catch (error: CancellationException) { throw error }
-                catch (_: SecurityException) { updateNotification("Нет доступа к геолокации"); break }
-                catch (_: Exception) { updateNotification("Ошибка получения GPS — повторная попытка позже") }
-                if (currentCoroutineContext().isActive && hasLocationPermission()) delay(2_000L)
+                catch (_: SecurityException) {
+                    updateNotification("Нет доступа к геолокации")
+                    break
+                } catch (error: Exception) {
+                    android.util.Log.e(TAG, "Driver GPS cycle failed", error)
+                    updateNotification("Ошибка GPS — повторяю автоматически")
+                }
+                delay(PUBLISH_INTERVAL_MS)
             }
             if (!hasLocationPermission()) stopSelf()
         }
@@ -191,6 +193,7 @@ class DriverLocationService : Service() {
         private const val NOTIFICATION_ID = 1001
         private const val ACTION_STOP = "com.safar.app.STOP_DRIVER_LOCATION"
         private const val DRIVER_REFRESH_MS = 30_000L
+        private const val PUBLISH_INTERVAL_MS = 5_000L
         private const val TAG = "SafarDriverGPS"
         fun start(context: Context) { ContextCompat.startForegroundService(context, Intent(context, DriverLocationService::class.java)) }
         fun stop(context: Context) { context.startService(Intent(context, DriverLocationService::class.java).setAction(ACTION_STOP)) }
