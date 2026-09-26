@@ -242,8 +242,8 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                 locationProvider.headingDegrees().collectLatest { heading ->
                     _uiState.value = _uiState.value.copy(headingDegrees = heading)
                 }
-            } catch (_: CancellationException) {
-                throw
+            } catch (error: CancellationException) {
+                throw error
             } catch (_: Exception) {
             }
         }
