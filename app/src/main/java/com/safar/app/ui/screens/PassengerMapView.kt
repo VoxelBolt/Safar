@@ -392,35 +392,30 @@ private fun setupMapLayers(style: Style) {
 
 private fun updateUserLocation(style: Style, point: GeoPoint?) {
     val source = style.getSourceAs<GeoJsonSource>(USER_LOCATION_SOURCE_ID) ?: return
+
     if (point == null) {
         source.setGeoJson(FeatureCollection.fromFeatures(emptyArray<Feature>()))
         return
     }
+
     source.setGeoJson(
         FeatureCollection.fromFeature(
             Feature.fromGeometry(Point.fromLngLat(point.longitude, point.latitude))
         )
     )
-    // Keep the user layer explicitly above every other custom layer.
-    style.removeLayer(USER_LOCATION_PULSE_LAYER_ID)
-    style.removeLayer(USER_LOCATION_CIRCLE_LAYER_ID)
-    style.addLayer(
-        CircleLayer(USER_LOCATION_PULSE_LAYER_ID, USER_LOCATION_SOURCE_ID).withProperties(
-            circleColor(SafarBlue.toArgb()),
-            circleRadius(18f),
-            circleOpacity(0.20f),
-        )
-    )
-    style.addLayer(
-        CircleLayer(USER_LOCATION_CIRCLE_LAYER_ID, USER_LOCATION_SOURCE_ID).withProperties(
-            circleColor(SafarBlue.toArgb()),
-            circleRadius(8f),
-            circleStrokeColor(Color.White.toArgb()),
-            circleStrokeWidth(2.5f),
-        )
-    )
-}
 
+    // Keep the user marker above all other custom map layers.
+    val pulse = style.getLayerAs<CircleLayer>(USER_LOCATION_PULSE_LAYER_ID)
+    val circle = style.getLayerAs<CircleLayer>(USER_LOCATION_CIRCLE_LAYER_ID)
+    pulse?.let {
+        style.removeLayer(USER_LOCATION_PULSE_LAYER_ID)
+        style.addLayer(it)
+    }
+    circle?.let {
+        style.removeLayer(USER_LOCATION_CIRCLE_LAYER_ID)
+        style.addLayer(it)
+    }
+}
 private fun updateRoute(style: Style, route: Route?, opacity: Float) {
     val source = style.getSourceAs<GeoJsonSource>(ROUTE_SOURCE_ID) ?: return
     val path = route?.path.orEmpty()
