@@ -2,6 +2,7 @@ package com.safar.app.ui.screens
 
 import android.Manifest
 import android.app.Application
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.LocationManager
@@ -288,7 +289,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         if (!hasLocationPermission()) return
 
         val locationManager = getApplication<Application>()
-            .getSystemService(Application.LOCATION_SERVICE) as LocationManager
+            .getSystemService(Context.LOCATION_SERVICE) as LocationManager
         val locationEnabled = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
             runCatching { locationManager.isLocationEnabled }.getOrDefault(false)
         } else {
