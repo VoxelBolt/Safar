@@ -758,18 +758,24 @@ private fun DriverHomeScreen(
         driverLocationProvider.currentLocation { point ->
             if (point != null) {
                 driverLocation = point
+                driverLocateRequestId += 1L
             }
         }
 
-        try {
-            driverLocationProvider.locations().collect { point ->
-                driverLocation = point
-            }
-        } catch (error: CancellationException) {
-            throw error
-        } catch (_: Exception) {
+        while (true) {
             driverLocationProvider.currentLocation { point ->
-                if (point != null) driverLocation = point
+                if (point != null) {
+                    driverLocation = point
+                }
+            }
+            try {
+                driverLocationProvider.locations().collect { point ->
+                    driverLocation = point
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                delay(1_000L)
             }
         }
     }
