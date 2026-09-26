@@ -212,11 +212,11 @@ internal fun PassengerMapView(
     LaunchedEffect(styleReady, route, passengerLocation, headingDegrees, vehicleLocations) {
         if (!styleReady) return@LaunchedEffect
         map?.style?.let { style ->
-            updateUserLocation(style, passengerLocation)
             updateRoute(style, route, routeOpacity)
             updateRouteStation(style, route)
             updateHeadingSector(style, passengerLocation, headingDegrees)
             updateVehicles(style, vehicleLocations, route?.number)
+            updateUserLocation(style, passengerLocation)
         }
 
         if (passengerLocation != null && !centeredOnUser) {
