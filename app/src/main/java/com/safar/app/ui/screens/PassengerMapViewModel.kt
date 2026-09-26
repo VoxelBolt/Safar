@@ -118,8 +118,14 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             _uiState.value = _uiState.value.copy(loadingVehicles = true)
             runCatching { vehicleRepository.getVehiclesForRoute(route.id) }
                 .onSuccess { vehicles ->
+                    val fresh = freshVehicles(vehicles).map { it.copy(active = true) }
+                    android.util.Log.d(
+                        "SafarVehicle",
+                        "initial route=${route.id} vehicles=${fresh.size} locations=" +
+                            fresh.joinToString { "${it.identifier}:${it.currentLocation?.latitude},${it.currentLocation?.longitude}" },
+                    )
                     _uiState.value = _uiState.value.copy(
-                        activeVehicles = freshVehicles(vehicles).map { it.copy(active = true) },
+                        activeVehicles = fresh,
                         loadingVehicles = false,
                     )
                 }
@@ -358,7 +364,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             ContextCompat.checkSelfPermission(getApplication(), Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
     private companion object {
-        const val LOCATION_FRESHNESS_MS = 25_000L
+        const val LOCATION_FRESHNESS_MS = 60_000L
         const val STALE_SWEEP_INTERVAL_MS = 5_000L
     }
 }
