@@ -116,10 +116,10 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         vehicleRefreshJob?.cancel()
         vehicleRefreshJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(loadingVehicles = true)
-            runCatching { vehicleRepository.getActiveVehiclesForRoute(route.id) }
+            runCatching { vehicleRepository.getVehiclesForRoute(route.id) }
                 .onSuccess { vehicles ->
                     _uiState.value = _uiState.value.copy(
-                        activeVehicles = freshVehicles(vehicles),
+                        activeVehicles = freshVehicles(vehicles).map { it.copy(active = true) },
                         loadingVehicles = false,
                     )
                 }
@@ -136,9 +136,9 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         vehicleLocationPollingJob?.cancel()
         vehicleLocationPollingJob = viewModelScope.launch {
             while (isActive && _uiState.value.selectedRoute?.id == routeId) {
-                runCatching { vehicleRepository.getActiveVehiclesForRoute(routeId) }
+                runCatching { vehicleRepository.getVehiclesForRoute(routeId) }
                     .onSuccess { vehicles ->
-                        val active = vehicles.filter { it.active && it.currentLocation != null }
+                        val active = freshVehicles(vehicles).map { it.copy(active = true) }
                         _uiState.value = _uiState.value.copy(activeVehicles = active, error = null)
                         android.util.Log.d(
                             "SafarVehicle",
@@ -196,7 +196,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             runCatching { vehicleRepository.getActiveVehiclesForRoute(selectedRoute.id) }
                 .onSuccess { vehicles ->
                     _uiState.value = _uiState.value.copy(
-                        activeVehicles = freshVehicles(vehicles),
+                        activeVehicles = freshVehicles(vehicles).map { it.copy(active = true) },
                         error = null,
                     )
                 }
