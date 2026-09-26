@@ -2,7 +2,10 @@ package com.safar.app.ui.screens
 
 import android.Manifest
 import android.app.Application
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.LocationManager
+import android.provider.Settings
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -283,6 +286,24 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     fun refreshPassengerLocation() {
         refreshLocationPermissionState()
         if (!hasLocationPermission()) return
+
+        val locationManager = getApplication<Application>()
+            .getSystemService(Application.LOCATION_SERVICE) as LocationManager
+        val locationEnabled = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            runCatching { locationManager.isLocationEnabled }.getOrDefault(false)
+        } else {
+            runCatching { locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) }.getOrDefault(false)
+        }
+
+        if (!locationEnabled) {
+            _uiState.value = _uiState.value.copy(error = "Включите геолокацию на телефоне")
+            getApplication<Application>().startActivity(
+                Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            return
+        }
+
         locateRequestJob?.cancel()
         locateRequestJob = viewModelScope.launch {
             locationProvider.lastKnownLocation { point ->
