@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.android.gms.location.LocationServices
 import com.safar.app.data.location.AndroidLocationProvider
 import com.safar.app.data.realtime.RealtimeTransport
 import com.safar.app.di.AppContainer
@@ -20,7 +21,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -43,6 +44,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     private val vehicleRepository = AppContainer.vehicleRepository
     private val realtimeTransport: RealtimeTransport = AppContainer.realtimeTransport
     private val locationProvider = AndroidLocationProvider(application)
+
     private val _uiState = MutableStateFlow(PassengerMapUiState())
     val uiState: StateFlow<PassengerMapUiState> = _uiState.asStateFlow()
 
@@ -51,6 +53,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     private var realtimeJob: Job? = null
     private var staleSweepJob: Job? = null
     private var headingJob: Job? = null
+    private var locateRequestJob: Job? = null
 
     init {
         refreshLocationPermissionState()
@@ -61,45 +64,45 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         if (_uiState.value.loadingRoutes) return
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(loadingRoutes = true, error = null)
-            runCatching {
-                routeRepository.getRoutes().sortedBy { it.number }
-            }.onSuccess { routes ->
-                val selected = _uiState.value.selectedRoute
-                    ?.let { old -> routes.firstOrNull { it.id == old.id } }
-                val effective = selected ?: routes.firstOrNull()
-                _uiState.value = _uiState.value.copy(
-                    routes = routes,
-                    selectedRoute = effective,
-                    loadingRoutes = false,
-                )
-                effective?.let {
-                    loadVehicles(it)
-                    switchRealtime(it.id)
+            runCatching { routeRepository.getRoutes().sortedBy { it.number } }
+                .onSuccess { routes ->
+                    val selected = _uiState.value.selectedRoute?.let { old -> routes.firstOrNull { it.id == old.id } }
+                    val effective = selected ?: routes.firstOrNull()
+                    _uiState.value = _uiState.value.copy(
+                        routes = routes,
+                        selectedRoute = effective,
+                        loadingRoutes = false,
+                    )
+                    effective?.let {
+                        loadVehicles(it)
+                        switchRealtime(it.id)
+                    }
                 }
-            }.onFailure { error ->
-                _uiState.value = _uiState.value.copy(
-                    loadingRoutes = false,
-                    error = error.message ?: "Не удалось загрузить маршруты",
-                )
-            }
+                .onFailure { error ->
+                    _uiState.value = _uiState.value.copy(
+                        loadingRoutes = false,
+                        error = error.message ?: "Не удалось загрузить маршруты",
+                    )
+                }
         }
     }
 
     fun selectRoute(route: Route) {
+        val oldRouteId = _uiState.value.selectedRoute?.id
         _uiState.value = _uiState.value.copy(
             selectedRoute = route,
             recentRoutes = buildList {
                 add(route)
-                _uiState.value.recentRoutes
-                    .filter { it.id != route.id }
-                    .take(2)
-                    .forEach(::add)
+                _uiState.value.recentRoutes.filter { it.id != route.id }.take(2).forEach(::add)
             },
             activeVehicles = emptyList(),
             error = null,
         )
         loadVehicles(route)
         switchRealtime(route.id)
+        if (oldRouteId != null && oldRouteId != route.id) {
+            viewModelScope.launch { runCatching { realtimeTransport.removePassengerLocation(oldRouteId) } }
+        }
     }
 
     private fun loadVehicles(route: Route) {
@@ -125,59 +128,38 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     private fun switchRealtime(routeId: String) {
         realtimeJob?.cancel()
         realtimeTransport.disconnect()
-
         realtimeJob = viewModelScope.launch {
             try {
                 realtimeTransport.connect(routeId)
-                realtimeTransport.vehicleEvents.collect { event ->
+                realtimeTransport.vehicleEvents.collectLatest { event ->
                     applyRealtimeEvent(event.vehicleId, event.routeId, event.location)
                 }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
                 if (currentCoroutineContext().isActive) {
-                    _uiState.value = _uiState.value.copy(
-                        error = error.message ?: "Realtime недоступен",
-                    )
+                    _uiState.value = _uiState.value.copy(error = error.message ?: "Realtime недоступен")
                 }
             }
         }
     }
 
-    private fun applyRealtimeEvent(
-        vehicleId: String,
-        routeId: String,
-        location: VehicleLocation?,
-    ) {
+    private fun applyRealtimeEvent(vehicleId: String, routeId: String, location: VehicleLocation?) {
         val selectedRoute = _uiState.value.selectedRoute ?: return
         if (selectedRoute.id != routeId) return
 
-        if (location == null) {
+        if (location == null || !isFresh(location.timestampEpochMs)) {
             _uiState.value = _uiState.value.copy(
                 activeVehicles = _uiState.value.activeVehicles.filter { it.id != vehicleId },
             )
             return
         }
 
-        if (!isFresh(location.timestampEpochMs)) {
-            _uiState.value = _uiState.value.copy(
-                activeVehicles = _uiState.value.activeVehicles.filter { it.id != vehicleId },
-            )
-            return
-        }
-
-        val currentVehicles = _uiState.value.activeVehicles
-        val currentVehicle = currentVehicles.firstOrNull { it.id == vehicleId }
-
+        val currentVehicle = _uiState.value.activeVehicles.firstOrNull { it.id == vehicleId }
         if (currentVehicle != null) {
-            val updated = currentVehicle.copy(
-                currentLocation = location,
-                active = true,
-            )
+            val updated = currentVehicle.copy(currentLocation = location, active = true)
             _uiState.value = _uiState.value.copy(
-                activeVehicles = currentVehicles.map {
-                    if (it.id == vehicleId) updated else it
-                }.filter { isFresh(it.currentLocation?.timestampEpochMs) },
+                activeVehicles = _uiState.value.activeVehicles.map { if (it.id == vehicleId) updated else it },
                 error = null,
             )
             return
@@ -218,37 +200,51 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
 
     fun onLocationPermissionResult(granted: Boolean) {
         _uiState.value = _uiState.value.copy(locationPermissionRequired = !granted)
-        if (granted) startLocationUpdates() else stopLocationUpdates()
+        if (granted) {
+            startLocationUpdates()
+            requestCurrentLocation(centerCamera = false)
+        } else {
+            stopLocationUpdates()
+            _uiState.value = _uiState.value.copy(passengerLocation = null)
+        }
     }
 
     fun refreshLocationPermissionState() {
-        val granted = ContextCompat.checkSelfPermission(
-            getApplication(),
-            Manifest.permission.ACCESS_FINE_LOCATION,
-        ) == PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(
-            getApplication(),
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-        ) == PackageManager.PERMISSION_GRANTED
-        onLocationPermissionResult(granted)
+        val granted = hasLocationPermission()
+        _uiState.value = _uiState.value.copy(locationPermissionRequired = !granted)
+        if (granted) startLocationUpdates()
     }
 
     private fun startLocationUpdates() {
-        if (locationJob != null) return
+        if (locationJob?.isActive == true) return
         locationProvider.lastKnownLocation { point ->
-            if (point != null) _uiState.value = _uiState.value.copy(passengerLocation = point)
-        }
-        locationProvider.currentLocation { point ->
-            if (point != null) _uiState.value = _uiState.value.copy(passengerLocation = point)
-        }
-        locationJob = viewModelScope.launch {
-            locationProvider.locations().collect { point ->
+            if (point != null) {
                 _uiState.value = _uiState.value.copy(passengerLocation = point)
+            }
+        }
+        requestCurrentLocation(centerCamera = false)
+        locationJob = viewModelScope.launch {
+            try {
+                locationProvider.locations().collectLatest { point ->
+                    _uiState.value = _uiState.value.copy(passengerLocation = point)
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                locationJob = null
+                delay(1_000L)
+                if (hasLocationPermission()) startLocationUpdates()
             }
         }
         headingJob?.cancel()
         headingJob = viewModelScope.launch {
-            locationProvider.headingDegrees().collect { heading ->
-                _uiState.value = _uiState.value.copy(headingDegrees = heading)
+            try {
+                locationProvider.headingDegrees().collectLatest { heading ->
+                    _uiState.value = _uiState.value.copy(headingDegrees = heading)
+                }
+            } catch (_: CancellationException) {
+                throw
+            } catch (_: Exception) {
             }
         }
     }
@@ -258,19 +254,40 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         locationJob = null
         headingJob?.cancel()
         headingJob = null
+        locateRequestJob?.cancel()
+    }
+
+    private fun requestCurrentLocation(centerCamera: Boolean) {
+        if (!hasLocationPermission()) return
+        locationProvider.currentLocationSample { sample ->
+            if (sample != null) {
+                _uiState.value = _uiState.value.copy(
+                    passengerLocation = sample.point,
+                    locateRequestId = if (centerCamera) _uiState.value.locateRequestId + 1L else _uiState.value.locateRequestId,
+                )
+            } else {
+                LocationServices.getFusedLocationProviderClient(getApplication<Application>())
+                    .lastLocation
+                    .addOnSuccessListener { location ->
+                        if (location != null) {
+                            _uiState.value = _uiState.value.copy(
+                                passengerLocation = GeoPoint(location.latitude, location.longitude),
+                                locateRequestId = if (centerCamera) _uiState.value.locateRequestId + 1L else _uiState.value.locateRequestId,
+                            )
+                        }
+                    }
+            }
+        }
     }
 
     fun refreshPassengerLocation() {
         refreshLocationPermissionState()
-        if (_uiState.value.locationPermissionRequired) return
-
-        locationProvider.currentLocation { point ->
-            if (point != null) {
-                _uiState.value = _uiState.value.copy(
-                    passengerLocation = point,
-                    locateRequestId = _uiState.value.locateRequestId + 1L,
-                )
-            }
+        if (!hasLocationPermission()) return
+        locateRequestJob?.cancel()
+        locateRequestJob = viewModelScope.launch {
+            requestCurrentLocation(centerCamera = true)
+            delay(500L)
+            requestCurrentLocation(centerCamera = true)
         }
     }
 
@@ -282,6 +299,10 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         realtimeTransport.disconnect()
         super.onCleared()
     }
+
+    private fun hasLocationPermission(): Boolean =
+        ContextCompat.checkSelfPermission(getApplication(), Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(getApplication(), Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
     private companion object {
         const val LOCATION_FRESHNESS_MS = 25_000L
