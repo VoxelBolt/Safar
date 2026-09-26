@@ -5,6 +5,7 @@ import android.content.Context
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.os.Build
 import android.util.Log
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -65,8 +66,13 @@ class AndroidLocationProvider(private val context: Context) {
         val networkEnabled = runCatching {
             locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
         }.getOrDefault(false)
+        val locationEnabled = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            runCatching { locationManager.isLocationEnabled }.getOrDefault(false)
+        } else {
+            gpsEnabled || networkEnabled
+        }
 
-        Log.d(TAG, "locationSamples: permission=granted gps=$gpsEnabled network=$networkEnabled")
+        Log.d(TAG, "locationSamples: locationEnabled=$locationEnabled gps=$gpsEnabled network=$networkEnabled")
         emitLastKnown()
 
         if (gpsEnabled) {
@@ -95,7 +101,9 @@ class AndroidLocationProvider(private val context: Context) {
 
         // Fused is retained as a second source, because some Samsung devices
         // provide a faster fix through Google Play Services.
-        val fusedRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 2_000L)
+        val fusedPriority = if (hasFineLocationPermission()) Priority.PRIORITY_HIGH_ACCURACY else Priority.PRIORITY_BALANCED_POWER_ACCURACY
+
+        val fusedRequest = LocationRequest.Builder(fusedPriority, 2_000L)
             .setMinUpdateIntervalMillis(1_000L)
             .setWaitForAccurateLocation(false)
             .build()
@@ -118,7 +126,7 @@ class AndroidLocationProvider(private val context: Context) {
                 fusedCallback,
                 Looper.getMainLooper(),
             )
-        }
+        }.onFailure { Log.w(TAG, "Fused requestLocationUpdates failed", it) }
 
         awaitClose {
             locationManager.removeUpdates(listener)
@@ -180,8 +188,11 @@ class AndroidLocationProvider(private val context: Context) {
             onResult(fallback.toLocationSample())
         }
 
+        val priority = if (hasFineLocationPermission()) Priority.PRIORITY_HIGH_ACCURACY else Priority.PRIORITY_BALANCED_POWER_ACCURACY
+        Log.d(TAG, "currentLocation: fine=" + hasFineLocationPermission() + " coarse=" + hasCoarseLocationPermission() + " priority=" + priority)
+
         fusedClient.getCurrentLocation(
-            Priority.PRIORITY_HIGH_ACCURACY,
+            priority,
             CancellationTokenSource().token,
         ).addOnSuccessListener { location ->
             Log.d(TAG, "getCurrentLocation result: ${location?.latitude},${location?.longitude}")
@@ -208,6 +219,18 @@ class AndroidLocationProvider(private val context: Context) {
             .addOnSuccessListener { location -> onResult(location?.toGeoPoint()) }
             .addOnFailureListener { onResult(null) }
     }
+
+    private fun hasFineLocationPermission(): Boolean =
+        androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.ACCESS_FINE_LOCATION,
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+    private fun hasCoarseLocationPermission(): Boolean =
+        androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION,
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
     private companion object { const val TAG = "SafarGPS" }
 
