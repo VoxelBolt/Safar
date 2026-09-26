@@ -18,7 +18,9 @@ import androidx.core.content.ContextCompat
 import com.safar.app.R
 import com.safar.app.di.AppContainer
 import kotlinx.coroutines.delay
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -35,6 +37,8 @@ class DriverLocationService : Service() {
     private val locationProvider by lazy { AndroidLocationProvider(applicationContext) }
     private lateinit var connectivityManager: ConnectivityManager
     private var publishingJob: Job? = null
+    private var locationStreamJob: Job? = null
+    private val lastPublishedLocationTimestamp = AtomicLong(0L)
     private val driverSnapshot = AtomicReference<com.safar.app.domain.model.Driver?>(null)
     @Volatile private var driverSnapshotLoadedAt = 0L
     @Volatile private var networkAvailable = false
@@ -85,21 +89,38 @@ class DriverLocationService : Service() {
 
     private fun startPublishingIfNeeded() {
         if (publishingJob?.isActive == true) return
+
+        // Primary channel: continuous Android location updates. This is the same
+        // stream that already drives the blue dot on the driver's map.
+        locationStreamJob = scope.launch {
+            while (currentCoroutineContext().isActive && hasLocationPermission()) {
+                try {
+                    locationProvider.locationSamples().collect { sample ->
+                        if (!networkAvailable || !hasLocationPermission()) return@collect
+                        publishLocationSample(sample)
+                    }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    android.util.Log.e(TAG, "Location stream failed; restarting", error)
+                    delay(1_000L)
+                }
+            }
+        }
+
+        // Safety channel: ask Android for a fresh single fix every few seconds.
         publishingJob = scope.launch {
             while (currentCoroutineContext().isActive && hasLocationPermission()) {
                 try {
-                    // Do not rely only on the continuous location flow here.
-                    // Some devices can temporarily stop delivering that flow while
-                    // the foreground service is still alive. A periodic fresh-location
-                    // request guarantees that the server heartbeat keeps advancing.
                     if (networkAvailable) {
                         publishCurrentLocationOnce()
                         updateNotification("Геопозиция передаётся пассажирам")
                     } else {
                         updateNotification("Нет интернета — отправка приостановлена")
                     }
-                } catch (error: CancellationException) { throw error }
-                catch (_: SecurityException) {
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: SecurityException) {
                     updateNotification("Нет доступа к геолокации")
                     break
                 } catch (error: Exception) {
@@ -115,19 +136,35 @@ class DriverLocationService : Service() {
     private fun publishCurrentLocationOnce() {
         if (!networkAvailable || !hasLocationPermission()) return
         locationProvider.currentLocationSample { sample ->
-            if (sample == null || !networkAvailable) return@currentLocationSample
+            if (sample == null || !networkAvailable) {
+                android.util.Log.w(TAG, "No fresh current-location sample received")
+                return@currentLocationSample
+            }
             scope.launch {
-                val recordedAtIso = sample.timestampEpochMs.takeIf { it > 0L }?.let { Instant.ofEpochMilli(it).toString() }
                 try {
-                    publishDriverSample(sample.point.latitude, sample.point.longitude, recordedAtIso)
-                    updateNotification("Геопозиция передаётся пассажирам")
-                } catch (error: CancellationException) { throw error }
-                catch (error: Exception) {
+                    publishLocationSample(sample)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
                     android.util.Log.e(TAG, "Driver location publish failed", error)
                     updateNotification("Не удалось передать координату — повторяю автоматически")
                 }
             }
         }
+    }
+
+    private suspend fun publishLocationSample(sample: LocationSample) {
+        val timestampEpochMs = sample.timestampEpochMs
+        if (timestampEpochMs <= 0L) return
+
+        // Never move the server heartbeat backwards if Android gives us a cached
+        // location after a newer sample has already been published.
+        val previous = lastPublishedLocationTimestamp.get()
+        if (timestampEpochMs <= previous) return
+        if (!lastPublishedLocationTimestamp.compareAndSet(previous, timestampEpochMs)) return
+
+        val recordedAtIso = Instant.ofEpochMilli(timestampEpochMs).toString()
+        publishDriverSample(sample.point.latitude, sample.point.longitude, recordedAtIso)
     }
 
     private suspend fun publishDriverSample(latitude: Double, longitude: Double, recordedAtIso: String?) {
@@ -139,12 +176,35 @@ class DriverLocationService : Service() {
         }
         val driver = driverSnapshot.get() ?: error("Driver profile not found")
         val routeId = driver.routeId ?: error("Driver route is not assigned yet")
-        val timestamp = recordedAtIso ?: java.time.Instant.now().toString()
-        try {
-            AppContainer.driverLocationRepository.submitLocation(latitude=latitude, longitude=longitude, recordedAtIso=timestamp)
-        } catch (error: CancellationException) { throw error }
-        catch (error: Exception) { android.util.Log.e(TAG, "Current vehicle state update failed", error) }
-        AppContainer.realtimeTransport.sendDriverLocation(routeId=routeId, vehicleId=driver.vehicleId, latitude=latitude, longitude=longitude, recordedAtIso=timestamp)
+        val timestamp = recordedAtIso ?: Instant.now().toString()
+
+        // The database write is authoritative. Do not broadcast a location to
+        // passengers if saving the current state failed.
+        AppContainer.driverLocationRepository.submitLocation(
+            latitude = latitude,
+            longitude = longitude,
+            recordedAtIso = timestamp,
+        )
+
+        android.util.Log.d(
+            TAG,
+            "Vehicle location saved: vehicle=${driver.vehicleId} route=$routeId " +
+                "lat=$latitude lon=$longitude recordedAt=$timestamp",
+        )
+
+        runCatching {
+            AppContainer.realtimeTransport.sendDriverLocation(
+                routeId = routeId,
+                vehicleId = driver.vehicleId,
+                latitude = latitude,
+                longitude = longitude,
+                recordedAtIso = timestamp,
+            )
+        }.onFailure { error ->
+            android.util.Log.w(TAG, "Realtime vehicle broadcast failed", error)
+        }
+
+        updateNotification("Геопозиция передаётся пассажирам")
     }
 
     private fun hasLocationPermission(): Boolean =
@@ -177,7 +237,12 @@ class DriverLocationService : Service() {
         }
     }
 
-    private fun stopPublishing() { publishingJob?.cancel(); publishingJob = null }
+    private fun stopPublishing() {
+        publishingJob?.cancel()
+        publishingJob = null
+        locationStreamJob?.cancel()
+        locationStreamJob = null
+    }
 
     override fun onDestroy() {
         stopPublishing()
