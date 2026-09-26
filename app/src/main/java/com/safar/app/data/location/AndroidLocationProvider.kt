@@ -2,6 +2,7 @@ package com.safar.app.data.location
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.location.LocationManager
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -22,6 +23,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.FlowPreview
 
@@ -30,16 +32,35 @@ class AndroidLocationProvider(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun locationSamples(): Flow<LocationSample> = callbackFlow {
-        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5_000L)
-            .setMinUpdateIntervalMillis(5_000L)
+        val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        val gpsEnabled = runCatching { locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) }.getOrDefault(true)
+        val networkEnabled = runCatching { locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) }.getOrDefault(true)
+        if (!gpsEnabled && !networkEnabled) {
+            close(IllegalStateException("Службы геолокации отключены"))
+            return@callbackFlow
+        }
+
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 2_000L)
+            .setMinUpdateIntervalMillis(1_000L)
+            .setMaxUpdateDelayMillis(2_000L)
             .setWaitForAccurateLocation(false)
             .build()
+
         val callback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
-                result.locations.lastOrNull()?.let { location -> trySend(location.toLocationSample()).isSuccess }
+                result.locations
+                    .asSequence()
+                    .filter { it.latitude.isFinite() && it.longitude.isFinite() }
+                    .maxByOrNull { it.elapsedRealtimeNanos }
+                    ?.let { location ->
+                        trySend(location.toLocationSample()).isSuccess
+                    }
             }
         }
-        client.requestLocationUpdates(request, callback, Looper.getMainLooper()).addOnFailureListener { close(it) }
+
+        client.requestLocationUpdates(request, callback, Looper.getMainLooper())
+            .addOnFailureListener { close(it) }
+
         awaitClose { client.removeLocationUpdates(callback) }
     }.distinctUntilChanged()
 
