@@ -287,9 +287,16 @@ class SupabaseSafarApi(
             .toDomain()
     }
 
-    private fun parseTimestamp(value: String): Long =
-        runCatching { Instant.parse(value).toEpochMilli() }
-            .getOrElse { OffsetDateTime.parse(value).toInstant().toEpochMilli() }
+    private fun parseTimestamp(value: String): Long {
+        // PostgREST/PostgreSQL timestamps can arrive as
+        // "2026-09-26 15:05:24.084+00", while realtime sends ISO-8601
+        // "2026-09-26T15:05:24.084Z". Support both formats.
+        return runCatching { Instant.parse(value).toEpochMilli() }
+            .recoverCatching {
+                OffsetDateTime.parse(value.replace(' ', 'T')).toInstant().toEpochMilli()
+            }
+            .getOrThrow()
+    }
 
     private fun UserDto.toDomain(): User = User(
         id = id,
