@@ -285,8 +285,16 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         if (!hasLocationPermission()) return
         locateRequestJob?.cancel()
         locateRequestJob = viewModelScope.launch {
+            locationProvider.lastKnownLocation { point ->
+                if (point != null) {
+                    _uiState.value = _uiState.value.copy(
+                        passengerLocation = point,
+                        locateRequestId = _uiState.value.locateRequestId + 1L,
+                    )
+                }
+            }
             requestCurrentLocation(centerCamera = true)
-            delay(500L)
+            delay(750L)
             requestCurrentLocation(centerCamera = true)
         }
     }
