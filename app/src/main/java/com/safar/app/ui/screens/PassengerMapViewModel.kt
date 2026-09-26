@@ -54,6 +54,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
 
     private var locationJob: Job? = null
     private var vehicleRefreshJob: Job? = null
+    private var vehicleLocationPollingJob: Job? = null
     private var realtimeJob: Job? = null
     private var staleSweepJob: Job? = null
     private var headingJob: Job? = null
@@ -79,6 +80,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                     )
                     effective?.let {
                         loadVehicles(it)
+                        startVehicleLocationPolling(it.id)
                         switchRealtime(it.id)
                     }
                 }
@@ -103,6 +105,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             error = null,
         )
         loadVehicles(route)
+        startVehicleLocationPolling(route.id)
         switchRealtime(route.id)
         if (oldRouteId != null && oldRouteId != route.id) {
             viewModelScope.launch { runCatching { realtimeTransport.removePassengerLocation(oldRouteId) } }
@@ -129,6 +132,25 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    private fun startVehicleLocationPolling(routeId: String) {
+        vehicleLocationPollingJob?.cancel()
+        vehicleLocationPollingJob = viewModelScope.launch {
+            while (isActive && _uiState.value.selectedRoute?.id == routeId) {
+                runCatching { vehicleRepository.getActiveVehiclesForRoute(routeId) }
+                    .onSuccess { vehicles ->
+                        val active = vehicles.filter { it.active && it.currentLocation != null }
+                        _uiState.value = _uiState.value.copy(activeVehicles = active, error = null)
+                        android.util.Log.d(
+                            "SafarVehicle",
+                            "poll route=$routeId vehicles=${active.size} locations=" +
+                                active.joinToString { "${it.identifier}:${it.currentLocation?.latitude},${it.currentLocation?.longitude}" },
+                        )
+                    }
+                    .onFailure { error -> android.util.Log.w("SafarVehicle", "poll failed", error) }
+                delay(3_000L)
+            }
+        }
+    }
     private fun switchRealtime(routeId: String) {
         realtimeJob?.cancel()
         realtimeTransport.disconnect()
@@ -323,6 +345,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
 
     override fun onCleared() {
         stopLocationUpdates()
+        vehicleLocationPollingJob?.cancel()
         realtimeJob?.cancel()
         staleSweepJob?.cancel()
         vehicleRefreshJob?.cancel()
