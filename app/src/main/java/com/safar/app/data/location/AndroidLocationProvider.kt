@@ -174,33 +174,82 @@ class AndroidLocationProvider(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun currentLocationSample(onResult: (LocationSample?) -> Unit) {
-        // Immediately expose the best cached fix, then allow the fresh Fused fix
-        // to replace it. The fresh callback is intentionally not suppressed.
-        val gps = runCatching {
-            locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-        }.getOrNull()
-        val network = runCatching {
-            locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-        }.getOrNull()
-        val fallback = listOfNotNull(gps, network).maxByOrNull { it.elapsedRealtimeNanos }
-
-        if (fallback != null && fallback.latitude.isFinite() && fallback.longitude.isFinite()) {
-            onResult(fallback.toLocationSample())
+        val fine = hasFineLocationPermission()
+        val coarse = hasCoarseLocationPermission()
+        val gpsEnabled = runCatching {
+            locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+        }.getOrDefault(false)
+        val networkEnabled = runCatching {
+            locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        }.getOrDefault(false)
+        val locationEnabled = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            runCatching { locationManager.isLocationEnabled }.getOrDefault(false)
+        } else {
+            gpsEnabled || networkEnabled
         }
 
-        val priority = if (hasFineLocationPermission()) Priority.PRIORITY_HIGH_ACCURACY else Priority.PRIORITY_BALANCED_POWER_ACCURACY
-        Log.d(TAG, "currentLocation: fine=" + hasFineLocationPermission() + " coarse=" + hasCoarseLocationPermission() + " priority=" + priority)
+        Log.d(
+            TAG,
+            "currentLocation: fine=$fine coarse=$coarse locationEnabled=$locationEnabled gps=$gpsEnabled network=$networkEnabled"
+        )
+
+        // First use an already cached fix if Android has one.
+        val cached = listOfNotNull(
+            runCatching { locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER) }.getOrNull(),
+            runCatching { locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) }.getOrNull(),
+        ).maxByOrNull { it.elapsedRealtimeNanos }
+
+        if (cached != null && cached.latitude.isFinite() && cached.longitude.isFinite()) {
+            Log.d(TAG, "LocationManager cached fix: ${cached.latitude},${cached.longitude} accuracy=${cached.accuracy}")
+            onResult(cached.toLocationSample())
+        }
+
+        // On Android 11+ ask Android's own location manager for a fresh fix.
+        // This is independent from Google Play Services and is important when
+        // FusedLocationProvider returns null without a cached location.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && locationEnabled) {
+            val providers = buildList {
+                if (fine && gpsEnabled) add(LocationManager.GPS_PROVIDER)
+                if (networkEnabled) add(LocationManager.NETWORK_PROVIDER)
+                if (!fine && gpsEnabled) add(LocationManager.GPS_PROVIDER)
+            }.distinct()
+
+            for (provider in providers) {
+                runCatching {
+                    locationManager.getCurrentLocation(
+                        provider,
+                        null,
+                        context.mainExecutor,
+                    ) { location ->
+                        Log.d(
+                            TAG,
+                            "LocationManager current fix provider=$provider result=${location?.latitude},${location?.longitude}"
+                        )
+                        if (location != null && location.latitude.isFinite() && location.longitude.isFinite()) {
+                            onResult(location.toLocationSample())
+                        }
+                    }
+                }.onFailure {
+                    Log.w(TAG, "LocationManager getCurrentLocation failed provider=$provider", it)
+                }
+            }
+        } else if (!locationEnabled) {
+            Log.w(TAG, "Location services are disabled")
+        }
+
+        val priority = if (fine) Priority.PRIORITY_HIGH_ACCURACY else Priority.PRIORITY_BALANCED_POWER_ACCURACY
+        Log.d(TAG, "Fused request: priority=$priority")
 
         fusedClient.getCurrentLocation(
             priority,
             CancellationTokenSource().token,
         ).addOnSuccessListener { location ->
-            Log.d(TAG, "getCurrentLocation result: ${location?.latitude},${location?.longitude}")
+            Log.d(TAG, "Fused getCurrentLocation result: ${location?.latitude},${location?.longitude}")
             if (location != null && location.latitude.isFinite() && location.longitude.isFinite()) {
                 onResult(location.toLocationSample())
             }
         }.addOnFailureListener { error ->
-            Log.w(TAG, "getCurrentLocation failed", error)
+            Log.w(TAG, "Fused getCurrentLocation failed", error)
         }
     }
     @SuppressLint("MissingPermission")
