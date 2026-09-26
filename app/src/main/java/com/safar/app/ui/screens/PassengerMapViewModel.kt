@@ -6,7 +6,6 @@ import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.google.android.gms.location.LocationServices
 import com.safar.app.data.location.AndroidLocationProvider
 import com.safar.app.data.realtime.RealtimeTransport
 import com.safar.app.di.AppContainer
@@ -21,261 +20,271 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 data class PassengerMapUiState(
     val routes: List<Route> = emptyList(),
+    val recentRoutes: List<Route> = emptyList(),
     val selectedRoute: Route? = null,
-    val selectedVehicle: Vehicle? = null,
-    val vehicleLocations: List<Pair<Vehicle, VehicleLocation>> = emptyList(),
+    val activeVehicles: List<Vehicle> = emptyList(),
     val passengerLocation: GeoPoint? = null,
     val headingDegrees: Float? = null,
-    val locationPermissionGranted: Boolean = false,
-    val realtimeConnected: Boolean = false,
     val locateRequestId: Long = 0L,
-    val loading: Boolean = false,
+    val loadingRoutes: Boolean = false,
+    val loadingVehicles: Boolean = false,
     val error: String? = null,
+    val locationPermissionRequired: Boolean = true,
 )
 
 class PassengerMapViewModel(application: Application) : AndroidViewModel(application) {
     private val routeRepository = AppContainer.routeRepository
     private val vehicleRepository = AppContainer.vehicleRepository
-    private val driverLocationRepository = AppContainer.driverLocationRepository
-    private val locationProvider = AndroidLocationProvider(application)
     private val realtimeTransport: RealtimeTransport = AppContainer.realtimeTransport
-
+    private val locationProvider = AndroidLocationProvider(application)
     private val _uiState = MutableStateFlow(PassengerMapUiState())
     val uiState: StateFlow<PassengerMapUiState> = _uiState.asStateFlow()
 
-    private var realtimeJob: Job? = null
     private var locationJob: Job? = null
+    private var vehicleRefreshJob: Job? = null
+    private var realtimeJob: Job? = null
+    private var staleSweepJob: Job? = null
     private var headingJob: Job? = null
-    private var locationRetryJob: Job? = null
 
     init {
-        _uiState.value = _uiState.value.copy(
-            locationPermissionGranted = hasLocationPermission(),
-        )
-        loadRoutes()
-        startHeading()
-        startLocationUpdates()
+        refreshLocationPermissionState()
+        startStaleSweep()
     }
 
     fun loadRoutes() {
-        if (_uiState.value.loading) return
+        if (_uiState.value.loadingRoutes) return
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(loading = true, error = null)
+            _uiState.value = _uiState.value.copy(loadingRoutes = true, error = null)
             runCatching {
-                val routes = routeRepository.getRoutes().sortedBy { it.number }
-                routes
+                routeRepository.getRoutes().sortedBy { it.number }
             }.onSuccess { routes ->
-                _uiState.value = _uiState.value.copy(routes = routes, loading = false)
-                val saved = _uiState.value.selectedRoute
-                if (saved != null) {
-                    connectRoute(saved)
+                val selected = _uiState.value.selectedRoute
+                    ?.let { old -> routes.firstOrNull { it.id == old.id } }
+                val effective = selected ?: routes.firstOrNull()
+                _uiState.value = _uiState.value.copy(
+                    routes = routes,
+                    selectedRoute = effective,
+                    loadingRoutes = false,
+                )
+                effective?.let {
+                    loadVehicles(it)
+                    switchRealtime(it.id)
                 }
             }.onFailure { error ->
                 _uiState.value = _uiState.value.copy(
-                    loading = false,
-                    error = error.userMessage(),
+                    loadingRoutes = false,
+                    error = error.message ?: "Не удалось загрузить маршруты",
                 )
             }
         }
     }
 
-    fun onLocationPermissionChanged(granted: Boolean) {
-        _uiState.value = _uiState.value.copy(locationPermissionGranted = granted)
-        if (granted) {
-            restartLocationUpdates()
-            requestCurrentLocation()
-        } else {
-            locationJob?.cancel()
-            locationRetryJob?.cancel()
-            _uiState.value = _uiState.value.copy(passengerLocation = null)
-        }
-    }
-
     fun selectRoute(route: Route) {
-        if (_uiState.value.selectedRoute?.id == route.id) {
-            _uiState.value = _uiState.value.copy(selectedRoute = null, selectedVehicle = null, vehicleLocations = emptyList())
-            realtimeJob?.cancel()
-            realtimeTransport.disconnect()
-            return
-        }
         _uiState.value = _uiState.value.copy(
             selectedRoute = route,
-            selectedVehicle = null,
-            vehicleLocations = emptyList(),
-            realtimeConnected = false,
+            recentRoutes = buildList {
+                add(route)
+                _uiState.value.recentRoutes
+                    .filter { it.id != route.id }
+                    .take(2)
+                    .forEach(::add)
+            },
+            activeVehicles = emptyList(),
+            error = null,
         )
-        connectRoute(route)
+        loadVehicles(route)
+        switchRealtime(route.id)
     }
 
-    fun selectVehicle(vehicle: Vehicle?) {
-        _uiState.value = _uiState.value.copy(selectedVehicle = vehicle)
+    private fun loadVehicles(route: Route) {
+        vehicleRefreshJob?.cancel()
+        vehicleRefreshJob = viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(loadingVehicles = true)
+            runCatching { vehicleRepository.getActiveVehiclesForRoute(route.id) }
+                .onSuccess { vehicles ->
+                    _uiState.value = _uiState.value.copy(
+                        activeVehicles = freshVehicles(vehicles),
+                        loadingVehicles = false,
+                    )
+                }
+                .onFailure { error ->
+                    _uiState.value = _uiState.value.copy(
+                        loadingVehicles = false,
+                        error = error.message ?: "Не удалось получить транспорт",
+                    )
+                }
+        }
     }
 
-    fun locateUser() {
-        _uiState.value = _uiState.value.copy(locateRequestId = _uiState.value.locateRequestId + 1)
-        requestCurrentLocation()
-    }
-
-    private fun connectRoute(route: Route) {
+    private fun switchRealtime(routeId: String) {
         realtimeJob?.cancel()
         realtimeTransport.disconnect()
-        _uiState.value = _uiState.value.copy(vehicleLocations = emptyList(), realtimeConnected = false)
+
         realtimeJob = viewModelScope.launch {
             try {
-                realtimeTransport.connect(route.id)
-                _uiState.value = _uiState.value.copy(realtimeConnected = true)
-                refreshCurrentVehicleLocations(route)
-                realtimeTransport.vehicleEvents.collectLatest { event ->
-                    if (_uiState.value.selectedRoute?.id != event.routeId) return@collectLatest
-                    applyVehicleEvent(event)
+                realtimeTransport.connect(routeId)
+                realtimeTransport.vehicleEvents.collect { event ->
+                    applyRealtimeEvent(event.vehicleId, event.routeId, event.location)
                 }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
                 if (currentCoroutineContext().isActive) {
                     _uiState.value = _uiState.value.copy(
-                        realtimeConnected = false,
-                        error = error.userMessage(),
+                        error = error.message ?: "Realtime недоступен",
                     )
                 }
             }
         }
     }
 
-    private suspend fun refreshCurrentVehicleLocations(route: Route) {
-        runCatching {
-            driverLocationRepository.getCurrentLocations(routeId = route.id)
-        }.onSuccess { current ->
-            val vehicles = current.mapNotNull { location ->
-                vehicleRepository.findById(location.vehicleId)?.let { vehicle ->
-                    vehicle to location
+    private fun applyRealtimeEvent(
+        vehicleId: String,
+        routeId: String,
+        location: VehicleLocation?,
+    ) {
+        val selectedRoute = _uiState.value.selectedRoute ?: return
+        if (selectedRoute.id != routeId) return
+
+        if (location == null) {
+            _uiState.value = _uiState.value.copy(
+                activeVehicles = _uiState.value.activeVehicles.filter { it.id != vehicleId },
+            )
+            return
+        }
+
+        if (!isFresh(location.timestampEpochMs)) {
+            _uiState.value = _uiState.value.copy(
+                activeVehicles = _uiState.value.activeVehicles.filter { it.id != vehicleId },
+            )
+            return
+        }
+
+        val currentVehicles = _uiState.value.activeVehicles
+        val currentVehicle = currentVehicles.firstOrNull { it.id == vehicleId }
+
+        if (currentVehicle != null) {
+            val updated = currentVehicle.copy(
+                currentLocation = location,
+                active = true,
+            )
+            _uiState.value = _uiState.value.copy(
+                activeVehicles = currentVehicles.map {
+                    if (it.id == vehicleId) updated else it
+                }.filter { isFresh(it.currentLocation?.timestampEpochMs) },
+                error = null,
+            )
+            return
+        }
+
+        vehicleRefreshJob?.cancel()
+        vehicleRefreshJob = viewModelScope.launch {
+            runCatching { vehicleRepository.getActiveVehiclesForRoute(selectedRoute.id) }
+                .onSuccess { vehicles ->
+                    _uiState.value = _uiState.value.copy(
+                        activeVehicles = freshVehicles(vehicles),
+                        error = null,
+                    )
                 }
-            }.filter { (_, location) -> isFresh(location.timestampEpochMs) }
-            if (_uiState.value.selectedRoute?.id == route.id) {
-                _uiState.value = _uiState.value.copy(vehicleLocations = vehicles)
-            }
-        }.onFailure { error ->
-            if (_uiState.value.selectedRoute?.id == route.id) {
-                _uiState.value = _uiState.value.copy(error = error.userMessage())
+        }
+    }
+
+    private fun startStaleSweep() {
+        if (staleSweepJob?.isActive == true) return
+        staleSweepJob = viewModelScope.launch {
+            while (isActive) {
+                delay(STALE_SWEEP_INTERVAL_MS)
+                val fresh = freshVehicles(_uiState.value.activeVehicles)
+                if (fresh.size != _uiState.value.activeVehicles.size) {
+                    _uiState.value = _uiState.value.copy(activeVehicles = fresh)
+                }
             }
         }
     }
 
-    private fun applyVehicleEvent(event: com.safar.app.data.realtime.RealtimeVehicleEvent) {
-        val route = _uiState.value.selectedRoute ?: return
-        if (route.id != event.routeId) return
+    private fun freshVehicles(vehicles: List<Vehicle>): List<Vehicle> =
+        vehicles.filter { isFresh(it.currentLocation?.timestampEpochMs) }
 
-        if (event.location == null) {
-            _uiState.value = _uiState.value.copy(
-                vehicleLocations = _uiState.value.vehicleLocations.filterNot { it.first.id == event.vehicleId }
-            )
-            return
-        }
+    private fun isFresh(timestampEpochMs: Long?): Boolean {
+        if (timestampEpochMs == null || timestampEpochMs <= 0L) return false
+        return System.currentTimeMillis() - timestampEpochMs <= LOCATION_FRESHNESS_MS
+    }
 
-        if (!isFresh(event.location.timestampEpochMs)) {
-            _uiState.value = _uiState.value.copy(
-                vehicleLocations = _uiState.value.vehicleLocations.filterNot { it.first.id == event.vehicleId }
-            )
-            return
-        }
+    fun onLocationPermissionResult(granted: Boolean) {
+        _uiState.value = _uiState.value.copy(locationPermissionRequired = !granted)
+        if (granted) startLocationUpdates() else stopLocationUpdates()
+    }
 
-        viewModelScope.launch {
-            val vehicle = vehicleRepository.findById(event.vehicleId) ?: return@launch
-            val updated = _uiState.value.vehicleLocations.filterNot { it.first.id == vehicle.id } + (vehicle to event.location)
-            _uiState.value = _uiState.value.copy(vehicleLocations = updated)
-        }
+    fun refreshLocationPermissionState() {
+        val granted = ContextCompat.checkSelfPermission(
+            getApplication(),
+            Manifest.permission.ACCESS_FINE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(
+            getApplication(),
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+        onLocationPermissionResult(granted)
     }
 
     private fun startLocationUpdates() {
-        locationJob?.cancel()
-        if (!hasLocationPermission()) return
-        locationJob = viewModelScope.launch {
-            try {
-                locationProvider.locationSamples().collectLatest { sample ->
-                    _uiState.value = _uiState.value.copy(passengerLocation = sample.point)
-                }
-            } catch (_: CancellationException) {
-                throw
-            } catch (_: Exception) {
-                scheduleLocationRetry()
-            }
+        if (locationJob != null) return
+        locationProvider.lastKnownLocation { point ->
+            if (point != null) _uiState.value = _uiState.value.copy(passengerLocation = point)
         }
-    }
-
-    private fun restartLocationUpdates() {
-        startLocationUpdates()
-    }
-
-    private fun scheduleLocationRetry() {
-        locationRetryJob?.cancel()
-        locationRetryJob = viewModelScope.launch {
-            while (isActive && hasLocationPermission()) {
-                delay(2_000L)
-                startLocationUpdates()
-                requestCurrentLocation()
-                if (_uiState.value.passengerLocation != null) break
-            }
-        }
-    }
-
-    private fun requestCurrentLocation() {
-        if (!hasLocationPermission()) return
         locationProvider.currentLocation { point ->
-            if (point != null) {
+            if (point != null) _uiState.value = _uiState.value.copy(passengerLocation = point)
+        }
+        locationJob = viewModelScope.launch {
+            locationProvider.locations().collect { point ->
                 _uiState.value = _uiState.value.copy(passengerLocation = point)
-            } else {
-                LocationServices.getFusedLocationProviderClient(getApplication<Application>())
-                    .lastLocation
-                    .addOnSuccessListener { location ->
-                        if (location != null) {
-                            _uiState.value = _uiState.value.copy(
-                                passengerLocation = GeoPoint(location.latitude, location.longitude)
-                            )
-                        }
-                    }
             }
         }
-    }
-
-    private fun startHeading() {
         headingJob?.cancel()
         headingJob = viewModelScope.launch {
-            try {
-                locationProvider.headingDegrees().collectLatest { heading ->
-                    _uiState.value = _uiState.value.copy(headingDegrees = heading)
-                }
-            } catch (_: CancellationException) {
-                throw
-            } catch (_: Exception) {
+            locationProvider.headingDegrees().collect { heading ->
+                _uiState.value = _uiState.value.copy(headingDegrees = heading)
+            }
+        }
+    }
+
+    private fun stopLocationUpdates() {
+        locationJob?.cancel()
+        locationJob = null
+        headingJob?.cancel()
+        headingJob = null
+    }
+
+    fun refreshPassengerLocation() {
+        refreshLocationPermissionState()
+        if (_uiState.value.locationPermissionRequired) return
+
+        locationProvider.currentLocation { point ->
+            if (point != null) {
+                _uiState.value = _uiState.value.copy(
+                    passengerLocation = point,
+                    locateRequestId = _uiState.value.locateRequestId + 1L,
+                )
             }
         }
     }
 
     override fun onCleared() {
+        stopLocationUpdates()
         realtimeJob?.cancel()
-        locationJob?.cancel()
-        headingJob?.cancel()
-        locationRetryJob?.cancel()
+        staleSweepJob?.cancel()
+        vehicleRefreshJob?.cancel()
         realtimeTransport.disconnect()
         super.onCleared()
     }
 
-    private fun hasLocationPermission(): Boolean =
-        ContextCompat.checkSelfPermission(getApplication(), Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
-            ContextCompat.checkSelfPermission(getApplication(), Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-
-    private fun isFresh(timestampEpochMs: Long): Boolean =
-        timestampEpochMs > 0L && System.currentTimeMillis() - timestampEpochMs <= LOCATION_FRESHNESS_MS
-
-    private fun Throwable.userMessage(): String = message?.takeIf { it.isNotBlank() } ?: "Не удалось загрузить данные"
-
     private companion object {
-        const val LOCATION_FRESHNESS_MS = 60_000L
+        const val LOCATION_FRESHNESS_MS = 25_000L
+        const val STALE_SWEEP_INTERVAL_MS = 5_000L
     }
 }
