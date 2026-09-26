@@ -1,0 +1,51 @@
+{
+  "project": "Safar",
+  "stage": "driver-work-session",
+  "modules": [
+    "app"
+  ],
+  "navigation": [
+    "language",
+    "role",
+    "passenger registration",
+    "driver registration",
+    "passenger placeholder",
+    "driver placeholder"
+  ],
+  "implemented": [
+    "domain models",
+    "repository contracts and stubs",
+    "API boundary",
+    "location boundary",
+    "realtime boundary",
+    "Material 3 theme",
+    "foundation screen",
+    "language localization (ru/en/tg)",
+    "role selection state",
+    "local registration state",
+    "first-launch persistence",
+    "onboarding UI",
+    "Passenger/Driver role illustrations",
+    "Supabase/PostgreSQL backend contract and migration",
+    "Supabase Auth anonymous session for RLS identity",
+    "RLS policies and controlled RPC operations",
+    "Supabase-backed repositories",
+    "driver route assignment from Supabase",
+    "driver work session lifecycle",
+    "wall-clock work-session timer with pause accounting",
+    "driver home loading/error/empty states"
+  ],
+  "not_implemented": [
+    "map",
+    "GPS",
+    "background location",
+    "foreground service",
+    "realtime transport",
+    "ETA",
+    "favorites",
+    "profile",
+    "statistics"
+  ],
+  "api_base_url": "Supabase project URL supplied through SUPABASE_URL",
+  "package": "com.safar.app"
+}
