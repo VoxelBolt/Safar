@@ -166,25 +166,8 @@ class AndroidLocationProvider(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun currentLocationSample(onResult: (LocationSample?) -> Unit) {
-        val delivered = booleanArrayOf(false)
-
-        fun deliver(location: Location?) {
-            if (!delivered[0]) {
-                delivered[0] = true
-                onResult(location?.takeIf { it.latitude.isFinite() && it.longitude.isFinite() }?.toLocationSample())
-            }
-        }
-
-        fusedClient.getCurrentLocation(
-            Priority.PRIORITY_HIGH_ACCURACY,
-            CancellationTokenSource().token,
-        ).addOnSuccessListener { location ->
-            deliver(location)
-        }.addOnFailureListener {
-            deliver(null)
-        }
-
-        // Fallback for devices where FusedLocationProvider does not return a fix.
+        // Immediately expose the best cached fix, then allow the fresh Fused fix
+        // to replace it. The fresh callback is intentionally not suppressed.
         val gps = runCatching {
             locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
         }.getOrNull()
@@ -192,9 +175,23 @@ class AndroidLocationProvider(private val context: Context) {
             locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
         }.getOrNull()
         val fallback = listOfNotNull(gps, network).maxByOrNull { it.elapsedRealtimeNanos }
-        if (fallback != null) deliver(fallback)
-    }
 
+        if (fallback != null && fallback.latitude.isFinite() && fallback.longitude.isFinite()) {
+            onResult(fallback.toLocationSample())
+        }
+
+        fusedClient.getCurrentLocation(
+            Priority.PRIORITY_HIGH_ACCURACY,
+            CancellationTokenSource().token,
+        ).addOnSuccessListener { location ->
+            Log.d(TAG, "getCurrentLocation result: ${location?.latitude},${location?.longitude}")
+            if (location != null && location.latitude.isFinite() && location.longitude.isFinite()) {
+                onResult(location.toLocationSample())
+            }
+        }.addOnFailureListener { error ->
+            Log.w(TAG, "getCurrentLocation failed", error)
+        }
+    }
     @SuppressLint("MissingPermission")
     fun lastKnownLocation(onResult: (GeoPoint?) -> Unit) {
         val candidates = listOfNotNull(
