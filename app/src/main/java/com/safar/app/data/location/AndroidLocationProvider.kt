@@ -12,6 +12,8 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Looper
+import android.content.Intent
+import android.provider.Settings
 import android.view.Surface
 import android.view.WindowManager
 import com.google.android.gms.location.LocationCallback
@@ -202,6 +204,22 @@ class AndroidLocationProvider(private val context: Context) {
         if (cached != null && cached.latitude.isFinite() && cached.longitude.isFinite()) {
             Log.d(TAG, "LocationManager cached fix: ${cached.latitude},${cached.longitude} accuracy=${cached.accuracy}")
             onResult(cached.toLocationSample())
+        }
+
+        // If the phone-wide Location switch is off, no provider can produce
+        // a coordinate. Open the system Location settings immediately instead
+        // of silently returning null.
+        if (!locationEnabled) {
+            Log.w(TAG, "Location services are disabled - opening system Location settings")
+            runCatching {
+                context.startActivity(
+                    Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }.onFailure {
+                Log.e(TAG, "Could not open Location settings", it)
+            }
+            return
         }
 
         // On Android 11+ ask Android's own location manager for a fresh fix.
