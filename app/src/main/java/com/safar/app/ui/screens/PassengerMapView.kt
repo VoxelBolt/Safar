@@ -1,7 +1,6 @@
 package com.safar.app.ui.screens
 
 import android.content.Context
-import android.location.Location
 import android.os.Bundle
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -38,10 +37,6 @@ import com.safar.app.ui.theme.SafarWhite
 import kotlinx.coroutines.delay
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
-import org.maplibre.android.location.LocationComponent
-import org.maplibre.android.location.LocationComponentActivationOptions
-import org.maplibre.android.location.LocationComponentOptions
-import org.maplibre.android.location.modes.RenderMode
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapView
@@ -85,6 +80,8 @@ private const val ROUTE_STATION_CIRCLE_LAYER_ID = "safar-route-station-circle-la
 private const val ROUTE_STATION_LABEL_LAYER_ID = "safar-route-station-label-layer"
 private const val USER_HEADING_SOURCE_ID = "safar-user-heading-source"
 private const val USER_HEADING_LAYER_ID = "safar-user-heading-layer"
+private const val USER_LOCATION_SOURCE_ID = "safar-user-location-source"
+private const val USER_LOCATION_LAYER_ID = "safar-user-location-layer"
 private const val VEHICLES_SOURCE_ID = "safar-vehicles-source"
 private const val VEHICLES_LAYER_ID = "safar-vehicles-layer"
 private const val VEHICLE_LABEL_LAYER_ID = "safar-vehicle-label-layer"
@@ -123,7 +120,6 @@ internal fun PassengerMapView(
     val lifecycleOwner = LocalLifecycleOwner.current
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
     var styleReady by remember { mutableStateOf(false) }
-    var locationComponent by remember { mutableStateOf<LocationComponent?>(null) }
     var centeredOnUser by remember { mutableStateOf(false) }
     var lastCameraRouteId by remember { mutableStateOf<String?>(null) }
 
@@ -148,8 +144,6 @@ internal fun PassengerMapView(
         if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) mapView.onResume()
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            locationComponent?.onDestroy()
-            locationComponent = null
             mapView.onPause()
             mapView.onStop()
             mapView.onDestroy()
@@ -169,7 +163,6 @@ internal fun PassengerMapView(
                         loadedMap.uiSettings.isTiltGesturesEnabled = true
                         loadedMap.setStyle(Style.Builder().fromUri(OPEN_FREE_MAP_STYLE)) { style ->
                             setupMapLayers(style)
-                            locationComponent = loadedMap.locationComponent
                             styleReady = true
                             loadedMap.cameraPosition = CameraPosition.Builder()
                                 .target(LatLng(DEFAULT_LATITUDE, DEFAULT_LONGITUDE))
@@ -181,16 +174,8 @@ internal fun PassengerMapView(
             },
             update = {
                 if (styleReady) {
-                    passengerLocation?.let { point ->
-                        val mapLocation = Location("safar").apply {
-                            latitude = point.latitude
-                            longitude = point.longitude
-                            accuracy = 5f
-                            headingDegrees?.let { bearing = it }
-                        }
-                        locationComponent?.takeIf { it.isLocationComponentActivated() }?.forceLocationUpdate(mapLocation)
-                    }
                     map?.style?.let { style ->
+                        updateUserLocation(style, passengerLocation)
                         updateRoute(style, route, routeOpacity)
                         updateRouteStation(style, route)
                         updateHeadingSector(style, passengerLocation, headingDegrees)
@@ -229,60 +214,10 @@ internal fun PassengerMapView(
         }
     }
 
-    LaunchedEffect(styleReady, locationPermissionGranted) {
-        if (!styleReady) return@LaunchedEffect
-        val component = locationComponent ?: return@LaunchedEffect
-        if (!locationPermissionGranted) {
-            if (component.isLocationComponentActivated()) {
-                component.isLocationComponentEnabled = false
-            }
-            return@LaunchedEffect
-        }
-        val currentStyle = map?.style ?: return@LaunchedEffect
-        if (!component.isLocationComponentActivated()) {
-            val locationOptions = LocationComponentOptions.builder(context)
-                .foregroundTintColor(SafarBlue.toArgb())
-                .backgroundTintColor(Color.White.toArgb())
-                .bearingTintColor(SafarBlue.toArgb())
-                .pulseEnabled(true)
-                .pulseColor(SafarBlue.toArgb())
-                .pulseAlpha(0.18f)
-                .build()
-            component.activateLocationComponent(
-                LocationComponentActivationOptions.builder(context, currentStyle)
-                    .locationComponentOptions(locationOptions)
-                    .useDefaultLocationEngine(false)
-                    .build()
-            )
-        }
-        component.isLocationComponentEnabled = true
-        component.setRenderMode(RenderMode.COMPASS)
-        passengerLocation?.let { point ->
-            if (component.isLocationComponentActivated()) {
-                component.forceLocationUpdate(
-                    Location("safar").apply {
-                        latitude = point.latitude
-                        longitude = point.longitude
-                        accuracy = 5f
-                        headingDegrees?.let { bearing = it }
-                    }
-                )
-            }
-        }
-    }
-
     LaunchedEffect(styleReady, route, passengerLocation, headingDegrees, vehicleLocations) {
         if (!styleReady) return@LaunchedEffect
-        passengerLocation?.let { point ->
-            val mapLocation = Location("safar").apply {
-                latitude = point.latitude
-                longitude = point.longitude
-                accuracy = 5f
-                headingDegrees?.let { bearing = it }
-            }
-            locationComponent?.takeIf { it.isLocationComponentActivated() }?.forceLocationUpdate(mapLocation)
-        }
         map?.style?.let { style ->
+            updateUserLocation(style, passengerLocation)
             updateRoute(style, route, routeOpacity)
             updateRouteStation(style, route)
             updateHeadingSector(style, passengerLocation, headingDegrees)
@@ -360,6 +295,9 @@ private fun setupMapLayers(style: Style) {
     if (style.getSource(USER_HEADING_SOURCE_ID) == null) {
         style.addSource(GeoJsonSource(USER_HEADING_SOURCE_ID, FeatureCollection.fromFeatures(emptyArray<Feature>())))
     }
+    if (style.getSource(USER_LOCATION_SOURCE_ID) == null) {
+        style.addSource(GeoJsonSource(USER_LOCATION_SOURCE_ID, FeatureCollection.fromFeatures(emptyArray<Feature>())))
+    }
     if (style.getSource(VEHICLES_SOURCE_ID) == null) {
         style.addSource(GeoJsonSource(VEHICLES_SOURCE_ID, FeatureCollection.fromFeatures(emptyArray<Feature>())))
     }
@@ -411,6 +349,16 @@ private fun setupMapLayers(style: Style) {
             )
         )
     }
+    if (style.getLayer(USER_LOCATION_LAYER_ID) == null) {
+        style.addLayer(
+            CircleLayer(USER_LOCATION_LAYER_ID, USER_LOCATION_SOURCE_ID).withProperties(
+                circleColor(SafarBlue.toArgb()),
+                circleRadius(8f),
+                circleStrokeColor(Color.White.toArgb()),
+                circleStrokeWidth(2.5f),
+            )
+        )
+    }
     if (style.getLayer(VEHICLES_LAYER_ID) == null) {
         style.addLayer(
             CircleLayer(VEHICLES_LAYER_ID, VEHICLES_SOURCE_ID).withProperties(
@@ -434,6 +382,19 @@ private fun setupMapLayers(style: Style) {
             )
         )
     }
+}
+
+private fun updateUserLocation(style: Style, point: GeoPoint?) {
+    val source = style.getSourceAs<GeoJsonSource>(USER_LOCATION_SOURCE_ID) ?: return
+    if (point == null) {
+        source.setGeoJson(FeatureCollection.fromFeatures(emptyArray<Feature>()))
+        return
+    }
+    source.setGeoJson(
+        FeatureCollection.fromFeature(
+            Feature.fromGeometry(Point.fromLngLat(point.longitude, point.latitude))
+        )
+    )
 }
 
 private fun updateRoute(style: Style, route: Route?, opacity: Float) {
