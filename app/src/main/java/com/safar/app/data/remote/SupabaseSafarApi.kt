@@ -363,6 +363,6 @@ class SupabaseSafarApi(
         vehicleId = vehicleId,
         latitude = latitude,
         longitude = longitude,
-        timestampEpochMs = Instant.parse(recordedAt).toEpochMilli(),
+        timestampEpochMs = parseTimestamp(recordedAt),
     )
 }
