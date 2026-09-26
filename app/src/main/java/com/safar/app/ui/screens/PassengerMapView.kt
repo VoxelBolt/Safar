@@ -28,6 +28,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.safar.app.domain.model.GeoPoint
+import com.safar.app.domain.model.PassengerLocation
 import com.safar.app.domain.model.Route
 import com.safar.app.domain.model.Vehicle
 import com.safar.app.domain.model.VehicleLocation
@@ -101,6 +102,7 @@ internal fun PassengerMapView(
     locationPermissionGranted: Boolean,
     locateRequestId: Long = 0L,
     vehicleLocations: List<Pair<Vehicle, VehicleLocation>>,
+    passengerLocations: List<PassengerLocation> = emptyList(),
     onLocateUser: () -> Unit = {},
     routeOpacity: Float = 0.78f,
     modifier: Modifier = Modifier,
@@ -365,10 +367,6 @@ private fun setupMapLayers(style: Style) {
         style.addSource(GeoJsonSource(ROUTE_STATION_SOURCE_ID, FeatureCollection.fromFeatures(emptyArray<Feature>())))
     }
 
-    if (style.getImage(VEHICLE_ICON_IMAGE_ID) == null) {
-        style.addImage(VEHICLE_ICON_IMAGE_ID, createVehicleMarkerBitmap())
-    }
-
     if (style.getLayer(ROUTE_CASING_LAYER_ID) == null) {
         style.addLayer(
             LineLayer(ROUTE_CASING_LAYER_ID, ROUTE_SOURCE_ID).withProperties(
@@ -415,18 +413,18 @@ private fun setupMapLayers(style: Style) {
     }
     if (style.getLayer(VEHICLES_LAYER_ID) == null) {
         style.addLayer(
-            SymbolLayer(VEHICLES_LAYER_ID, VEHICLES_SOURCE_ID).withProperties(
-                org.maplibre.android.style.layers.PropertyFactory.iconImage(VEHICLE_ICON_IMAGE_ID),
-                org.maplibre.android.style.layers.PropertyFactory.iconSize(0.75f),
-                org.maplibre.android.style.layers.PropertyFactory.iconAllowOverlap(true),
-                org.maplibre.android.style.layers.PropertyFactory.iconIgnorePlacement(true),
+            CircleLayer(VEHICLES_LAYER_ID, VEHICLES_SOURCE_ID).withProperties(
+                circleColor(SafarBlue.toArgb()),
+                circleRadius(8f),
+                circleStrokeColor(Color.White.toArgb()),
+                circleStrokeWidth(2f),
             )
         )
     }
     if (style.getLayer(VEHICLE_LABEL_LAYER_ID) == null) {
         style.addLayer(
             SymbolLayer(VEHICLE_LABEL_LAYER_ID, VEHICLES_SOURCE_ID).withProperties(
-                textField("{vehicle_number}"),
+                textField("{identifier}"),
                 textSize(12f),
                 textColor(Color.White.toArgb()),
                 textHaloColor(Color.Black.toArgb()),
@@ -499,15 +497,12 @@ private fun updateVehicles(
     routeNumber: String?,
 ) {
     val source = style.getSourceAs<GeoJsonSource>(VEHICLES_SOURCE_ID) ?: return
-    val filtered = locations.filter { (vehicle, _) ->
-        routeNumber == null || vehicle.routeId != null && vehicle.routeId == routeNumber
-    }
-    val features = filtered.map { (vehicle, location) ->
+    val features = locations.map { (vehicle, location) ->
         Feature.fromGeometry(
             Point.fromLngLat(location.longitude, location.latitude)
         ).apply {
             addStringProperty("vehicle_id", vehicle.id)
-            addStringProperty("vehicle_number", vehicle.number)
+            addStringProperty("identifier", vehicle.identifier)
         }
     }
     source.setGeoJson(FeatureCollection.fromFeatures(features.toTypedArray()))
