@@ -50,6 +50,7 @@ import org.maplibre.android.style.layers.PropertyFactory.circleColor
 import org.maplibre.android.style.layers.PropertyFactory.circleRadius
 import org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor
 import org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth
+import org.maplibre.android.style.layers.PropertyFactory.circleOpacity
 import org.maplibre.android.style.layers.PropertyFactory.fillColor
 import org.maplibre.android.style.layers.PropertyFactory.fillOpacity
 import org.maplibre.android.style.layers.PropertyFactory.lineCap
@@ -81,7 +82,8 @@ private const val ROUTE_STATION_LABEL_LAYER_ID = "safar-route-station-label-laye
 private const val USER_HEADING_SOURCE_ID = "safar-user-heading-source"
 private const val USER_HEADING_LAYER_ID = "safar-user-heading-layer"
 private const val USER_LOCATION_SOURCE_ID = "safar-user-location-source"
-private const val USER_LOCATION_LAYER_ID = "safar-user-location-layer"
+private const val USER_LOCATION_CIRCLE_LAYER_ID = "safar-user-location-circle-layer"
+private const val USER_LOCATION_PULSE_LAYER_ID = "safar-user-location-pulse-layer"
 private const val VEHICLES_SOURCE_ID = "safar-vehicles-source"
 private const val VEHICLES_LAYER_ID = "safar-vehicles-layer"
 private const val VEHICLE_LABEL_LAYER_ID = "safar-vehicle-label-layer"
@@ -349,11 +351,20 @@ private fun setupMapLayers(style: Style) {
             )
         )
     }
-    if (style.getLayer(USER_LOCATION_LAYER_ID) == null) {
+    if (style.getLayer(USER_LOCATION_PULSE_LAYER_ID) == null) {
         style.addLayer(
-            CircleLayer(USER_LOCATION_LAYER_ID, USER_LOCATION_SOURCE_ID).withProperties(
+            CircleLayer(USER_LOCATION_PULSE_LAYER_ID, USER_LOCATION_SOURCE_ID).withProperties(
                 circleColor(SafarBlue.toArgb()),
-                circleRadius(8f),
+                circleRadius(16f),
+                circleOpacity(0.16f),
+            )
+        )
+    }
+    if (style.getLayer(USER_LOCATION_CIRCLE_LAYER_ID) == null) {
+        style.addLayer(
+            CircleLayer(USER_LOCATION_CIRCLE_LAYER_ID, USER_LOCATION_SOURCE_ID).withProperties(
+                circleColor(SafarBlue.toArgb()),
+                circleRadius(7f),
                 circleStrokeColor(Color.White.toArgb()),
                 circleStrokeWidth(2.5f),
             )
