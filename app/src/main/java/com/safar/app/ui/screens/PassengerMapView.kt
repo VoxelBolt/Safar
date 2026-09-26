@@ -1,6 +1,10 @@
 package com.safar.app.ui.screens
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.RectF
 import android.os.Bundle
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -51,6 +55,10 @@ import org.maplibre.android.style.layers.PropertyFactory.circleRadius
 import org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor
 import org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth
 import org.maplibre.android.style.layers.PropertyFactory.circleOpacity
+import org.maplibre.android.style.layers.PropertyFactory.iconAllowOverlap
+import org.maplibre.android.style.layers.PropertyFactory.iconIgnorePlacement
+import org.maplibre.android.style.layers.PropertyFactory.iconImage
+import org.maplibre.android.style.layers.PropertyFactory.iconSize
 import org.maplibre.android.style.layers.PropertyFactory.fillColor
 import org.maplibre.android.style.layers.PropertyFactory.fillOpacity
 import org.maplibre.android.style.layers.PropertyFactory.lineCap
@@ -86,7 +94,9 @@ private const val USER_LOCATION_CIRCLE_LAYER_ID = "safar-user-location-circle-la
 private const val USER_LOCATION_PULSE_LAYER_ID = "safar-user-location-pulse-layer"
 private const val VEHICLES_SOURCE_ID = "safar-vehicles-source"
 private const val VEHICLES_LAYER_ID = "safar-vehicles-layer"
+private const val VEHICLE_ICON_LAYER_ID = "safar-vehicle-icon-layer"
 private const val VEHICLE_LABEL_LAYER_ID = "safar-vehicle-label-layer"
+private const val VEHICLE_ICON_IMAGE_ID = "safar-vehicle-icon"
 
 private const val DEFAULT_LATITUDE = 40.2829
 private const val DEFAULT_LONGITUDE = 69.6228
@@ -165,7 +175,7 @@ internal fun PassengerMapView(
                         loadedMap.uiSettings.isRotateGesturesEnabled = true
                         loadedMap.uiSettings.isTiltGesturesEnabled = true
                         loadedMap.setStyle(Style.Builder().fromUri(OPEN_FREE_MAP_STYLE)) { style ->
-                            setupMapLayers(style)
+                            setupMapLayers(style, context)
                             styleReady = true
                             loadedMap.cameraPosition = CameraPosition.Builder()
                                 .target(LatLng(DEFAULT_LATITUDE, DEFAULT_LONGITUDE))
@@ -286,7 +296,7 @@ private fun rememberMapLibre(context: Context) {
     }
 }
 
-private fun setupMapLayers(style: Style) {
+private fun setupMapLayers(style: Style, context: Context) {
     if (style.getSource(ROUTE_SOURCE_ID) == null) {
         style.addSource(GeoJsonSource(ROUTE_SOURCE_ID, FeatureCollection.fromFeatures(emptyArray<Feature>())))
     }
@@ -357,6 +367,19 @@ private fun setupMapLayers(style: Style) {
             )
         )
     }
+    if (style.getImage(VEHICLE_ICON_IMAGE_ID) == null) {
+        style.addImage(VEHICLE_ICON_IMAGE_ID, createVehicleMarkerBitmap())
+    }
+    if (style.getLayer(VEHICLE_ICON_LAYER_ID) == null) {
+        style.addLayer(
+            SymbolLayer(VEHICLE_ICON_LAYER_ID, VEHICLES_SOURCE_ID).withProperties(
+                iconImage(VEHICLE_ICON_IMAGE_ID),
+                iconSize(0.72f),
+                iconAllowOverlap(true),
+                iconIgnorePlacement(true),
+            )
+        )
+    }
     if (style.getLayer(VEHICLE_LABEL_LAYER_ID) == null) {
         style.addLayer(
             SymbolLayer(VEHICLE_LABEL_LAYER_ID, VEHICLES_SOURCE_ID).withProperties(
@@ -390,6 +413,48 @@ private fun setupMapLayers(style: Style) {
             )
         )
     }
+}
+
+
+private fun createVehicleMarkerBitmap(): Bitmap {
+    val size = 96
+    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+
+    val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0x22000000
+        style = Paint.Style.FILL
+    }
+    canvas.drawCircle(size / 2f, size / 2f + 3f, 33f, shadowPaint)
+
+    val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = SafarBlue.toArgb()
+        style = Paint.Style.FILL
+    }
+    canvas.drawCircle(size / 2f, size / 2f, 31f, backgroundPaint)
+
+    val busPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.White.toArgb()
+        style = Paint.Style.FILL
+    }
+    canvas.drawRoundRect(
+        RectF(29f, 22f, 67f, 70f),
+        9f,
+        9f,
+        busPaint,
+    )
+
+    val windowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = SafarBlue.toArgb()
+        style = Paint.Style.FILL
+    }
+    canvas.drawRoundRect(RectF(34f, 28f, 62f, 44f), 3f, 3f, windowPaint)
+    canvas.drawRect(47f, 28f, 49f, 44f, busPaint)
+
+    canvas.drawCircle(38f, 66f, 5f, windowPaint)
+    canvas.drawCircle(58f, 66f, 5f, windowPaint)
+
+    return bitmap
 }
 
 private fun updateUserLocation(style: Style, point: GeoPoint?) {
