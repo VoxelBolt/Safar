@@ -193,7 +193,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
 
         vehicleRefreshJob?.cancel()
         vehicleRefreshJob = viewModelScope.launch {
-            runCatching { vehicleRepository.getActiveVehiclesForRoute(selectedRoute.id) }
+            runCatching { vehicleRepository.getVehiclesForRoute(selectedRoute.id) }
                 .onSuccess { vehicles ->
                     _uiState.value = _uiState.value.copy(
                         activeVehicles = freshVehicles(vehicles).map { it.copy(active = true) },
