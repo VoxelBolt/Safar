@@ -35,16 +35,23 @@ class AndroidLocationProvider(private val context: Context) {
     private val fusedClient = LocationServices.getFusedLocationProviderClient(context)
     private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
+    private val acceptedLocationLock = Any()
+    private var lastAcceptedLocation: Location? = null
+
     @SuppressLint("MissingPermission")
     fun locationSamples(): Flow<LocationSample> = callbackFlow {
         var emitted = false
 
         val listener = object : LocationListener {
             override fun onLocationChanged(location: Location) {
-                if (location.latitude.isFinite() && location.longitude.isFinite()) {
+                acceptLocation(location, "LocationManager")?.let { accepted ->
                     emitted = true
-                    Log.d(TAG, "LocationManager fix: ${location.latitude},${location.longitude} accuracy=${location.accuracy}")
-                    trySend(location.toLocationSample())
+                    Log.d(
+                        TAG,
+                        "LocationManager fix accepted: ${accepted.latitude},${accepted.longitude} " +
+                            "accuracy=${accepted.accuracy}"
+                    )
+                    trySend(accepted.toLocationSample())
                 }
             }
         }
@@ -56,9 +63,11 @@ class AndroidLocationProvider(private val context: Context) {
                 runCatching { locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) }
                     .getOrNull()?.let(::add)
             }
-            candidates.maxByOrNull { it.elapsedRealtimeNanos }?.let {
-                emitted = true
-                trySend(it.toLocationSample())
+            candidates.maxByOrNull { it.elapsedRealtimeNanos }?.let { candidate ->
+                acceptLocation(candidate, "last-known")?.let { accepted ->
+                    emitted = true
+                    trySend(accepted.toLocationSample())
+                }
             }
         }
 
@@ -89,7 +98,11 @@ class AndroidLocationProvider(private val context: Context) {
             }.onFailure { Log.w(TAG, "GPS requestLocationUpdates failed", it) }
         }
 
-        if (networkEnabled) {
+        // When fine GPS is available, do not mix the coarse network provider
+        // into the same stream. Network fixes are a common source of 50-100m
+        // jumps while the phone is stationary. Keep it only as a fallback
+        // when GPS/fine permission is unavailable.
+        if (networkEnabled && (!gpsEnabled || !hasFineLocationPermission())) {
             runCatching {
                 locationManager.requestLocationUpdates(
                     LocationManager.NETWORK_PROVIDER,
@@ -114,9 +127,15 @@ class AndroidLocationProvider(private val context: Context) {
             override fun onLocationResult(result: LocationResult) {
                 result.locations.maxByOrNull { it.elapsedRealtimeNanos }?.let {
                     if (it.latitude.isFinite() && it.longitude.isFinite()) {
-                        emitted = true
-                        Log.d(TAG, "Fused fix: ${it.latitude},${it.longitude} accuracy=${it.accuracy}")
-                        trySend(it.toLocationSample())
+                        acceptLocation(it, "Fused")?.let { accepted ->
+                            emitted = true
+                            Log.d(
+                                TAG,
+                                "Fused fix accepted: ${accepted.latitude},${accepted.longitude} " +
+                                    "accuracy=${accepted.accuracy}"
+                            )
+                            trySend(accepted.toLocationSample())
+                        }
                     }
                 }
             }
@@ -227,9 +246,13 @@ class AndroidLocationProvider(private val context: Context) {
         // FusedLocationProvider returns null without a cached location.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && locationEnabled) {
             val providers = buildList {
-                if (fine && gpsEnabled) add(LocationManager.GPS_PROVIDER)
-                if (networkEnabled) add(LocationManager.NETWORK_PROVIDER)
-                if (!fine && gpsEnabled) add(LocationManager.GPS_PROVIDER)
+                if (fine && gpsEnabled) {
+                    add(LocationManager.GPS_PROVIDER)
+                } else if (networkEnabled) {
+                    add(LocationManager.NETWORK_PROVIDER)
+                } else if (gpsEnabled) {
+                    add(LocationManager.GPS_PROVIDER)
+                }
             }.distinct()
 
             for (provider in providers) {
@@ -243,8 +266,10 @@ class AndroidLocationProvider(private val context: Context) {
                             TAG,
                             "LocationManager current fix provider=$provider result=${location?.latitude},${location?.longitude}"
                         )
-                        if (location != null && location.latitude.isFinite() && location.longitude.isFinite()) {
-                            onResult(location.toLocationSample())
+                        if (location != null) {
+                            acceptLocation(location, "current-${provider}")?.let { accepted ->
+                                onResult(accepted.toLocationSample())
+                            }
                         }
                     }
                 }.onFailure {
@@ -263,8 +288,10 @@ class AndroidLocationProvider(private val context: Context) {
             CancellationTokenSource().token,
         ).addOnSuccessListener { location ->
             Log.d(TAG, "Fused getCurrentLocation result: ${location?.latitude},${location?.longitude}")
-            if (location != null && location.latitude.isFinite() && location.longitude.isFinite()) {
-                onResult(location.toLocationSample())
+            if (location != null) {
+                acceptLocation(location, "fused-current")?.let { accepted ->
+                    onResult(accepted.toLocationSample())
+                }
             }
         }.addOnFailureListener { error ->
             Log.w(TAG, "Fused getCurrentLocation failed", error)
@@ -299,7 +326,79 @@ class AndroidLocationProvider(private val context: Context) {
             android.Manifest.permission.ACCESS_COARSE_LOCATION,
         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
-    private companion object { const val TAG = "SafarGPS" }
+    private companion object {
+        const val TAG = "SafarGPS"
+        const val MAX_ACCEPTED_ACCURACY_METERS = 65f
+    }
+
+
+    /**
+     * Rejects bad-accuracy fixes and physically implausible jumps. A much more
+     * accurate newer fix is allowed to replace a coarse previous fix (for
+     * example, GPS replacing a network location).
+     */
+    private fun acceptLocation(location: Location, source: String): Location? {
+        if (!location.latitude.isFinite() || !location.longitude.isFinite()) return null
+        if (location.hasAccuracy() && location.accuracy > MAX_ACCEPTED_ACCURACY_METERS) {
+            Log.d(TAG, "GPS fix rejected: source=$source accuracy=${location.accuracy}m")
+            return null
+        }
+
+        synchronized(acceptedLocationLock) {
+            val previous = lastAcceptedLocation
+            if (previous == null) {
+                lastAcceptedLocation = location
+                return location
+            }
+
+            val elapsedSeconds = (
+                (location.elapsedRealtimeNanos - previous.elapsedRealtimeNanos) / 1_000_000_000.0
+            )
+
+            if (elapsedSeconds <= 0.0) {
+                if (location.time <= previous.time) return null
+                lastAcceptedLocation = location
+                return location
+            }
+
+            val distanceMeters = previous.distanceTo(location)
+            val currentAccuracy = if (location.hasAccuracy()) location.accuracy.toDouble() else 0.0
+            val previousAccuracy = if (previous.hasAccuracy()) previous.accuracy.toDouble() else 0.0
+
+            // Let a clearly better GPS fix replace a coarse network/fused fix
+            // even if the two points are several metres apart.
+            if (
+                currentAccuracy > 0.0 &&
+                previousAccuracy > 0.0 &&
+                currentAccuracy + 5.0 < previousAccuracy
+            ) {
+                lastAcceptedLocation = location
+                return location
+            }
+
+            val maxPlausibleSpeed = 32.0 // ~115 km/h, above normal city minibus speed.
+            val allowedJump = max(
+                25.0,
+                maxPlausibleSpeed * elapsedSeconds +
+                    min(currentAccuracy, 25.0) +
+                    min(previousAccuracy, 25.0)
+            )
+
+            if (distanceMeters > allowedJump) {
+                Log.d(
+                    TAG,
+                    "GPS jump rejected: source=$source distance=${"%.1f".format(distanceMeters)}m " +
+                        "elapsed=${"%.2f".format(elapsedSeconds)}s " +
+                        "accuracy=${"%.1f".format(currentAccuracy)}m"
+                )
+                return null
+            }
+
+            lastAcceptedLocation = location
+            return location
+        }
+    }
+
 
     private fun Location.toGeoPoint() = GeoPoint(latitude, longitude)
     private fun Location.toLocationSample() = LocationSample(
