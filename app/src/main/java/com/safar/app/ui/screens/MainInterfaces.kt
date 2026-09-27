@@ -660,8 +660,7 @@ fun DriverMainScreen(state: OnboardingState) {
         foregroundLocationGranted = result[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
             result[Manifest.permission.ACCESS_COARSE_LOCATION] == true ||
             hasForegroundLocationPermission(context)
-        // Starting is driven by trackingReady below: GPS publishing starts when
-        // the driver actually begins an ACTIVE work session.
+        // GPS publishing starts as soon as the driver has permission and an assigned route; it is not tied to the timer.
     }
 
     androidx.compose.runtime.DisposableEffect(lifecycleOwner, trackingReady) {
