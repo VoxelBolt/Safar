@@ -142,10 +142,7 @@ internal fun PassengerMapView(
     var lastFocusedVehicleId by remember { mutableStateOf<String?>(null) }
     val vehicleMarkers = remember { mutableMapOf<String, Marker>() }
     val vehicleLocationStabilizer = remember(route?.id) { VehicleLocationStabilizer() }
-    val stabilizedVehicleLocations = vehicleLocationStabilizer.stabilize(
-        locations = vehicleLocations,
-        routePath = route?.path.orEmpty(),
-    )
+    val stabilizedVehicleLocations = vehicleLocationStabilizer.stabilize(vehicleLocations)
     val vehicleMarkerIcon = remember(context) {
         IconFactory.getInstance(context).fromBitmap(createVehicleMarkerBitmap())
     }
@@ -649,7 +646,7 @@ private fun snapLocationToRenderedRoad(
     // At the current zoom, ask MapLibre for visible road lines inside a box
     // corresponding to 20m around the raw GPS position.
     val metersPerPixel = runCatching {
-        map.getMetersPerPixelAtLatitude(location.latitude)
+        map.projection.getMetersPerPixelAtLatitude(location.latitude)
     }.getOrDefault(1.0).coerceAtLeast(0.1)
 
     val radiusPx = (20.0 / metersPerPixel)
