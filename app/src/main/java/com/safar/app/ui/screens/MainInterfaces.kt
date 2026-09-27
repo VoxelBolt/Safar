@@ -205,6 +205,7 @@ private fun PassengerMapScreen(
                 locateRequestId = ui.locateRequestId,
                 onLocateUser = viewModel::refreshPassengerLocation,
                 onShowNearestVehicle = viewModel::showNearestVehicleOnMap,
+                showNearestVehicleButton = true,
                 nearestVehicle = ui.nearestVehicle?.let { vehicle ->
                     vehicle.currentLocation?.let { location -> vehicle to location }
                 },
@@ -305,21 +306,7 @@ private fun PassengerMapScreen(
                                 color = Muted,
                             )
                         }
-                        if (ui.selectedRoute != null) {
-                            Surface(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clickable { viewModel.showNearestVehicleOnMap() },
-                                shape = CircleShape,
-                                color = SoftBlue,
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    SafarGlyph(Glyph.BUS, SafarBlue, 22.dp)
-                                }
-                            }
-                        } else {
-                            SafarGlyph(Glyph.CHEVRON, Muted, 22.dp)
-                        }
+                        SafarGlyph(Glyph.CHEVRON, Muted, 22.dp)
                     }
                     Spacer(Modifier.height(14.dp))
                     HorizontalDivider(color = Border)
@@ -865,6 +852,7 @@ private fun DriverHomeScreen(
                     }
                 }
             },
+            showNearestVehicleButton = false,
             vehicleLocations = emptyList(),
             passengerLocations = ui.passengerLocations,
             routeOpacity = 0.78f,
