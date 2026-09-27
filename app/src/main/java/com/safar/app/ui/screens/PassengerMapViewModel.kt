@@ -41,6 +41,7 @@ data class PassengerMapUiState(
     val nearestVehicleDistanceMeters: Double? = null,
     val nearestVehicleEtaMinutes: Int? = null,
     val nearestVehicleRequestId: Long = 0L,
+    val nearestVehicleTrackingEnabled: Boolean = false,
     val loadingRoutes: Boolean = false,
     val loadingVehicles: Boolean = false,
     val error: String? = null,
@@ -64,7 +65,6 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     private var headingJob: Job? = null
     private var locateRequestJob: Job? = null
     private var nearestVehicleRequestJob: Job? = null
-    private var nearestVehicleRefreshJob: Job? = null
 
     init {
         refreshLocationPermissionState()
