@@ -229,6 +229,10 @@ internal fun PassengerMapView(
                 onLocateUser()
             }
             Spacer(Modifier.size(8.dp))
+            MapControlButton("🚌") {
+                onShowNearestVehicle()
+            }
+            Spacer(Modifier.size(8.dp))
             MapControlButton("+") {
                 map?.animateCamera(CameraUpdateFactory.zoomIn())
             }
