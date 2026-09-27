@@ -175,7 +175,6 @@ class DriverLocationService : Service() {
             driverSnapshotLoadedAt = now
         }
         val driver = driverSnapshot.get() ?: error("Driver profile not found")
-        val routeId = driver.routeId ?: error("Driver route is not assigned yet")
         val timestamp = recordedAtIso ?: Instant.now().toString()
 
         // The database write is authoritative. Do not broadcast a location to
@@ -191,18 +190,6 @@ class DriverLocationService : Service() {
             "Vehicle location saved: vehicle=${driver.vehicleId} route=$routeId " +
                 "lat=$latitude lon=$longitude recordedAt=$timestamp",
         )
-
-        runCatching {
-            AppContainer.realtimeTransport.sendDriverLocation(
-                routeId = routeId,
-                vehicleId = driver.vehicleId,
-                latitude = latitude,
-                longitude = longitude,
-                recordedAtIso = timestamp,
-            )
-        }.onFailure { error ->
-            android.util.Log.w(TAG, "Realtime vehicle broadcast failed", error)
-        }
 
         updateNotification("Геопозиция передаётся пассажирам")
     }
