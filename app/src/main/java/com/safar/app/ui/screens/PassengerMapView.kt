@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.os.Bundle
 import androidx.compose.foundation.background
@@ -140,6 +141,11 @@ internal fun PassengerMapView(
     var lastCameraRouteId by remember { mutableStateOf<String?>(null) }
     var lastFocusedVehicleId by remember { mutableStateOf<String?>(null) }
     val vehicleMarkers = remember { mutableMapOf<String, Marker>() }
+    val vehicleLocationStabilizer = remember(route?.id) { VehicleLocationStabilizer() }
+    val stabilizedVehicleLocations = vehicleLocationStabilizer.stabilize(
+        locations = stabilizedVehicleLocations,
+        routePath = route?.path.orEmpty(),
+    )
     val vehicleMarkerIcon = remember(context) {
         IconFactory.getInstance(context).fromBitmap(createVehicleMarkerBitmap())
     }
@@ -177,7 +183,7 @@ internal fun PassengerMapView(
                 mapView.apply {
                     getMapAsync { loadedMap ->
                         map = loadedMap
-                        syncVehicleMarkers(loadedMap, vehicleLocations, vehicleMarkerIcon, vehicleMarkers)
+                        syncVehicleMarkers(loadedMap, stabilizedVehicleLocations, vehicleMarkerIcon, vehicleMarkers)
                         loadedMap.uiSettings.isCompassEnabled = false
                         loadedMap.uiSettings.isScrollGesturesEnabled = true
                         loadedMap.uiSettings.isZoomGesturesEnabled = true
@@ -201,10 +207,10 @@ internal fun PassengerMapView(
                         updateRoute(style, route, routeOpacity)
                         updateRouteStation(style, route)
                         updateHeadingSector(style, passengerLocation, headingDegrees)
-                        updateVehicles(style, vehicleLocations, route?.number)
+                        updateVehicles(style, stabilizedVehicleLocations)
                     }
                     map?.let { loadedMap ->
-                        syncVehicleMarkers(loadedMap, vehicleLocations, vehicleMarkerIcon, vehicleMarkers)
+                        syncVehicleMarkers(loadedMap, stabilizedVehicleLocations, vehicleMarkerIcon, vehicleMarkers)
                     }
                 }
             },
@@ -231,13 +237,13 @@ internal fun PassengerMapView(
         }
     }
 
-    LaunchedEffect(styleReady, route, passengerLocation, headingDegrees, vehicleLocations) {
+    LaunchedEffect(styleReady, route, passengerLocation, headingDegrees, stabilizedVehicleLocations) {
         if (!styleReady) return@LaunchedEffect
         map?.style?.let { style ->
             updateRoute(style, route, routeOpacity)
             updateRouteStation(style, route)
             updateHeadingSector(style, passengerLocation, headingDegrees)
-            updateVehicles(style, vehicleLocations, route?.number)
+            updateVehicles(style, stabilizedVehicleLocations, route?.number)
             updateUserLocation(style, passengerLocation)
         }
 
@@ -245,7 +251,7 @@ internal fun PassengerMapView(
         // This is route-agnostic: route 3, 8, 15, etc. all use the same live
         // vehicle list. Passenger location is used only when there is no active
         // vehicle to focus.
-        val vehicle = vehicleLocations.firstOrNull()
+        val vehicle = stabilizedVehicleLocations.firstOrNull()
         if (vehicle != null && vehicle.first.id != lastFocusedVehicleId) {
             map?.animateCamera(
                 CameraUpdateFactory.newLatLngZoom(
@@ -266,14 +272,14 @@ internal fun PassengerMapView(
         }
     }
 
-    LaunchedEffect(styleReady, route?.id, vehicleLocations) {
+    LaunchedEffect(styleReady, route?.id, stabilizedVehicleLocations) {
         if (!styleReady || route == null || route.id == lastCameraRouteId) return@LaunchedEffect
 
         // If a live vehicle exists, the vehicle-camera effect above owns the
         // camera. Never move the map back to the route midpoint afterwards.
         // Otherwise the active vehicle can be rendered outside the viewport,
         // which makes the marker look like it disappeared.
-        if (vehicleLocations.isNotEmpty()) {
+        if (stabilizedVehicleLocations.isNotEmpty()) {
             lastCameraRouteId = route.id
             return@LaunchedEffect
         }
@@ -412,7 +418,7 @@ private fun setupMapLayers(style: Style, context: Context) {
     style.addLayer(
         SymbolLayer(VEHICLE_ICON_LAYER_ID, VEHICLES_SOURCE_ID).withProperties(
             iconImage(VEHICLE_ICON_IMAGE_ID),
-            iconSize(1.15f),
+            iconSize(0.95f),
             iconAllowOverlap(true),
             iconIgnorePlacement(true),
         )
@@ -454,28 +460,58 @@ private fun setupMapLayers(style: Style, context: Context) {
 
 
 private fun createVehicleMarkerBitmap(): Bitmap {
-    val size = 96
-    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val width = 112
+    val height = 128
+    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
+    val centerX = width / 2f
 
     val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0x22000000
+        color = 0x33000000
         style = Paint.Style.FILL
     }
-    canvas.drawCircle(size / 2f, size / 2f + 3f, 33f, shadowPaint)
+    canvas.drawOval(
+        RectF(centerX - 24f, height - 17f, centerX + 24f, height - 5f),
+        shadowPaint,
+    )
 
-    val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    val pinPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = SafarBlue.toArgb()
         style = Paint.Style.FILL
     }
-    canvas.drawCircle(size / 2f, size / 2f, 31f, backgroundPaint)
+
+    val pin = Path().apply {
+        moveTo(centerX, height - 8f)
+        cubicTo(
+            centerX - 8f, height - 24f,
+            22f, 72f,
+            22f, 50f,
+        )
+        cubicTo(
+            22f, 27f,
+            39f, 10f,
+            centerX, 10f,
+        )
+        cubicTo(
+            73f, 10f,
+            90f, 27f,
+            90f, 50f,
+        )
+        cubicTo(
+            90f, 72f,
+            centerX + 8f, height - 24f,
+            centerX, height - 8f,
+        )
+        close()
+    }
+    canvas.drawPath(pin, pinPaint)
 
     val busPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.White.toArgb()
         style = Paint.Style.FILL
     }
     canvas.drawRoundRect(
-        RectF(29f, 22f, 67f, 70f),
+        RectF(35f, 29f, 77f, 76f),
         9f,
         9f,
         busPaint,
@@ -485,11 +521,16 @@ private fun createVehicleMarkerBitmap(): Bitmap {
         color = SafarBlue.toArgb()
         style = Paint.Style.FILL
     }
-    canvas.drawRoundRect(RectF(34f, 28f, 62f, 44f), 3f, 3f, windowPaint)
-    canvas.drawRect(47f, 28f, 49f, 44f, busPaint)
+    canvas.drawRoundRect(
+        RectF(40f, 35f, 72f, 51f),
+        3f,
+        3f,
+        windowPaint,
+    )
+    canvas.drawRect(54f, 35f, 57f, 51f, busPaint)
 
-    canvas.drawCircle(38f, 66f, 5f, windowPaint)
-    canvas.drawCircle(58f, 66f, 5f, windowPaint)
+    canvas.drawCircle(44f, 70f, 5f, windowPaint)
+    canvas.drawCircle(68f, 70f, 5f, windowPaint)
 
     return bitmap
 }
@@ -587,6 +628,7 @@ private fun syncVehicleMarkers(
                 MarkerOptions()
                     .position(position)
                     .icon(icon)
+                    .anchor(0.5f, 1.0f)
                     .title(vehicle.identifier)
             )
         } else {
@@ -599,7 +641,6 @@ private fun syncVehicleMarkers(
 private fun updateVehicles(
     style: Style,
     locations: List<Pair<Vehicle, VehicleLocation>>,
-    routeNumber: String?,
 ) {
     val source = style.getSourceAs<GeoJsonSource>(VEHICLES_SOURCE_ID) ?: return
     val features = locations.map { (vehicle, location) ->
