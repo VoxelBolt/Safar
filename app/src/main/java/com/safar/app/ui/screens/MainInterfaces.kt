@@ -710,6 +710,7 @@ fun DriverMainScreen(state: OnboardingState) {
                 onPauseWork = driverViewModel::pauseWork,
                 onResumeWork = driverViewModel::resumeWork,
                 onFinishWork = driverViewModel::finishWork,
+                onPublishDriverLocation = driverViewModel::publishDriverLocation,
                 foregroundLocationGranted = foregroundLocationGranted,
                 onRequestTrackingPermission = ::requestDriverTrackingPermission,
                 modifier = Modifier.padding(padding),
@@ -729,6 +730,7 @@ private fun DriverHomeScreen(
     onPauseWork: () -> Unit,
     onResumeWork: () -> Unit,
     onFinishWork: () -> Unit,
+    onPublishDriverLocation: (GeoPoint) -> Unit,
     foregroundLocationGranted: Boolean,
     onRequestTrackingPermission: () -> Unit,
     modifier: Modifier = Modifier,
@@ -761,7 +763,7 @@ private fun DriverHomeScreen(
                 if (sample != null) {
                     driverLocation = sample.point
                     driverLocateRequestId += 1L
-                    driverViewModel.publishDriverLocation(sample.point)
+                    onPublishDriverLocation(sample.point)
                 }
             }
             delay(5_000L)
