@@ -7,6 +7,7 @@ import android.graphics.Paint
 import android.graphics.PointF
 import android.graphics.RectF
 import android.os.Bundle
+import org.json.JSONObject
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -31,6 +32,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
+import java.net.URL
 import com.safar.app.domain.model.GeoPoint
 import com.safar.app.domain.model.PassengerLocation
 import com.safar.app.domain.model.Route
@@ -104,29 +109,6 @@ private const val VEHICLE_ICON_LAYER_ID = "safar-vehicle-icon-layer"
 private const val VEHICLE_LABEL_LAYER_ID = "safar-vehicle-label-layer"
 private const val VEHICLE_ICON_IMAGE_ID = "safar-vehicle-icon"
 
-// OpenFreeMap Liberty road layers. Querying these layers directly is much more
-// reliable than probing arbitrary rendered pixels: the 20m search box can see
-// the actual transportation LineString even when the road is only a few pixels
-// wide on screen.
-private val ROAD_LAYER_IDS = arrayOf(
-    "road_minor",
-    "road_service",
-    "road_track",
-    "road_minor_casing",
-    "road_service_track",
-    "road_service_track_casing",
-    "road_link",
-    "road_link_casing",
-    "road_secondary_tertiary",
-    "road_secondary_tertiary_casing",
-    "road_trunk_primary",
-    "road_trunk_primary_casing",
-    "road_motorway",
-    "road_motorway_casing",
-    "road_motorway_link",
-    "road_motorway_link_casing",
-)
-
 private const val DEFAULT_LATITUDE = 40.2829
 private const val DEFAULT_LONGITUDE = 69.6228
 private const val DEFAULT_ZOOM = 12.0
@@ -168,6 +150,7 @@ internal fun PassengerMapView(
     val vehicleMarkers = remember { mutableMapOf<String, Marker>() }
     val vehicleLocationStabilizer = remember(route?.id) { VehicleLocationStabilizer() }
     val stabilizedVehicleLocations = vehicleLocationStabilizer.stabilize(vehicleLocations)
+    var snappedVehicleLocations by remember { mutableStateOf(stabilizedVehicleLocations) }
     val vehicleMarkerIcon = remember(context) {
         IconFactory.getInstance(context).fromBitmap(createVehicleMarkerBitmap())
     }
@@ -231,16 +214,12 @@ internal fun PassengerMapView(
                         updateHeadingSector(style, passengerLocation, headingDegrees)
                     }
                     map?.let { loadedMap ->
-                        val displayLocations = snapVehiclesToRenderedRoad(
-                            loadedMap,
-                            stabilizedVehicleLocations,
-                        )
                         loadedMap.style?.let { style ->
-                            updateVehicles(style, displayLocations)
+                            updateVehicles(style, snappedVehicleLocations)
                         }
                         syncVehicleMarkers(
                             loadedMap,
-                            displayLocations,
+                            snappedVehicleLocations,
                             vehicleMarkerIcon,
                             vehicleMarkers,
                         )
@@ -270,7 +249,7 @@ internal fun PassengerMapView(
         }
     }
 
-    LaunchedEffect(styleReady, route, passengerLocation, headingDegrees, stabilizedVehicleLocations) {
+    LaunchedEffect(styleReady, route, passengerLocation, headingDegrees, snappedVehicleLocations) {
         if (!styleReady) return@LaunchedEffect
         map?.style?.let { style ->
             updateRoute(style, route, routeOpacity)
@@ -279,19 +258,11 @@ internal fun PassengerMapView(
             updateUserLocation(style, passengerLocation)
         }
 
-        // Give Liberty's transportation tiles a moment to finish their
-        // first render. The initial Compose update can happen before road
-        // features are queryable.
-        delay(800L)
-
-        val displayVehicleLocations = map?.let {
-            snapVehiclesToRenderedRoad(it, stabilizedVehicleLocations)
-        } ?: stabilizedVehicleLocations
-        map?.style?.let { updateVehicles(it, displayVehicleLocations) }
+        map?.style?.let { updateVehicles(it, snappedVehicleLocations) }
         map?.let {
             syncVehicleMarkers(
                 it,
-                displayVehicleLocations,
+                snappedVehicleLocations,
                 vehicleMarkerIcon,
                 vehicleMarkers,
             )
@@ -301,7 +272,7 @@ internal fun PassengerMapView(
         // This is route-agnostic: route 3, 8, 15, etc. all use the same live
         // vehicle list. Passenger location is used only when there is no active
         // vehicle to focus.
-        val vehicle = displayVehicleLocations.firstOrNull()
+        val vehicle = snappedVehicleLocations.firstOrNull()
         if (vehicle != null && vehicle.first.id != lastFocusedVehicleId) {
             map?.animateCamera(
                 CameraUpdateFactory.newLatLngZoom(
@@ -322,14 +293,14 @@ internal fun PassengerMapView(
         }
     }
 
-    LaunchedEffect(styleReady, route?.id, stabilizedVehicleLocations) {
+    LaunchedEffect(styleReady, route?.id, snappedVehicleLocations) {
         if (!styleReady || route == null || route.id == lastCameraRouteId) return@LaunchedEffect
 
         // If a live vehicle exists, the vehicle-camera effect above owns the
         // camera. Never move the map back to the route midpoint afterwards.
         // Otherwise the active vehicle can be rendered outside the viewport,
         // which makes the marker look like it disappeared.
-        if (stabilizedVehicleLocations.isNotEmpty()) {
+        if (snappedVehicleLocations.isNotEmpty()) {
             lastCameraRouteId = route.id
             return@LaunchedEffect
         }
@@ -346,6 +317,22 @@ internal fun PassengerMapView(
             )
         }
         lastCameraRouteId = route.id
+    }
+
+    // Road snapping is asynchronous because the reliable fallback uses the
+    // OpenStreetMap road network. Do not block the MapLibre UI thread.
+    LaunchedEffect(styleReady, stabilizedVehicleLocations) {
+        if (!styleReady || stabilizedVehicleLocations.isEmpty()) {
+            snappedVehicleLocations = stabilizedVehicleLocations
+            return@LaunchedEffect
+        }
+
+        delay(500L)
+
+        snappedVehicleLocations = snapVehiclesToRoadNetwork(
+            map = map,
+            locations = stabilizedVehicleLocations,
+        )
     }
 
     LaunchedEffect(locateRequestId) {
@@ -510,52 +497,57 @@ private fun setupMapLayers(style: Style, context: Context) {
 
 
 private fun createVehicleMarkerBitmap(): Bitmap {
-    // Supplied reference icon: bright blue square with a white front-view bus.
-    // Keep the same silhouette instead of the previous circular marker.
+    // Bright version of the exact visual language of the supplied reference:
+    // blue rounded square + white front-facing bus, no circular badge.
     val size = 96
     val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
 
     val bluePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.rgb(25, 118, 255)
+        color = android.graphics.Color.rgb(0, 112, 255)
         style = Paint.Style.FILL
     }
-    canvas.drawRect(4f, 4f, 92f, 92f, bluePaint)
+    canvas.drawRoundRect(
+        RectF(8f, 8f, 88f, 88f),
+        7f,
+        7f,
+        bluePaint,
+    )
 
     val whitePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = android.graphics.Color.WHITE
         style = Paint.Style.FILL
     }
 
-    // Front-view bus body.
+    // Bus roof/body.
     canvas.drawRoundRect(
-        RectF(25f, 17f, 71f, 74f),
-        8f,
-        8f,
+        RectF(28f, 20f, 68f, 73f),
+        7f,
+        7f,
         whitePaint,
     )
 
-    // Windshield with the blue centre and white divider.
+    // Windshield.
     canvas.drawRoundRect(
-        RectF(30f, 23f, 66f, 47f),
-        5f,
-        5f,
+        RectF(32f, 26f, 64f, 46f),
+        4f,
+        4f,
         bluePaint,
     )
-    canvas.drawRect(47f, 23f, 50f, 47f, whitePaint)
+    canvas.drawRect(47f, 26f, 49f, 46f, whitePaint)
 
-    // Lower blue grille/front panel.
-    canvas.drawRect(31f, 51f, 65f, 63f, bluePaint)
+    // Front panel.
+    canvas.drawRect(33f, 51f, 63f, 61f, bluePaint)
 
-    // Headlights / wheels from the supplied glyph.
-    canvas.drawCircle(34f, 67f, 6f, bluePaint)
-    canvas.drawCircle(62f, 67f, 6f, bluePaint)
-    canvas.drawCircle(34f, 67f, 2.2f, whitePaint)
-    canvas.drawCircle(62f, 67f, 2.2f, whitePaint)
+    // Headlights / lower details.
+    canvas.drawCircle(36f, 67f, 4.5f, bluePaint)
+    canvas.drawCircle(60f, 67f, 4.5f, bluePaint)
+    canvas.drawCircle(36f, 67f, 1.8f, whitePaint)
+    canvas.drawCircle(60f, 67f, 1.8f, whitePaint)
 
-    // Small lower white bumper pieces.
-    canvas.drawRect(27f, 70f, 36f, 77f, whitePaint)
-    canvas.drawRect(60f, 70f, 69f, 77f, whitePaint)
+    // Side mirrors.
+    canvas.drawRoundRect(RectF(23f, 37f, 30f, 47f), 3f, 3f, whitePaint)
+    canvas.drawRoundRect(RectF(66f, 37f, 73f, 47f), 3f, 3f, whitePaint)
 
     return bitmap
 }
@@ -631,34 +623,49 @@ private fun updateHeadingSector(style: Style, center: GeoPoint?, headingDegrees:
 }
 
 
-private fun snapVehiclesToRenderedRoad(
-    map: MapLibreMap,
+private suspend fun snapVehiclesToRoadNetwork(
+    map: MapLibreMap?,
     locations: List<Pair<Vehicle, VehicleLocation>>,
 ): List<Pair<Vehicle, VehicleLocation>> {
     if (locations.isEmpty()) return emptyList()
 
-    // Use the actual OpenFreeMap vector source instead of rendered-pixel
-    // probing. The Liberty style uses the "transportation" source layer for
-    // roads. This makes the 20m rule independent of road line width and zoom.
-    return locations.map { (vehicle, rawLocation) ->
-        vehicle to snapLocationToRenderedRoad(map, rawLocation)
+    return locations.map { (vehicle, location) ->
+        vehicle to snapOneVehicleToRoad(map, location)
     }
 }
 
-private fun snapLocationToRenderedRoad(
-    map: MapLibreMap,
+private suspend fun snapOneVehicleToRoad(
+    map: MapLibreMap?,
     location: VehicleLocation,
 ): VehicleLocation {
-    val style = map.style ?: return location
-    val source = style.getSourceAs<VectorSource>("openmaptiles") ?: return location
+    // First try the loaded Liberty vector tiles. The official Liberty style
+    // uses source "openmaptiles" and source-layer "transportation".
+    val vectorResult = runCatching {
+        snapFromLoadedVectorRoads(map, location)
+    }.getOrNull()
 
-    // Pull the transportation features currently loaded in the visible vector
-    // tiles. We then do the exact distance calculation in meters ourselves.
-    val features = runCatching {
-        source.querySourceFeatures(arrayOf("transportation"), null)
-    }.getOrDefault(emptyList())
+    if (vectorResult != null) {
+        return vectorResult
+    }
 
-    if (features.isEmpty()) return location
+    // Reliable fallback: OSRM's Nearest service returns the closest real road
+    // coordinate and its distance from the original GPS point.
+    return snapFromOsrm(location) ?: location
+}
+
+private fun snapFromLoadedVectorRoads(
+    map: MapLibreMap?,
+    location: VehicleLocation,
+): VehicleLocation? {
+    val style = map?.style ?: return null
+    val source = style.getSourceAs<VectorSource>("openmaptiles") ?: return null
+
+    val features = source.querySourceFeatures(
+        arrayOf("transportation"),
+        null,
+    )
+
+    if (features.isEmpty()) return null
 
     var bestPoint: GeoPoint? = null
     var bestDistance = Double.MAX_VALUE
@@ -688,13 +695,69 @@ private fun snapLocationToRenderedRoad(
         }
     }
 
-    // Never move a vehicle farther than the requested 20m.
     val snapped = bestPoint?.takeIf { bestDistance <= 20.0 } ?: return location
 
     return location.copy(
         latitude = snapped.latitude,
         longitude = snapped.longitude,
     )
+}
+
+private suspend fun snapFromOsrm(
+    location: VehicleLocation,
+): VehicleLocation? = withContext(Dispatchers.IO) {
+    runCatching {
+        val url = URL(
+            "https://router.project-osrm.org/nearest/v1/driving/" +
+                "${location.longitude},${location.latitude}.json?number=1"
+        )
+
+        val connection = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 2500
+            readTimeout = 2500
+            useCaches = false
+        }
+
+        try {
+            val responseCode = connection.responseCode
+            if (responseCode !in 200..299) return@runCatching null
+
+            val body = connection.inputStream.bufferedReader().use { it.readText() }
+            val json = JSONObject(body)
+
+            if (json.optString("code") != "Ok") return@runCatching null
+
+            val waypoint = json.optJSONArray("waypoints")
+                ?.optJSONObject(0)
+                ?: return@runCatching null
+
+            val distance = waypoint.optDouble("distance", Double.NaN)
+            val coordinates = waypoint.optJSONArray("location")
+                ?: return@runCatching null
+
+            val longitude = coordinates.optDouble(0, Double.NaN)
+            val latitude = coordinates.optDouble(1, Double.NaN)
+
+            if (!distance.isFinite() ||
+                !longitude.isFinite() ||
+                !latitude.isFinite()
+            ) {
+                return@runCatching null
+            }
+
+            // This is the hard rule: OSRM may find a road farther away, but
+            // Safar never moves the vehicle unless it is <= 20 meters away.
+            if (distance > 20.0) return@runCatching null
+
+            location.copy(
+                latitude = latitude,
+                longitude = longitude,
+            )
+        } finally {
+            connection.disconnect()
+        }
+    }.getOrNull()
 }
 
 private data class RoadProjection(
