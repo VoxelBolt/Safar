@@ -402,6 +402,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     }
 
     override fun onCleared() {
+        nearestVehicleRequestJob?.cancel()
         stopLocationUpdates()
         vehicleLocationPollingJob?.cancel()
         realtimeJob?.cancel()
