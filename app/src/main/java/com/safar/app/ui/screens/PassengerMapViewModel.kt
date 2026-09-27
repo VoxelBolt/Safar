@@ -64,6 +64,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     private var headingJob: Job? = null
     private var locateRequestJob: Job? = null
     private var nearestVehicleRequestJob: Job? = null
+    private var nearestVehicleRefreshJob: Job? = null
 
     init {
         refreshLocationPermissionState()
@@ -107,12 +108,6 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             return
         }
 
-        val route = _uiState.value.selectedRoute
-        if (route == null) {
-            _uiState.value = _uiState.value.copy(error = "Сначала выберите маршрут")
-            return
-        }
-
         nearestVehicleRequestJob?.cancel()
         nearestVehicleRequestJob = viewModelScope.launch {
             locationProvider.currentLocationSample { sample ->
@@ -125,37 +120,50 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                 }
 
                 _uiState.value = _uiState.value.copy(passengerLocation = passenger)
+                startNearestVehicleRefresh()
+            }
+        }
+    }
 
-                viewModelScope.launch {
+    private fun startNearestVehicleRefresh() {
+        nearestVehicleRefreshJob?.cancel()
+        nearestVehicleRefreshJob = viewModelScope.launch {
+            while (isActive && _uiState.value.nearestVehicleRequestId >= 0L) {
+                val passenger = _uiState.value.passengerLocation
+                if (passenger != null) {
                     runCatching { vehicleRepository.getAllVehicles() }
                         .onSuccess { vehicles ->
                             val fresh = freshVehicles(vehicles)
                             val result = NearestVehicleCalculator.findNearest(passenger, fresh)
+                            val nextRequestId = _uiState.value.nearestVehicleRequestId + 1L
+
                             if (result == null) {
                                 _uiState.value = _uiState.value.copy(
                                     nearestVehicle = null,
                                     nearestVehicleDistanceMeters = null,
                                     nearestVehicleEtaMinutes = null,
-                                    nearestVehicleRequestId = _uiState.value.nearestVehicleRequestId + 1L,
+                                    nearestVehicleRequestId = nextRequestId,
                                     error = "Сейчас нет маршруток с актуальной геопозицией",
                                 )
-                                return@onSuccess
+                            } else {
+                                _uiState.value = _uiState.value.copy(
+                                    nearestVehicle = result.vehicle,
+                                    nearestVehicleDistanceMeters = result.distanceMeters,
+                                    nearestVehicleEtaMinutes = result.etaMinutes,
+                                    nearestVehicleRequestId = nextRequestId,
+                                    error = null,
+                                )
                             }
-
-                            _uiState.value = _uiState.value.copy(
-                                nearestVehicle = result.vehicle,
-                                nearestVehicleDistanceMeters = result.distanceMeters,
-                                nearestVehicleEtaMinutes = result.etaMinutes,
-                                nearestVehicleRequestId = _uiState.value.nearestVehicleRequestId + 1L,
-                                error = null,
-                            )
                         }
                         .onFailure { error ->
-                            _uiState.value = _uiState.value.copy(
-                                error = error.message ?: "Не удалось найти ближайшую маршрутку",
+                            android.util.Log.w(
+                                "SafarNearestVehicle",
+                                "Nearest vehicle refresh failed",
+                                error,
                             )
                         }
                 }
+                delay(5_000L)
             }
         }
     }
@@ -436,6 +444,8 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         staleSweepJob?.cancel()
         vehicleRefreshJob?.cancel()
         realtimeTransport.disconnect()
+        nearestVehicleRequestJob?.cancel()
+        nearestVehicleRefreshJob?.cancel()
         super.onCleared()
     }
 
