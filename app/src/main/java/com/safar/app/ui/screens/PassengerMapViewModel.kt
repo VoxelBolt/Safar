@@ -128,9 +128,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                 updateNearestVehicle(passenger, routeSnapshot, forceFocus = true)
             }
 
-            // Then query the complete current-location table. This is intentionally
-            // not limited to the selected route: the feature must find the closest
-            // currently tracked minibus for the passenger.
+            // Query every currently tracked vehicle, regardless of route.
             runCatching { vehicleRepository.getAllVehicles() }
                 .onSuccess { vehicles ->
                     val fresh = freshVehicles(vehicles).map { it.copy(active = true) }
@@ -147,6 +145,8 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                         _uiState.value = _uiState.value.copy(
                             error = "Не удалось получить актуальные маршрутки",
                         )
+                    } else {
+                        updateNearestVehicle(passenger, routeSnapshot, forceFocus = true)
                     }
                 }
         }
@@ -216,20 +216,20 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         vehicleLocationPollingJob?.cancel()
         vehicleLocationPollingJob = viewModelScope.launch {
             while (isActive && _uiState.value.selectedRoute?.id == routeId) {
-                runCatching { vehicleRepository.getVehiclesForRoute(routeId) }
-                    .onSuccess { vehicles ->
+                runCatching {
+                    if (_uiState.value.nearestVehicleTrackingEnabled) {
+                        val all = vehicleRepository.getAllVehicles()
+                        val freshAll = freshVehicles(all).map { it.copy(active = true) }
+                        val routeActive = freshAll.filter { it.routeId == routeId }
+                        _uiState.value = _uiState.value.copy(activeVehicles = routeActive, error = null)
+                        _uiState.value.passengerLocation?.let { updateNearestVehicle(it, freshAll) }
+                        android.util.Log.d("SafarNearestVehicle", "poll all=" + freshAll.size + " selectedRoute=" + routeActive.size)
+                    } else {
+                        val vehicles = vehicleRepository.getVehiclesForRoute(routeId)
                         val active = freshVehicles(vehicles).map { it.copy(active = true) }
                         _uiState.value = _uiState.value.copy(activeVehicles = active, error = null)
-                        if (_uiState.value.nearestVehicleTrackingEnabled) {
-                            _uiState.value.passengerLocation?.let { updateNearestVehicle(it, active) }
-                        }
-                        android.util.Log.d(
-                            "SafarVehicle",
-                            "poll route=$routeId vehicles=${active.size} locations=" +
-                                active.joinToString { "${it.identifier}:${it.currentLocation?.latitude},${it.currentLocation?.longitude}" },
-                        )
                     }
-                    .onFailure { error -> android.util.Log.w("SafarVehicle", "poll failed", error) }
+                }
                 delay(10_000L)
             }
         }
