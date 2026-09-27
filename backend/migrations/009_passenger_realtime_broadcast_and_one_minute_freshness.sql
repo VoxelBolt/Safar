@@ -11,8 +11,8 @@ select
     v.route_id,
     (
         coalesce(v.active, false)
-        and s.route_id = v.route_id
-        and s.recorded_at >= now() - interval '1 minute'
+        and coalesce(s.route_id = v.route_id, false)
+        and coalesce(s.recorded_at >= now() - interval '1 minute', false)
     ) as active,
     s.latitude,
     s.longitude,
