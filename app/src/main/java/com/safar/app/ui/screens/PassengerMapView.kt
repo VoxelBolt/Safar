@@ -78,6 +78,7 @@ import org.maplibre.android.style.layers.PropertyFactory.textSize
 import org.maplibre.android.style.layers.PropertyFactory.textAllowOverlap
 import org.maplibre.android.style.layers.PropertyFactory.textIgnorePlacement
 import org.maplibre.android.style.sources.GeoJsonSource
+import org.maplibre.android.style.sources.VectorSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.LineString
@@ -509,64 +510,52 @@ private fun setupMapLayers(style: Style, context: Context) {
 
 
 private fun createVehicleMarkerBitmap(): Bitmap {
-    // Recreate the bus glyph from the icon supplied by the user, but as a
-    // clean transparent marker and with a brighter blue so it stays visible
-    // over the Liberty map.
+    // Supplied reference icon: bright blue square with a white front-view bus.
+    // Keep the same silhouette instead of the previous circular marker.
     val size = 96
     val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
 
-    val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0x38000000
-        style = Paint.Style.FILL
-    }
-    canvas.drawRoundRect(
-        RectF(17f, 11f, 83f, 89f),
-        13f,
-        13f,
-        shadowPaint,
-    )
-
-    val blue = android.graphics.Color.rgb(25, 118, 255)
     val bluePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = blue
+        color = android.graphics.Color.rgb(25, 118, 255)
         style = Paint.Style.FILL
     }
-    canvas.drawRoundRect(
-        RectF(13f, 7f, 79f, 85f),
-        12f,
-        12f,
-        bluePaint,
-    )
+    canvas.drawRect(4f, 4f, 92f, 92f, bluePaint)
 
     val whitePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = android.graphics.Color.WHITE
         style = Paint.Style.FILL
     }
 
-    // Bus body.
+    // Front-view bus body.
     canvas.drawRoundRect(
-        RectF(27f, 20f, 65f, 69f),
+        RectF(25f, 17f, 71f, 74f),
         8f,
         8f,
         whitePaint,
     )
 
-    // Front windshield.
+    // Windshield with the blue centre and white divider.
     canvas.drawRoundRect(
-        RectF(31f, 26f, 61f, 43f),
-        4f,
-        4f,
+        RectF(30f, 23f, 66f, 47f),
+        5f,
+        5f,
         bluePaint,
     )
-    canvas.drawRect(46f, 26f, 49f, 43f, whitePaint)
+    canvas.drawRect(47f, 23f, 50f, 47f, whitePaint)
 
-    // Lower front panel and wheels, matching the supplied icon's silhouette.
-    canvas.drawRect(31f, 48f, 61f, 59f, whitePaint)
-    canvas.drawCircle(37f, 65f, 5f, bluePaint)
-    canvas.drawCircle(59f, 65f, 5f, bluePaint)
-    canvas.drawCircle(37f, 65f, 2f, whitePaint)
-    canvas.drawCircle(59f, 65f, 2f, whitePaint)
+    // Lower blue grille/front panel.
+    canvas.drawRect(31f, 51f, 65f, 63f, bluePaint)
+
+    // Headlights / wheels from the supplied glyph.
+    canvas.drawCircle(34f, 67f, 6f, bluePaint)
+    canvas.drawCircle(62f, 67f, 6f, bluePaint)
+    canvas.drawCircle(34f, 67f, 2.2f, whitePaint)
+    canvas.drawCircle(62f, 67f, 2.2f, whitePaint)
+
+    // Small lower white bumper pieces.
+    canvas.drawRect(27f, 70f, 36f, 77f, whitePaint)
+    canvas.drawRect(60f, 70f, 69f, 77f, whitePaint)
 
     return bitmap
 }
@@ -648,9 +637,9 @@ private fun snapVehiclesToRenderedRoad(
 ): List<Pair<Vehicle, VehicleLocation>> {
     if (locations.isEmpty()) return emptyList()
 
-    // Query a real 20m screen-space box against Liberty's transportation
-    // layers. This replaces pixel-grid probing: a narrow road cannot be missed
-    // simply because no sample pixel landed on it.
+    // Use the actual OpenFreeMap vector source instead of rendered-pixel
+    // probing. The Liberty style uses the "transportation" source layer for
+    // roads. This makes the 20m rule independent of road line width and zoom.
     return locations.map { (vehicle, rawLocation) ->
         vehicle to snapLocationToRenderedRoad(map, rawLocation)
     }
@@ -660,57 +649,21 @@ private fun snapLocationToRenderedRoad(
     map: MapLibreMap,
     location: VehicleLocation,
 ): VehicleLocation {
-    val screenPoint = map.projection.toScreenLocation(
-        LatLng(location.latitude, location.longitude)
-    )
+    val style = map.style ?: return location
+    val source = style.getSourceAs<VectorSource>("openmaptiles") ?: return location
 
-    val metersPerPixel = runCatching {
-        map.projection.getMetersPerPixelAtLatitude(location.latitude)
-    }.getOrDefault(1.0).coerceAtLeast(0.1)
+    // Pull the transportation features currently loaded in the visible vector
+    // tiles. We then do the exact distance calculation in meters ourselves.
+    val features = runCatching {
+        source.querySourceFeatures(arrayOf("transportation"), null)
+    }.getOrDefault(emptyList())
 
-    // Strict requirement: only snap when the real road geometry is <= 20m
-    // from the driver's GPS point.
-    val radiusPx = (20.0 / metersPerPixel).toFloat()
-    if (!radiusPx.isFinite() || radiusPx <= 0f) return location
-
-    // MapLibre Android 13.6.1 exposes the PointF overload here, not a
-    // RectF query overload. Sample the complete 20m disk densely and query
-    // only the actual Liberty road layers. This keeps the search compatible
-    // with the SDK version used by the project while avoiding the old generic
-    // feature probing.
-    val steps = 20
-    val featuresById = linkedMapOf<String, Feature>()
-
-    for (y in 0..steps) {
-        val offsetY = (y / steps.toFloat() * 2f - 1f) * radiusPx
-
-        for (x in 0..steps) {
-            val offsetX = (x / steps.toFloat() * 2f - 1f) * radiusPx
-
-            if (offsetX * offsetX + offsetY * offsetY > radiusPx * radiusPx) {
-                continue
-            }
-
-            val sample = PointF(
-                screenPoint.x + offsetX,
-                screenPoint.y + offsetY,
-            )
-
-            val sampleFeatures = runCatching {
-                map.queryRenderedFeatures(sample, *ROAD_LAYER_IDS)
-            }.getOrDefault(emptyList())
-
-            sampleFeatures.forEach { feature ->
-                val id = feature.id() ?: feature.toString()
-                featuresById[id] = feature
-            }
-        }
-    }
+    if (features.isEmpty()) return location
 
     var bestPoint: GeoPoint? = null
     var bestDistance = Double.MAX_VALUE
 
-    featuresById.values.forEach { feature ->
+    features.forEach { feature ->
         val geometry = feature.geometry() ?: return@forEach
 
         val lines: List<List<Point>> = when (geometry) {
@@ -735,6 +688,7 @@ private fun snapLocationToRenderedRoad(
         }
     }
 
+    // Never move a vehicle farther than the requested 20m.
     val snapped = bestPoint?.takeIf { bestDistance <= 20.0 } ?: return location
 
     return location.copy(
