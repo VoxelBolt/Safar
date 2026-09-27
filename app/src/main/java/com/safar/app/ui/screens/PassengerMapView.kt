@@ -610,35 +610,17 @@ private fun snapVehiclesToRenderedRoad(
 ): List<Pair<Vehicle, VehicleLocation>> {
     if (locations.isEmpty()) return emptyList()
 
-    val style = map.style ?: return locations
-
-    // This MapLibre version exposes queryRenderedFeatures(PointF, layerIds).
-    // Sample a small screen-space grid so we can find the actual rendered road
-    // within the requested 20m radius without relying on route.path.
-    val roadLayerIds = style.getLayers()
-        .filterIsInstance<LineLayer>()
-        .map { it.id }
-        .filterNot {
-            it == ROUTE_LAYER_ID ||
-                it == ROUTE_CASING_LAYER_ID
-        }
-        .toTypedArray()
-
-    if (roadLayerIds.isEmpty()) return locations
-
+    // Do not depend on Liberty style layer names. Different zoom levels can
+    // expose roads through different layer ids. We query rendered features
+    // directly and keep only LineString/MultiLineString geometries.
     return locations.map { (vehicle, rawLocation) ->
-        vehicle to snapLocationToRenderedRoad(
-            map = map,
-            location = rawLocation,
-            roadLayerIds = roadLayerIds,
-        )
+        vehicle to snapLocationToRenderedRoad(map, rawLocation)
     }
 }
 
 private fun snapLocationToRenderedRoad(
     map: MapLibreMap,
     location: VehicleLocation,
-    roadLayerIds: Array<String>,
 ): VehicleLocation {
     val screenPoint = map.projection.toScreenLocation(
         LatLng(location.latitude, location.longitude)
@@ -648,12 +630,18 @@ private fun snapLocationToRenderedRoad(
         map.projection.getMetersPerPixelAtLatitude(location.latitude)
     }.getOrDefault(1.0).coerceAtLeast(0.1)
 
+    // Search exactly 20m around the GPS point.
     val radiusPx = (20.0 / metersPerPixel)
-        .coerceIn(8.0, 45.0)
+        .coerceIn(6.0, 60.0)
         .toFloat()
 
     val features = mutableListOf<Feature>()
-    val steps = 6
+    val seenGeometry = mutableSetOf<String>()
+
+    // A denser grid is important because road lines are often only a few
+    // pixels wide. The old 7x7 grid could pass between a road and never
+    // return that road from queryRenderedFeatures().
+    val steps = 12
 
     for (y in 0..steps) {
         val offsetY = (y / steps.toFloat() * 2f - 1f) * radiusPx
@@ -672,13 +660,22 @@ private fun snapLocationToRenderedRoad(
 
             val sampleFeatures = runCatching {
                 map.queryRenderedFeatures(sample)
-                    .filter { feature ->
-                        feature.geometry() is LineString ||
-                            feature.geometry() is MultiLineString
-                    }
             }.getOrDefault(emptyList())
 
-            features += sampleFeatures
+            sampleFeatures.forEach { feature ->
+                val geometry = feature.geometry() ?: return@forEach
+
+                if (geometry !is LineString && geometry !is MultiLineString) {
+                    return@forEach
+                }
+
+                val key = runCatching { geometry.toJson() }
+                    .getOrElse { geometry.toString() }
+
+                if (seenGeometry.add(key)) {
+                    features += feature
+                }
+            }
         }
     }
 
@@ -710,7 +707,8 @@ private fun snapLocationToRenderedRoad(
         }
     }
 
-    // Never move the marker if the nearest rendered line is more than 20m away.
+    // The marker moves only when the real rendered line is at most 20m away.
+    // Otherwise the original GPS position is preserved.
     val snapped = bestPoint?.takeIf { bestDistance <= 20.0 } ?: return location
 
     return location.copy(
