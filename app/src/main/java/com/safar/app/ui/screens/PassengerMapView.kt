@@ -695,7 +695,8 @@ private fun snapFromLoadedVectorRoads(
         }
     }
 
-    val snapped = bestPoint?.takeIf { bestDistance <= 20.0 } ?: return location
+    val snapped = bestPoint?.takeIf { bestDistance <= 20.0 }
+        ?: return null
 
     return location.copy(
         latitude = snapped.latitude,
