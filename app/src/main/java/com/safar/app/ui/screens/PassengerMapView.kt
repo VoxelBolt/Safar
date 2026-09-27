@@ -112,6 +112,7 @@ internal fun PassengerMapView(
     vehicleLocations: List<Pair<Vehicle, VehicleLocation>>,
     passengerLocations: List<PassengerLocation> = emptyList(),
     onLocateUser: () -> Unit = {},
+    onShowNearestVehicle: () -> Unit = {},
     nearestVehicle: Pair<Vehicle, VehicleLocation>? = null,
     nearestVehicleRequestId: Long = 0L,
     routeOpacity: Float = 0.78f,
