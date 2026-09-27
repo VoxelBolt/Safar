@@ -146,6 +146,12 @@ class SupabaseSafarApi(
             .map { it.toDomain() }
     }
 
+    override suspend fun getAllVehicles(): List<Vehicle> =
+        client.from("vehicle_current_locations")
+            .select()
+            .decodeList<VehicleWithLocationDto>()
+            .map { it.toDomain() }
+
     override suspend fun getActiveVehiclesForRoute(routeId: String): List<Vehicle> {
         ensureAnonymousSession()
         return client.from("vehicle_current_locations")
