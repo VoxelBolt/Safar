@@ -204,7 +204,7 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
                 _uiState.value = _uiState.value.copy(workSession = updatedSession, actionInProgress = false, error = null)
                 // Never stop GPS when the Work Session changes. Tracking is owned
                 // by DriverLocationService and continues independently.
-                if (ui.driver?.routeId != null) {
+                if (_uiState.value.driver?.routeId != null) {
                     runCatching { DriverLocationService.start(getApplication()) }
                 }
             }.onFailure { error ->
