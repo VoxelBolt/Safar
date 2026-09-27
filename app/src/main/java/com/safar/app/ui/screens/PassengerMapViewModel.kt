@@ -238,7 +238,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                         )
                     }
                     .onFailure { error -> android.util.Log.w("SafarVehicle", "poll failed", error) }
-                delay(5_000L)
+                delay(10_000L)
             }
         }
     }
