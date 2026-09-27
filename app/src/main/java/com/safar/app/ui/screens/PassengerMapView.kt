@@ -106,7 +106,6 @@ private const val DEFAULT_LATITUDE = 40.2829
 private const val DEFAULT_LONGITUDE = 69.6228
 private const val DEFAULT_ZOOM = 12.0
 private const val USER_FOCUS_ZOOM = 15.5
-private const val VEHICLE_ROUTE_SNAP_DISTANCE_METERS = 20.0
 
 @Composable
 internal fun PassengerMapView(
@@ -118,6 +117,9 @@ internal fun PassengerMapView(
     vehicleLocations: List<Pair<Vehicle, VehicleLocation>>,
     passengerLocations: List<PassengerLocation> = emptyList(),
     onLocateUser: () -> Unit = {},
+    onShowNearestVehicle: () -> Unit = {},
+    nearestVehicle: Pair<Vehicle, VehicleLocation>? = null,
+    nearestVehicleRequestId: Long = 0L,
     routeOpacity: Float = 0.78f,
     modifier: Modifier = Modifier,
 ) {
@@ -140,14 +142,12 @@ internal fun PassengerMapView(
     var centeredOnUser by remember { mutableStateOf(false) }
     var locateTarget by remember { mutableStateOf<GeoPoint?>(null) }
     var lastCameraRouteId by remember { mutableStateOf<String?>(null) }
-    var lastFocusedVehicleId by remember { mutableStateOf<String?>(null) }
     val vehicleMarkers = remember { mutableMapOf<String, Marker>() }
     val vehicleLocationStabilizer = remember(route?.id) { VehicleLocationStabilizer() }
     val stabilizedVehicleLocations = vehicleLocationStabilizer.stabilize(vehicleLocations)
-    var snappedVehicleLocations by remember { mutableStateOf(stabilizedVehicleLocations) }
     val vehicleMarkerIcon = remember(context) {
         val bitmap = decodeVehicleMarkerBitmap(context)
-        val sizePx = 52
+        val sizePx = 60
         val scaled = Bitmap.createScaledBitmap(bitmap, sizePx, sizePx, true)
         IconFactory.getInstance(context).fromBitmap(scaled)
     }
@@ -185,7 +185,7 @@ internal fun PassengerMapView(
                 mapView.apply {
                     getMapAsync { loadedMap ->
                         map = loadedMap
-                        syncVehicleMarkers(loadedMap, stabilizedVehicleLocations, vehicleMarkerIcon, vehicleMarkers)
+                        syncVehicleMarkers(loadedMap, displayVehicleLocations(stabilizedVehicleLocations, nearestVehicle), vehicleMarkerIcon, vehicleMarkers)
                         loadedMap.uiSettings.isCompassEnabled = false
                         loadedMap.uiSettings.isScrollGesturesEnabled = true
                         loadedMap.uiSettings.isZoomGesturesEnabled = true
@@ -212,7 +212,7 @@ internal fun PassengerMapView(
                     }
                     map?.let { loadedMap ->
                         loadedMap.style?.let { style ->
-                            updateVehicles(style, snappedVehicleLocations)
+                            updateVehicles(style, displayVehicleLocations(stabilizedVehicleLocations, nearestVehicle))
                         }
                         syncVehicleMarkers(
                             loadedMap,
@@ -234,6 +234,10 @@ internal fun PassengerMapView(
         ) {
             MapControlButton("⌖") {
                 onLocateUser()
+            }
+            Spacer(Modifier.size(8.dp))
+            MapControlButton("◎") {
+                onShowNearestVehicle()
             }
             Spacer(Modifier.size(8.dp))
             MapControlButton("+") {
@@ -316,29 +320,14 @@ internal fun PassengerMapView(
         lastCameraRouteId = route.id
     }
 
-    // Road snapping is asynchronous because the reliable fallback uses the
-    // OpenStreetMap road network. Do not block the MapLibre UI thread.
-    val latestStabilizedVehicleLocations by rememberUpdatedState(stabilizedVehicleLocations)
-    val latestRoute by rememberUpdatedState(route)
-
-    LaunchedEffect(styleReady) {
-        if (!styleReady) return@LaunchedEffect
-
-        delay(800L)
-
-        while (true) {
-            val latest = latestStabilizedVehicleLocations
-            snappedVehicleLocations = if (latest.isEmpty()) {
-                emptyList()
-            } else {
-                snapVehiclesToRoute(
-                    locations = latest,
-                    routePath = latestRoute?.path.orEmpty(),
-                )
-            }
-
-            delay(3_000L)
-        }
+    LaunchedEffect(styleReady, nearestVehicleRequestId, nearestVehicle) {
+        if (!styleReady || nearestVehicleRequestId <= 0L || nearestVehicle == null) return@LaunchedEffect
+        map?.animateCamera(
+            CameraUpdateFactory.newLatLngZoom(
+                LatLng(nearestVehicle.second.latitude, nearestVehicle.second.longitude),
+                USER_FOCUS_ZOOM,
+            )
+        )
     }
 
     LaunchedEffect(locateRequestId) {
@@ -568,122 +557,12 @@ private fun updateHeadingSector(style: Style, center: GeoPoint?, headingDegrees:
 }
 
 
-private fun snapVehiclesToRoute(
+private fun displayVehicleLocations(
     locations: List<Pair<Vehicle, VehicleLocation>>,
-    routePath: List<GeoPoint>,
+    nearest: Pair<Vehicle, VehicleLocation>?,
 ): List<Pair<Vehicle, VehicleLocation>> {
-    if (locations.isEmpty() || routePath.size < 2) return locations
-
-    return locations.map { (vehicle, location) ->
-        vehicle to snapOneVehicleToRoute(location, routePath)
-    }
-}
-
-private fun snapOneVehicleToRoute(
-    location: VehicleLocation,
-    routePath: List<GeoPoint>,
-): VehicleLocation {
-    var bestProjection: RoadProjection? = null
-
-    for (index in 0 until routePath.lastIndex) {
-        val start = Point.fromLngLat(
-            routePath[index].longitude,
-            routePath[index].latitude,
-        )
-        val end = Point.fromLngLat(
-            routePath[index + 1].longitude,
-            routePath[index + 1].latitude,
-        )
-
-        val projection = projectGpsPointToSegment(location, start, end)
-        if (bestProjection == null || projection.distanceMeters < bestProjection.distanceMeters) {
-            bestProjection = projection
-        }
-    }
-
-    val nearest = bestProjection ?: return location
-
-    // Strict 20-meter rule: only move the displayed vehicle onto the
-    // selected bus route when the real GPS point is within 20 meters.
-    if (nearest.distanceMeters > VEHICLE_ROUTE_SNAP_DISTANCE_METERS) {
-        Log.d(
-            "SafarRouteSnap",
-            "NOT SNAPPED: GPS is ${"%.1f".format(nearest.distanceMeters)}m from route"
-        )
-        return location
-    }
-
-    Log.d(
-        "SafarRouteSnap",
-        "SNAPPED: ${"%.1f".format(nearest.distanceMeters)}m -> " +
-            "${nearest.point.latitude},${nearest.point.longitude}"
-    )
-
-    return location.copy(
-        latitude = nearest.point.latitude,
-        longitude = nearest.point.longitude,
-    )
-}
-
-private data class RoadProjection(
-    val point: GeoPoint,
-    val distanceMeters: Double,
-)
-
-private fun projectGpsPointToSegment(
-    location: VehicleLocation,
-    start: Point,
-    end: Point,
-): RoadProjection {
-    val point = GeoPoint(location.latitude, location.longitude)
-    val startPoint = GeoPoint(start.latitude(), start.longitude())
-    val endPoint = GeoPoint(end.latitude(), end.longitude())
-
-    val referenceLatRad = Math.toRadians(
-        (point.latitude + startPoint.latitude + endPoint.latitude) / 3.0
-    )
-    val metersPerLat = 111_320.0
-    val metersPerLon = 111_320.0 * kotlin.math.cos(referenceLatRad)
-
-    val px = (point.longitude - startPoint.longitude) * metersPerLon
-    val py = (point.latitude - startPoint.latitude) * metersPerLat
-    val bx = (endPoint.longitude - startPoint.longitude) * metersPerLon
-    val by = (endPoint.latitude - startPoint.latitude) * metersPerLat
-
-    val lengthSquared = bx * bx + by * by
-    val t = if (lengthSquared <= 1e-9) {
-        0.0
-    } else {
-        ((px * bx + py * by) / lengthSquared).coerceIn(0.0, 1.0)
-    }
-
-    val projected = GeoPoint(
-        latitude = startPoint.latitude +
-            (endPoint.latitude - startPoint.latitude) * t,
-        longitude = startPoint.longitude +
-            (endPoint.longitude - startPoint.longitude) * t,
-    )
-
-    return RoadProjection(
-        point = projected,
-        distanceMeters = haversineDistanceMeters(point, projected),
-    )
-}
-
-private fun haversineDistanceMeters(a: GeoPoint, b: GeoPoint): Double {
-    val earthRadius = 6_371_000.0
-    val dLat = Math.toRadians(b.latitude - a.latitude)
-    val dLon = Math.toRadians(b.longitude - a.longitude)
-    val lat1 = Math.toRadians(a.latitude)
-    val lat2 = Math.toRadians(b.latitude)
-
-    val h = kotlin.math.sin(dLat / 2) * kotlin.math.sin(dLat / 2) +
-        kotlin.math.cos(lat1) * kotlin.math.cos(lat2) *
-        kotlin.math.sin(dLon / 2) * kotlin.math.sin(dLon / 2)
-
-    return 2.0 * earthRadius * kotlin.math.asin(
-        kotlin.math.sqrt(h.coerceIn(0.0, 1.0))
-    )
+    if (nearest == null || locations.any { it.first.id == nearest.first.id }) return locations
+    return locations + nearest
 }
 
 private fun syncVehicleMarkers(
