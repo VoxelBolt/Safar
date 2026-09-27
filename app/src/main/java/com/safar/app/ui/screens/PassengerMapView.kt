@@ -20,7 +20,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,9 +59,6 @@ import org.maplibre.android.style.layers.PropertyFactory.circleRadius
 import org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor
 import org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth
 import org.maplibre.android.style.layers.PropertyFactory.circleOpacity
-import org.maplibre.android.style.layers.PropertyFactory.iconAllowOverlap
-import org.maplibre.android.style.layers.PropertyFactory.iconIgnorePlacement
-import org.maplibre.android.style.layers.PropertyFactory.iconImage
 import org.maplibre.android.style.layers.PropertyFactory.fillColor
 import org.maplibre.android.style.layers.PropertyFactory.fillOpacity
 import org.maplibre.android.style.layers.PropertyFactory.lineCap
@@ -99,7 +95,6 @@ private const val USER_LOCATION_CIRCLE_LAYER_ID = "safar-user-location-circle-la
 private const val USER_LOCATION_PULSE_LAYER_ID = "safar-user-location-pulse-layer"
 private const val VEHICLES_SOURCE_ID = "safar-vehicles-source"
 private const val VEHICLES_LAYER_ID = "safar-vehicles-layer"
-private const val VEHICLE_ICON_LAYER_ID = "safar-vehicle-icon-layer"
 private const val VEHICLE_LABEL_LAYER_ID = "safar-vehicle-label-layer"
 
 private const val DEFAULT_LATITUDE = 40.2829
@@ -140,7 +135,6 @@ internal fun PassengerMapView(
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
     var styleReady by remember { mutableStateOf(false) }
     var centeredOnUser by remember { mutableStateOf(false) }
-    var locateTarget by remember { mutableStateOf<GeoPoint?>(null) }
     var lastCameraRouteId by remember { mutableStateOf<String?>(null) }
     val vehicleMarkers = remember { mutableMapOf<String, Marker>() }
     val vehicleLocationStabilizer = remember(route?.id) { VehicleLocationStabilizer() }
@@ -320,7 +314,6 @@ internal fun PassengerMapView(
         if (!styleReady || locateRequestId <= 0L) return@LaunchedEffect
 
         val target = passengerLocation ?: return@LaunchedEffect
-        locateTarget = target
         map?.animateCamera(
             CameraUpdateFactory.newLatLngZoom(
                 LatLng(target.latitude, target.longitude),
