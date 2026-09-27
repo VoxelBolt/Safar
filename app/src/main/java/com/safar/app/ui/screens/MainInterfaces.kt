@@ -751,6 +751,23 @@ private fun DriverHomeScreen(
     var driverLocation by remember { mutableStateOf<GeoPoint?>(null) }
     var driverLocateRequestId by remember { mutableLongStateOf(0L) }
 
+    // Fail-safe publisher: while the driver screen is visible and work is ACTIVE,
+    // also send a fresh GPS fix every 5 seconds. The foreground service remains
+    // responsible for background tracking.
+    LaunchedEffect(status, foregroundLocationGranted) {
+        if (status != WorkSessionStatus.ACTIVE || !foregroundLocationGranted) return@LaunchedEffect
+        while (true) {
+            driverLocationProvider.currentLocationSample { sample ->
+                if (sample != null) {
+                    driverLocation = sample.point
+                    driverLocateRequestId += 1L
+                    driverViewModel.publishDriverLocation(sample.point)
+                }
+            }
+            delay(5_000L)
+        }
+    }
+
     LaunchedEffect(foregroundLocationGranted) {
         if (!foregroundLocationGranted) {
             driverLocation = null
