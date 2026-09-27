@@ -180,6 +180,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             nearestVehicleDistanceMeters = null,
             nearestVehicleEtaMinutes = null,
             nearestVehicleRequestId = 0L,
+            nearestVehicleTrackingEnabled = false,
             error = null,
         )
         loadVehicles(route)
@@ -231,7 +232,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                         )
                     }
                     .onFailure { error -> android.util.Log.w("SafarVehicle", "poll failed", error) }
-                delay(3_000L)
+                delay(5_000L)
             }
         }
     }
