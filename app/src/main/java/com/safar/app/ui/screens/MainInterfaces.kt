@@ -687,8 +687,6 @@ fun DriverMainScreen(state: OnboardingState) {
     LaunchedEffect(trackingReady) {
         if (trackingReady) {
             runCatching { DriverLocationService.start(context) }
-        } else {
-            runCatching { DriverLocationService.stop(context) }
         }
     }
 
