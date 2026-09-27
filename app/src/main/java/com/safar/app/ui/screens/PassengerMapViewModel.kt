@@ -139,7 +139,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             }
 
             runCatching {
-                vehicleRepository.getVehiclesForRoute(route.id)
+                vehicleRepository.getAllVehicles()
             }.onSuccess { vehicles ->
                 val fresh = freshVehicles(vehicles).map { it.copy(active = true) }
                 _uiState.value = _uiState.value.copy(
@@ -297,7 +297,8 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         vehicles: List<Vehicle>,
         forceFocus: Boolean = false,
     ) {
-        val result = NearestVehicleCalculator.findNearest(passenger, vehicles)
+        val candidates = (vehicles + listOfNotNull(_uiState.value.nearestVehicle)).distinctBy { it.id }.filter { isFresh(it.currentLocation?.timestampEpochMs) }
+        val result = NearestVehicleCalculator.findNearest(passenger, candidates)
         _uiState.value = _uiState.value.copy(
             nearestVehicle = result?.vehicle,
             nearestVehicleDistanceMeters = result?.distanceMeters,
