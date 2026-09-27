@@ -10,7 +10,7 @@ select
     v.identifier,
     v.route_id,
     (
-        v.active
+        coalesce(v.active, false)
         and s.route_id = v.route_id
         and s.recorded_at >= now() - interval '1 minute'
     ) as active,
