@@ -258,7 +258,7 @@ class DriverLocationService : Service() {
         private const val NOTIFICATION_ID = 1001
         private const val ACTION_STOP = "com.safar.app.STOP_DRIVER_LOCATION"
         private const val DRIVER_REFRESH_MS = 30_000L
-        private const val PUBLISH_INTERVAL_MS = 5_000L
+        private const val PUBLISH_INTERVAL_MS = 10_000L
         private const val TAG = "SafarDriverGPS"
         fun start(context: Context) { ContextCompat.startForegroundService(context, Intent(context, DriverLocationService::class.java)) }
         fun stop(context: Context) { context.startService(Intent(context, DriverLocationService::class.java).setAction(ACTION_STOP)) }
