@@ -10,8 +10,8 @@ import kotlin.math.sqrt
  * Stabilizes live vehicle GPS positions for passenger display.
  *
  * This class only limits physically implausible jumps between fresh GPS
- * samples. Road snapping is handled separately by PassengerMapView using
- * the actual rendered road network.
+ * samples. PassengerMapView renders the resulting live GPS position directly;
+ * no route-snap or fixed 20-meter correction is applied.
  */
 internal class VehicleLocationStabilizer(
     private val maxVehicleSpeedMetersPerSecond: Double = 32.0,
