@@ -135,14 +135,19 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                         .onSuccess { vehicles ->
                             val fresh = freshVehicles(vehicles)
                             val result = NearestVehicleCalculator.findNearest(passenger, fresh)
-                            val nextRequestId = _uiState.value.nearestVehicleRequestId + 1L
+                            val currentNearestId = _uiState.value.nearestVehicle?.id
+                            val nextRequestId = if (result?.vehicle?.id != currentNearestId) {
+                                _uiState.value.nearestVehicleRequestId + 1L
+                            } else {
+                                _uiState.value.nearestVehicleRequestId
+                            }
 
                             if (result == null) {
                                 _uiState.value = _uiState.value.copy(
                                     nearestVehicle = null,
                                     nearestVehicleDistanceMeters = null,
                                     nearestVehicleEtaMinutes = null,
-                                    nearestVehicleRequestId = nextRequestId,
+                                    nearestVehicleRequestId = if (currentNearestId != null) nextRequestId else _uiState.value.nearestVehicleRequestId,
                                     error = "Сейчас нет маршруток с актуальной геопозицией",
                                 )
                             } else {
