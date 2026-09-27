@@ -205,7 +205,6 @@ private fun PassengerMapScreen(
                 locateRequestId = ui.locateRequestId,
                 onLocateUser = viewModel::refreshPassengerLocation,
                 onShowNearestVehicle = viewModel::showNearestVehicleOnMap,
-                showNearestVehicleButton = true,
                 nearestVehicle = ui.nearestVehicle?.let { vehicle ->
                     vehicle.currentLocation?.let { location -> vehicle to location }
                 },
@@ -306,7 +305,21 @@ private fun PassengerMapScreen(
                                 color = Muted,
                             )
                         }
-                        SafarGlyph(Glyph.CHEVRON, Muted, 22.dp)
+                        Surface(
+                            modifier = Modifier
+                                .size(46.dp)
+                                .clickable { viewModel.showNearestVehicleOnMap() },
+                            shape = CircleShape,
+                            color = SoftBlue,
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                androidx.compose.material3.Text(
+                                    text = "⌖",
+                                    color = SafarBlue,
+                                    style = MaterialTheme.typography.titleLarge,
+                                )
+                            }
+                        }
                     }
                     Spacer(Modifier.height(14.dp))
                     HorizontalDivider(color = Border)
@@ -347,18 +360,13 @@ private fun PassengerMapScreen(
                             }
                         }
                         ui.nearestVehicleEtaMinutes?.let { eta ->
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = SoftBlue,
-                            ) {
-                                Text(
-                                    text = stringResource(R.string.nearest_vehicle_eta, eta),
-                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
-                                    color = SafarBlue,
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.labelLarge,
-                                )
-                            }
+                            Text(
+                                text = "≈ $eta мин",
+                                modifier = Modifier.padding(start = 8.dp),
+                                color = SafarBlue,
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.labelLarge,
+                            )
                         }
                     }
                 }
