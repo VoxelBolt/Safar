@@ -99,8 +99,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun showNearestVehicleOnMap() {
-        val passenger = _uiState.value.passengerLocation
-        if (!hasLocationPermission() || passenger == null) {
+        if (!hasLocationPermission()) {
             _uiState.value = _uiState.value.copy(
                 error = "Разрешите геолокацию, чтобы найти ближайшую маршрутку",
             )
@@ -108,36 +107,56 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             return
         }
 
+        val route = _uiState.value.selectedRoute
+        if (route == null) {
+            _uiState.value = _uiState.value.copy(error = "Сначала выберите маршрут")
+            return
+        }
+
         nearestVehicleRequestJob?.cancel()
         nearestVehicleRequestJob = viewModelScope.launch {
-            runCatching { vehicleRepository.getAllVehicles() }
-                .onSuccess { vehicles ->
-                    val fresh = freshVehicles(vehicles)
-                    val result = NearestVehicleCalculator.findNearest(passenger, fresh)
-                    if (result == null) {
-                        _uiState.value = _uiState.value.copy(
-                            nearestVehicle = null,
-                            nearestVehicleDistanceMeters = null,
-                            nearestVehicleEtaMinutes = null,
-                            nearestVehicleRequestId = _uiState.value.nearestVehicleRequestId + 1L,
-                            error = "Сейчас нет маршруток с актуальной геопозицией",
-                        )
-                        return@onSuccess
-                    }
+            locationProvider.currentLocationSample { sample ->
+                val passenger = sample?.point ?: _uiState.value.passengerLocation
+                if (passenger == null) {
+                    _uiState.value = _uiState.value.copy(
+                        error = "Не удалось получить ваше текущее местоположение",
+                    )
+                    return@currentLocationSample
+                }
 
-                    _uiState.value = _uiState.value.copy(
-                        nearestVehicle = result.vehicle,
-                        nearestVehicleDistanceMeters = result.distanceMeters,
-                        nearestVehicleEtaMinutes = result.etaMinutes,
-                        nearestVehicleRequestId = _uiState.value.nearestVehicleRequestId + 1L,
-                        error = null,
-                    )
+                _uiState.value = _uiState.value.copy(passengerLocation = passenger)
+
+                viewModelScope.launch {
+                    runCatching { vehicleRepository.getAllVehicles() }
+                        .onSuccess { vehicles ->
+                            val fresh = freshVehicles(vehicles)
+                            val result = NearestVehicleCalculator.findNearest(passenger, fresh)
+                            if (result == null) {
+                                _uiState.value = _uiState.value.copy(
+                                    nearestVehicle = null,
+                                    nearestVehicleDistanceMeters = null,
+                                    nearestVehicleEtaMinutes = null,
+                                    nearestVehicleRequestId = _uiState.value.nearestVehicleRequestId + 1L,
+                                    error = "Сейчас нет маршруток с актуальной геопозицией",
+                                )
+                                return@onSuccess
+                            }
+
+                            _uiState.value = _uiState.value.copy(
+                                nearestVehicle = result.vehicle,
+                                nearestVehicleDistanceMeters = result.distanceMeters,
+                                nearestVehicleEtaMinutes = result.etaMinutes,
+                                nearestVehicleRequestId = _uiState.value.nearestVehicleRequestId + 1L,
+                                error = null,
+                            )
+                        }
+                        .onFailure { error ->
+                            _uiState.value = _uiState.value.copy(
+                                error = error.message ?: "Не удалось найти ближайшую маршрутку",
+                            )
+                        }
                 }
-                .onFailure { error ->
-                    _uiState.value = _uiState.value.copy(
-                        error = error.message ?: "Не удалось найти ближайшую маршрутку",
-                    )
-                }
+            }
         }
     }
 
