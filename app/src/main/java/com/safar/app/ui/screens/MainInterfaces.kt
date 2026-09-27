@@ -859,7 +859,6 @@ private fun DriverHomeScreen(
                     }
                 }
             },
-            showNearestVehicleButton = false,
             vehicleLocations = emptyList(),
             passengerLocations = ui.passengerLocations,
             routeOpacity = 0.78f,
