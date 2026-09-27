@@ -361,7 +361,7 @@ private fun PassengerMapScreen(
                         }
                         ui.nearestVehicleEtaMinutes?.let { eta ->
                             Text(
-                                text = "≈ $eta мин",
+                                text = stringResource(R.string.nearest_vehicle_eta, eta),
                                 modifier = Modifier.padding(start = 8.dp),
                                 color = SafarBlue,
                                 fontWeight = FontWeight.Bold,
