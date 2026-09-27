@@ -106,6 +106,12 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             return
         }
 
+        val route = _uiState.value.selectedRoute
+        if (route == null) {
+            _uiState.value = _uiState.value.copy(error = "Сначала выберите маршрут")
+            return
+        }
+
         nearestVehicleRequestJob?.cancel()
         nearestVehicleRequestJob = viewModelScope.launch {
             locationProvider.currentLocationSample { sample ->
@@ -114,32 +120,40 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                     _uiState.value = _uiState.value.copy(error = "Не удалось получить ваше текущее местоположение")
                     return@currentLocationSample
                 }
-                val route = _uiState.value.selectedRoute
-                if (route == null) {
-                    _uiState.value = _uiState.value.copy(error = "Сначала выберите маршрут")
-                    return@currentLocationSample
+
+                // Calculate immediately from the vehicles already on screen. This makes
+                // the button responsive even when the network snapshot is slow.
+                val currentVehicles = freshVehicles(_uiState.value.activeVehicles)
+                _uiState.value = _uiState.value.copy(
+                    passengerLocation = passenger,
+                    nearestVehicleTrackingEnabled = true,
+                    error = null,
+                )
+                if (currentVehicles.isNotEmpty()) {
+                    updateNearestVehicle(passenger, currentVehicles, forceFocus = true)
                 }
-                viewModelScope.launch {
-                    runCatching { vehicleRepository.getVehiclesForRoute(route.id) }
-                        .onSuccess { vehicles ->
-                            val fresh = freshVehicles(vehicles).map { it.copy(active = true) }
-                            _uiState.value = _uiState.value.copy(
-                                passengerLocation = passenger,
-                                activeVehicles = fresh,
-                                nearestVehicleTrackingEnabled = true,
-                                error = null,
-                            )
-                            updateNearestVehicle(passenger, fresh, forceFocus = true)
-                        }
-                        .onFailure { error ->
-                            android.util.Log.w("SafarNearestVehicle", "Nearest snapshot failed", error)
-                            _uiState.value = _uiState.value.copy(
-                                passengerLocation = passenger,
-                                nearestVehicleTrackingEnabled = true,
-                                error = "Не удалось обновить транспорт. Показываю последние данные.",
-                            )
-                            updateNearestVehicle(passenger, _uiState.value.activeVehicles)
-                        }
+
+                // Refresh from the server and use every vehicle currently publishing
+                // a location on the selected route, not only the previously cached list.
+                runCatching {
+                    vehicleRepository.getAllVehicles().filter { it.routeId == route.id }
+                }.onSuccess { vehicles ->
+                    val fresh = freshVehicles(vehicles).map { it.copy(active = true) }
+                    _uiState.value = _uiState.value.copy(
+                        passengerLocation = passenger,
+                        activeVehicles = fresh,
+                        nearestVehicleTrackingEnabled = true,
+                        error = null,
+                    )
+                    updateNearestVehicle(passenger, fresh, forceFocus = true)
+                }.onFailure { error ->
+                    android.util.Log.w("SafarNearestVehicle", "Nearest snapshot failed", error)
+                    if (currentVehicles.isEmpty()) {
+                        _uiState.value = _uiState.value.copy(
+                            error = "Не удалось получить актуальные маршрутки",
+                            nearestVehicleTrackingEnabled = true,
+                        )
+                    }
                 }
             }
         }
