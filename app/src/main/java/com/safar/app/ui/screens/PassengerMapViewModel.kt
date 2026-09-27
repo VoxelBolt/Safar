@@ -100,87 +100,67 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun showNearestVehicleOnMap() {
-        if (!hasLocationPermission()) {
-            _uiState.value = _uiState.value.copy(error = "Разрешите геолокацию, чтобы найти ближайшую маршрутку")
-            requestCurrentLocation(centerCamera = false)
-            return
-        }
-
         val route = _uiState.value.selectedRoute
         if (route == null) {
             _uiState.value = _uiState.value.copy(error = "Сначала выберите маршрут")
             return
         }
 
+        if (!hasLocationPermission()) {
+            _uiState.value = _uiState.value.copy(error = "Разрешите геолокацию, чтобы найти ближайшую маршрутку")
+            requestCurrentLocation(centerCamera = false)
+            return
+        }
+
         nearestVehicleRequestJob?.cancel()
         nearestVehicleRequestJob = viewModelScope.launch {
-            locationProvider.currentLocationSample { sample ->
-                val passenger = sample?.point ?: _uiState.value.passengerLocation
-                if (passenger == null) {
-                    _uiState.value = _uiState.value.copy(error = "Не удалось получить ваше текущее местоположение")
-                    return@currentLocationSample
-                }
+            // Use the already-updated passenger GPS immediately. Do not wait for
+            // a second asynchronous callback: that made the button appear dead
+            // on devices where a fresh one-shot fix was delayed.
+            val passenger = _uiState.value.passengerLocation
+            if (passenger == null) {
+                requestCurrentLocation(centerCamera = false)
+                _uiState.value = _uiState.value.copy(
+                    error = "Получаю ваше местоположение…",
+                    nearestVehicleTrackingEnabled = true,
+                )
+                return@launch
+            }
 
-                // Calculate immediately from the vehicles already on screen. This makes
-                // the button responsive even when the network snapshot is slow.
-                val currentVehicles = freshVehicles(_uiState.value.activeVehicles)
+            _uiState.value = _uiState.value.copy(
+                passengerLocation = passenger,
+                nearestVehicleTrackingEnabled = true,
+                error = null,
+            )
+
+            val currentVehicles = freshVehicles(_uiState.value.activeVehicles)
+            if (currentVehicles.isNotEmpty()) {
+                updateNearestVehicle(passenger, currentVehicles, forceFocus = true)
+            }
+
+            runCatching {
+                vehicleRepository.getVehiclesForRoute(route.id)
+            }.onSuccess { vehicles ->
+                val fresh = freshVehicles(vehicles).map { it.copy(active = true) }
                 _uiState.value = _uiState.value.copy(
                     passengerLocation = passenger,
+                    activeVehicles = fresh,
                     nearestVehicleTrackingEnabled = true,
                     error = null,
                 )
-                if (currentVehicles.isNotEmpty()) {
-                    updateNearestVehicle(passenger, currentVehicles, forceFocus = true)
-                }
-
-                // Refresh from the server and use every vehicle currently publishing
-                // a location on the selected route, not only the previously cached list.
-                runCatching {
-                    vehicleRepository.getAllVehicles().filter { it.routeId == route.id }
-                }.onSuccess { vehicles ->
-                    val fresh = freshVehicles(vehicles).map { it.copy(active = true) }
+                updateNearestVehicle(passenger, fresh, forceFocus = true)
+            }.onFailure { error ->
+                android.util.Log.w("SafarNearestVehicle", "Nearest snapshot failed", error)
+                if (currentVehicles.isEmpty()) {
                     _uiState.value = _uiState.value.copy(
-                        passengerLocation = passenger,
-                        activeVehicles = fresh,
+                        error = "Не удалось получить актуальные маршрутки",
                         nearestVehicleTrackingEnabled = true,
-                        error = null,
                     )
-                    updateNearestVehicle(passenger, fresh, forceFocus = true)
-                }.onFailure { error ->
-                    android.util.Log.w("SafarNearestVehicle", "Nearest snapshot failed", error)
-                    if (currentVehicles.isEmpty()) {
-                        _uiState.value = _uiState.value.copy(
-                            error = "Не удалось получить актуальные маршрутки",
-                            nearestVehicleTrackingEnabled = true,
-                        )
-                    }
                 }
             }
         }
     }
 
-    private fun updateNearestVehicle(passenger: GeoPoint, vehicles: List<Vehicle>, forceFocus: Boolean = false) {
-        val result = NearestVehicleCalculator.findNearest(passenger, freshVehicles(vehicles))
-        val currentId = _uiState.value.nearestVehicle?.id
-        val nextRequestId = if (forceFocus || result?.vehicle?.id != currentId) _uiState.value.nearestVehicleRequestId + 1L else _uiState.value.nearestVehicleRequestId
-        _uiState.value = if (result == null) {
-            _uiState.value.copy(
-                nearestVehicle = null,
-                nearestVehicleDistanceMeters = null,
-                nearestVehicleEtaMinutes = null,
-                nearestVehicleRequestId = nextRequestId,
-                error = "Сейчас нет маршруток с актуальной геопозицией",
-            )
-        } else {
-            _uiState.value.copy(
-                nearestVehicle = result.vehicle,
-                nearestVehicleDistanceMeters = result.distanceMeters,
-                nearestVehicleEtaMinutes = result.etaMinutes,
-                nearestVehicleRequestId = nextRequestId,
-                error = null,
-            )
-        }
-    }
     fun selectRoute(route: Route) {
         val oldRouteId = _uiState.value.selectedRoute?.id
         _uiState.value = _uiState.value.copy(
