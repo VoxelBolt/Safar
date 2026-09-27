@@ -333,7 +333,7 @@ private fun PassengerMapScreen(
                             )
                             if (activeVehicle != null) {
                                 Text(
-                                    "Активных водителей на маршруте: ${ui.activeVehicles.size}",
+                                    activeVehicle.routeId?.let { routeId -> ui.routes.firstOrNull { it.id == routeId }?.number }?.let { routeNumber -> "Маршрут $routeNumber" } ?: "Активных водителей: ${ui.activeVehicles.size}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Muted,
                                 )
