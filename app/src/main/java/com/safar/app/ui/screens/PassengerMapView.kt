@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.PointF
 import android.os.Bundle
+import android.util.Log
 import org.json.JSONObject
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -20,6 +21,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -704,6 +706,8 @@ private suspend fun snapFromOsrm(
                 }
             }
 
+            Log.d("SafarRoadSnap", "vehicle GPS=${location.latitude},${location.longitude} nearestRoad=${bestDistance}m")
+
             if (bestDistance > 20.0 ||
                 !bestLongitude.isFinite() ||
                 !bestLatitude.isFinite()
@@ -714,6 +718,11 @@ private suspend fun snapFromOsrm(
             val snapped = location.copy(
                 latitude = bestLatitude,
                 longitude = bestLongitude,
+            )
+
+            Log.d(
+                "SafarRoadSnap",
+                "SNAPPED =${location.latitude},${location.longitude} -> ${snapped.latitude},${snapped.longitude} (${bestDistance}m)"
             )
 
             // The feature's contract is strict: only move a vehicle when the
