@@ -1,5 +1,6 @@
 package com.safar.app.ui.screens
 
+import com.safar.app.R
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
