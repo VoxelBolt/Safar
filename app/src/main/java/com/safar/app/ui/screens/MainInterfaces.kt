@@ -305,7 +305,21 @@ private fun PassengerMapScreen(
                                 color = Muted,
                             )
                         }
-                        SafarGlyph(Glyph.CHEVRON, Muted, 22.dp)
+                        if (ui.selectedRoute != null) {
+                            Surface(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clickable { viewModel.showNearestVehicleOnMap() },
+                                shape = CircleShape,
+                                color = SoftBlue,
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    SafarGlyph(Glyph.BUS, SafarBlue, 22.dp)
+                                }
+                            }
+                        } else {
+                            SafarGlyph(Glyph.CHEVRON, Muted, 22.dp)
+                        }
                     }
                     Spacer(Modifier.height(14.dp))
                     HorizontalDivider(color = Border)
@@ -346,12 +360,18 @@ private fun PassengerMapScreen(
                             }
                         }
                         ui.nearestVehicleEtaMinutes?.let { eta ->
-                            Text(
-                                text = stringResource(R.string.nearest_vehicle_eta, eta),
-                                color = SafarBlue,
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.titleMedium,
-                            )
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = SoftBlue,
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.nearest_vehicle_eta, eta),
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                                    color = SafarBlue,
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
+                            }
                         }
                     }
                 }
