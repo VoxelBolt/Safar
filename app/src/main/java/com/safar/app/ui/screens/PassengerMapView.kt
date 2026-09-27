@@ -653,7 +653,6 @@ private fun snapLocationToRenderedRoad(
         .toFloat()
 
     val features = mutableListOf<Feature>()
-    val seenGeometry = mutableSetOf<String>()
     val steps = 6
 
     for (y in 0..steps) {
@@ -675,15 +674,7 @@ private fun snapLocationToRenderedRoad(
                 map.queryRenderedFeatures(sample, roadLayerIds)
             }.getOrDefault(emptyList())
 
-            sampleFeatures.forEach { feature ->
-                val geometryKey = runCatching {
-                    feature.geometry()?.toJson()
-                }.getOrNull() ?: return@forEach
-
-                if (seenGeometry.add(geometryKey)) {
-                    features += feature
-                }
-            }
+            features += sampleFeatures
         }
     }
 
