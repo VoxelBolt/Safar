@@ -292,6 +292,24 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    private fun updateNearestVehicle(
+        passenger: GeoPoint,
+        vehicles: List<Vehicle>,
+        forceFocus: Boolean = false,
+    ) {
+        val result = NearestVehicleCalculator.findNearest(passenger, vehicles)
+        _uiState.value = _uiState.value.copy(
+            nearestVehicle = result?.vehicle,
+            nearestVehicleDistanceMeters = result?.distanceMeters,
+            nearestVehicleEtaMinutes = result?.etaMinutes,
+            nearestVehicleRequestId = if (forceFocus && result != null) {
+                _uiState.value.nearestVehicleRequestId + 1L
+            } else {
+                _uiState.value.nearestVehicleRequestId
+            },
+        )
+    }
+
     private fun startStaleSweep() {
         if (staleSweepJob?.isActive == true) return
         staleSweepJob = viewModelScope.launch {
