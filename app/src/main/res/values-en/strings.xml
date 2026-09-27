@@ -105,4 +105,6 @@
     <string name="route_ready">Route path available</string>
     <string name="route_path_unavailable">Route path is not available yet</string>
     <string name="retry">Retry</string>
+    <string name="find_nearest_vehicle">Find nearest minibus</string>
+    <string name="nearest_vehicle_eta">%1$d min</string>
 </resources>
