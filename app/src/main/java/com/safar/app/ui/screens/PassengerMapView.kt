@@ -106,7 +106,6 @@ private const val VEHICLES_SOURCE_ID = "safar-vehicles-source"
 private const val VEHICLES_LAYER_ID = "safar-vehicles-layer"
 private const val VEHICLE_ICON_LAYER_ID = "safar-vehicle-icon-layer"
 private const val VEHICLE_LABEL_LAYER_ID = "safar-vehicle-label-layer"
-private const val VEHICLE_ICON_IMAGE_ID = "safar-vehicle-icon"
 
 private const val DEFAULT_LATITUDE = 40.2829
 private const val DEFAULT_LONGITUDE = 69.6228
@@ -151,7 +150,10 @@ internal fun PassengerMapView(
     val stabilizedVehicleLocations = vehicleLocationStabilizer.stabilize(vehicleLocations)
     var snappedVehicleLocations by remember { mutableStateOf(stabilizedVehicleLocations) }
     val vehicleMarkerIcon = remember(context) {
-        IconFactory.getInstance(context).fromBitmap(decodeVehicleMarkerBitmap(context))
+        val bitmap = decodeVehicleMarkerBitmap(context)
+        val sizePx = (64f * context.resources.displayMetrics.density).toInt().coerceAtLeast(1)
+        val scaled = Bitmap.createScaledBitmap(bitmap, sizePx, sizePx, true)
+        IconFactory.getInstance(context).fromBitmap(scaled)
     }
 
     rememberMapLibre(context)
@@ -320,18 +322,24 @@ internal fun PassengerMapView(
 
     // Road snapping is asynchronous because the reliable fallback uses the
     // OpenStreetMap road network. Do not block the MapLibre UI thread.
-    LaunchedEffect(styleReady, stabilizedVehicleLocations) {
-        if (!styleReady || stabilizedVehicleLocations.isEmpty()) {
-            snappedVehicleLocations = stabilizedVehicleLocations
-            return@LaunchedEffect
-        }
+    val latestStabilizedVehicleLocations by rememberUpdatedState(stabilizedVehicleLocations)
 
-        delay(500L)
+    LaunchedEffect(styleReady) {
+        if (!styleReady) return@LaunchedEffect
+
+        delay(800L)
+
         while (true) {
-            snappedVehicleLocations = snapVehiclesToRoadNetwork(
-                map = map,
-                locations = stabilizedVehicleLocations,
-            )
+            val latest = latestStabilizedVehicleLocations
+            snappedVehicleLocations = if (latest.isEmpty()) {
+                emptyList()
+            } else {
+                snapVehiclesToRoadNetwork(
+                    map = map,
+                    locations = latest,
+                )
+            }
+
             delay(3_000L)
         }
     }
@@ -447,18 +455,6 @@ private fun setupMapLayers(style: Style, context: Context) {
             circleStrokeColor(Color.White.toArgb()),
             circleStrokeWidth(3f),
             circleOpacity(1f),
-        )
-    )
-    if (style.getImage(VEHICLE_ICON_IMAGE_ID) == null) {
-        style.addImage(VEHICLE_ICON_IMAGE_ID, decodeVehicleMarkerBitmap(context))
-    }
-    style.getLayer(VEHICLE_ICON_LAYER_ID)?.let { style.removeLayer(VEHICLE_ICON_LAYER_ID) }
-    style.addLayer(
-        SymbolLayer(VEHICLE_ICON_LAYER_ID, VEHICLES_SOURCE_ID).withProperties(
-            iconImage(VEHICLE_ICON_IMAGE_ID),
-            iconSize(0.95f),
-            iconAllowOverlap(true),
-            iconIgnorePlacement(true),
         )
     )
     if (style.getLayer(VEHICLE_LABEL_LAYER_ID) == null) {
@@ -662,7 +658,7 @@ private suspend fun snapFromOsrm(
         val url = URL(
             "https://router.project-osrm.org/nearest/v1/driving/" +
                 "${location.longitude},${location.latitude}.json" +
-                "?number=3&radiuses=20"
+                "?number=1"
         )
 
         val connection = (url.openConnection() as HttpURLConnection).apply {
@@ -715,10 +711,23 @@ private suspend fun snapFromOsrm(
                 return@runCatching null
             }
 
-            location.copy(
+            val snapped = location.copy(
                 latitude = bestLatitude,
                 longitude = bestLongitude,
             )
+
+            // The feature's contract is strict: only move a vehicle when the
+            // nearest road is at most 20 meters from its actual GPS position.
+            // Check the returned coordinates independently as a second guard.
+            if (haversineDistanceMeters(
+                    GeoPoint(location.latitude, location.longitude),
+                    GeoPoint(snapped.latitude, snapped.longitude),
+                ) > 20.0
+            ) {
+                return@runCatching null
+            }
+
+            snapped
         } finally {
             connection.disconnect()
         }
