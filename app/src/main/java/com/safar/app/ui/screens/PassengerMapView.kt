@@ -5,7 +5,6 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.PointF
-import android.graphics.RectF
 import android.os.Bundle
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
