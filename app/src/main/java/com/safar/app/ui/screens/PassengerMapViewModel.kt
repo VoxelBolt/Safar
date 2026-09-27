@@ -129,7 +129,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                                 nearestVehicleTrackingEnabled = true,
                                 error = null,
                             )
-                            updateNearestVehicle(passenger, fresh)
+                            updateNearestVehicle(passenger, fresh, forceFocus = true)
                         }
                         .onFailure { error ->
                             android.util.Log.w("SafarNearestVehicle", "Nearest snapshot failed", error)
@@ -145,10 +145,10 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
-    private fun updateNearestVehicle(passenger: GeoPoint, vehicles: List<Vehicle>) {
+    private fun updateNearestVehicle(passenger: GeoPoint, vehicles: List<Vehicle>, forceFocus: Boolean = false) {
         val result = NearestVehicleCalculator.findNearest(passenger, freshVehicles(vehicles))
         val currentId = _uiState.value.nearestVehicle?.id
-        val nextRequestId = if (result?.vehicle?.id != currentId) _uiState.value.nearestVehicleRequestId + 1L else _uiState.value.nearestVehicleRequestId
+        val nextRequestId = if (forceFocus || result?.vehicle?.id != currentId) _uiState.value.nearestVehicleRequestId + 1L else _uiState.value.nearestVehicleRequestId
         _uiState.value = if (result == null) {
             _uiState.value.copy(
                 nearestVehicle = null,
