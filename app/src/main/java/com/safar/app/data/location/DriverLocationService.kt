@@ -175,6 +175,7 @@ class DriverLocationService : Service() {
             driverSnapshotLoadedAt = now
         }
         val driver = driverSnapshot.get() ?: error("Driver profile not found")
+        val routeId = driver.routeId ?: error("Driver route is not assigned yet")
         val timestamp = recordedAtIso ?: Instant.now().toString()
 
         // The database write is authoritative. Do not broadcast a location to
