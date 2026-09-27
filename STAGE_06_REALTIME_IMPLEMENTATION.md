@@ -109,3 +109,12 @@ A Realtime `INSERT` RLS policy was added for authenticated clients on route-scop
 Passenger route changes stop the old publisher and switch the realtime subscription to the new route. Driver route changes similarly replace the passenger subscription with the new route. GPS collection remains independent of Work Session state.
 
 Full Android Gradle build and two-device end-to-end execution remain environment-dependent; this container does not provide the Android SDK/ADB/Gradle wrapper JAR required for those checks.
+
+
+## Stage 07 — Nearest vehicle and ETA
+
+The passenger map now has an explicit nearest-vehicle control. Tapping it reads all current vehicle rows from the authenticated `vehicle_current_locations` view, removes stale coordinates using the existing one-minute freshness guard, calculates the closest vehicle by Haversine GPS distance, centers the map on that vehicle, and shows an approximate ETA.
+
+The displayed ETA is intentionally an approximation: it uses straight-line GPS distance and a configurable urban average vehicle speed of 25 km/h. It is not road-network routing and does not account for traffic, turns, stops, or the remaining route geometry.
+
+Vehicle GPS tracking remains independent from Work Session state. Pause and Finish no longer stop the Driver Location Foreground Service from the Driver UI or ViewModel.

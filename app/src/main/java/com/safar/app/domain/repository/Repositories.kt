@@ -20,6 +20,7 @@ interface RouteRepository {
 
 interface VehicleRepository {
     suspend fun getVehiclesForRoute(routeId: String): List<Vehicle>
+    suspend fun getAllVehicles(): List<Vehicle>
     suspend fun getActiveVehiclesForRoute(routeId: String): List<Vehicle>
 }
 

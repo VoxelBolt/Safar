@@ -37,6 +37,10 @@ data class PassengerMapUiState(
     val passengerLocation: GeoPoint? = null,
     val headingDegrees: Float? = null,
     val locateRequestId: Long = 0L,
+    val nearestVehicle: Vehicle? = null,
+    val nearestVehicleDistanceMeters: Double? = null,
+    val nearestVehicleEtaMinutes: Int? = null,
+    val nearestVehicleRequestId: Long = 0L,
     val loadingRoutes: Boolean = false,
     val loadingVehicles: Boolean = false,
     val error: String? = null,
@@ -59,6 +63,8 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     private var staleSweepJob: Job? = null
     private var headingJob: Job? = null
     private var locateRequestJob: Job? = null
+    private var nearestVehicleRequestJob: Job? = null
+    private var nearestVehicleRefreshJob: Job? = null
 
     init {
         refreshLocationPermissionState()
@@ -93,6 +99,80 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    fun showNearestVehicleOnMap() {
+        if (!hasLocationPermission()) {
+            _uiState.value = _uiState.value.copy(
+                error = "Разрешите геолокацию, чтобы найти ближайшую маршрутку",
+            )
+            requestCurrentLocation(centerCamera = false)
+            return
+        }
+
+        nearestVehicleRequestJob?.cancel()
+        nearestVehicleRequestJob = viewModelScope.launch {
+            locationProvider.currentLocationSample { sample ->
+                val passenger = sample?.point ?: _uiState.value.passengerLocation
+                if (passenger == null) {
+                    _uiState.value = _uiState.value.copy(
+                        error = "Не удалось получить ваше текущее местоположение",
+                    )
+                    return@currentLocationSample
+                }
+
+                _uiState.value = _uiState.value.copy(passengerLocation = passenger)
+                startNearestVehicleRefresh()
+            }
+        }
+    }
+
+    private fun startNearestVehicleRefresh() {
+        nearestVehicleRefreshJob?.cancel()
+        nearestVehicleRefreshJob = viewModelScope.launch {
+            while (isActive && _uiState.value.nearestVehicleRequestId >= 0L) {
+                val passenger = _uiState.value.passengerLocation
+                if (passenger != null) {
+                    runCatching { vehicleRepository.getAllVehicles() }
+                        .onSuccess { vehicles ->
+                            val fresh = freshVehicles(vehicles)
+                            val result = NearestVehicleCalculator.findNearest(passenger, fresh)
+                            val currentNearestId = _uiState.value.nearestVehicle?.id
+                            val nextRequestId = if (result?.vehicle?.id != currentNearestId) {
+                                _uiState.value.nearestVehicleRequestId + 1L
+                            } else {
+                                _uiState.value.nearestVehicleRequestId
+                            }
+
+                            if (result == null) {
+                                _uiState.value = _uiState.value.copy(
+                                    nearestVehicle = null,
+                                    nearestVehicleDistanceMeters = null,
+                                    nearestVehicleEtaMinutes = null,
+                                    nearestVehicleRequestId = if (currentNearestId != null) nextRequestId else _uiState.value.nearestVehicleRequestId,
+                                    error = "Сейчас нет маршруток с актуальной геопозицией",
+                                )
+                            } else {
+                                _uiState.value = _uiState.value.copy(
+                                    nearestVehicle = result.vehicle,
+                                    nearestVehicleDistanceMeters = result.distanceMeters,
+                                    nearestVehicleEtaMinutes = result.etaMinutes,
+                                    nearestVehicleRequestId = nextRequestId,
+                                    error = null,
+                                )
+                            }
+                        }
+                        .onFailure { error ->
+                            android.util.Log.w(
+                                "SafarNearestVehicle",
+                                "Nearest vehicle refresh failed",
+                                error,
+                            )
+                        }
+                }
+                delay(5_000L)
+            }
+        }
+    }
+
     fun selectRoute(route: Route) {
         val oldRouteId = _uiState.value.selectedRoute?.id
         _uiState.value = _uiState.value.copy(
@@ -102,6 +182,10 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                 _uiState.value.recentRoutes.filter { it.id != route.id }.take(2).forEach(::add)
             },
             activeVehicles = emptyList(),
+            nearestVehicle = null,
+            nearestVehicleDistanceMeters = null,
+            nearestVehicleEtaMinutes = null,
+            nearestVehicleRequestId = 0L,
             error = null,
         )
         loadVehicles(route)
@@ -214,9 +298,17 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         staleSweepJob = viewModelScope.launch {
             while (isActive) {
                 delay(STALE_SWEEP_INTERVAL_MS)
-                val fresh = freshVehicles(_uiState.value.activeVehicles)
-                if (fresh.size != _uiState.value.activeVehicles.size) {
-                    _uiState.value = _uiState.value.copy(activeVehicles = fresh)
+                val current = _uiState.value
+                val fresh = freshVehicles(current.activeVehicles)
+                val nearestStillFresh = current.nearestVehicle?.currentLocation?.timestampEpochMs
+                    ?.let(::isFresh) == true
+                if (fresh.size != current.activeVehicles.size || !nearestStillFresh && current.nearestVehicle != null) {
+                    _uiState.value = current.copy(
+                        activeVehicles = fresh,
+                        nearestVehicle = if (nearestStillFresh) current.nearestVehicle else null,
+                        nearestVehicleDistanceMeters = if (nearestStillFresh) current.nearestVehicleDistanceMeters else null,
+                        nearestVehicleEtaMinutes = if (nearestStillFresh) current.nearestVehicleEtaMinutes else null,
+                    )
                 }
             }
         }
@@ -350,12 +442,15 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     }
 
     override fun onCleared() {
+        nearestVehicleRequestJob?.cancel()
         stopLocationUpdates()
         vehicleLocationPollingJob?.cancel()
         realtimeJob?.cancel()
         staleSweepJob?.cancel()
         vehicleRefreshJob?.cancel()
         realtimeTransport.disconnect()
+        nearestVehicleRequestJob?.cancel()
+        nearestVehicleRefreshJob?.cancel()
         super.onCleared()
     }
 

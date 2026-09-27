@@ -204,6 +204,11 @@ private fun PassengerMapScreen(
                 locationPermissionGranted = !ui.locationPermissionRequired,
                 locateRequestId = ui.locateRequestId,
                 onLocateUser = viewModel::refreshPassengerLocation,
+                onShowNearestVehicle = viewModel::showNearestVehicleOnMap,
+                nearestVehicle = ui.nearestVehicle?.let { vehicle ->
+                    vehicle.currentLocation?.let { location -> vehicle to location }
+                },
+                nearestVehicleRequestId = ui.nearestVehicleRequestId,
                 vehicleLocations = ui.activeVehicles.mapNotNull { vehicle ->
                     vehicle.currentLocation?.let { vehicle to it }
                 },
@@ -312,7 +317,7 @@ private fun PassengerMapScreen(
                         color = SafarNavy,
                     )
                     Spacer(Modifier.height(8.dp))
-                    val activeVehicle = ui.activeVehicles.firstOrNull()
+                    val activeVehicle = ui.nearestVehicle ?: ui.activeVehicles.firstOrNull()
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Surface(
                             shape = CircleShape,
@@ -328,7 +333,7 @@ private fun PassengerMapScreen(
                             )
                             if (activeVehicle != null) {
                                 Text(
-                                    "Активных водителей на маршруте: ${ui.activeVehicles.size}",
+                                    activeVehicle.routeId?.let { routeId -> ui.routes.firstOrNull { it.id == routeId }?.number }?.let { routeNumber -> stringResource(R.string.route_number_format, routeNumber) } ?: "Активных водителей: ${ui.activeVehicles.size}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Muted,
                                 )
@@ -339,6 +344,14 @@ private fun PassengerMapScreen(
                                     color = Muted,
                                 )
                             }
+                        }
+                        ui.nearestVehicleEtaMinutes?.let { eta ->
+                            Text(
+                                text = stringResource(R.string.nearest_vehicle_eta, eta),
+                                color = SafarBlue,
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleMedium,
+                            )
                         }
                     }
                 }
@@ -635,12 +648,11 @@ fun DriverMainScreen(state: OnboardingState) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var foregroundLocationGranted by remember { mutableStateOf(hasForegroundLocationPermission(context)) }
-    // The server should receive a driver location only while the driver has an
-    // active work session. Starting the foreground service from the active-session
-    // state also avoids Android background-start restrictions and stale vehicles.
+    // Driver GPS tracking is independent from the Work Session timer. A driver
+    // with location permission and an assigned route stays visible to passengers
+    // even after Pause/Finish.
     val trackingReady = foregroundLocationGranted &&
-        ui.driver?.routeId != null &&
-        ui.workSession?.status == com.safar.app.domain.model.WorkSessionStatus.ACTIVE
+        ui.driver?.routeId != null
 
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -648,8 +660,7 @@ fun DriverMainScreen(state: OnboardingState) {
         foregroundLocationGranted = result[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
             result[Manifest.permission.ACCESS_COARSE_LOCATION] == true ||
             hasForegroundLocationPermission(context)
-        // Starting is driven by trackingReady below: GPS publishing starts when
-        // the driver actually begins an ACTIVE work session.
+        // GPS publishing starts as soon as the driver has permission and an assigned route; it is not tied to the timer.
     }
 
     androidx.compose.runtime.DisposableEffect(lifecycleOwner, trackingReady) {
@@ -683,8 +694,6 @@ fun DriverMainScreen(state: OnboardingState) {
     LaunchedEffect(trackingReady) {
         if (trackingReady) {
             runCatching { DriverLocationService.start(context) }
-        } else {
-            runCatching { DriverLocationService.stop(context) }
         }
     }
 
@@ -753,11 +762,11 @@ private fun DriverHomeScreen(
     var driverLocation by remember { mutableStateOf<GeoPoint?>(null) }
     var driverLocateRequestId by remember { mutableLongStateOf(0L) }
 
-    // Fail-safe publisher: while the driver screen is visible and work is ACTIVE,
-    // also send a fresh GPS fix every 5 seconds. The foreground service remains
-    // responsible for background tracking.
-    LaunchedEffect(status, foregroundLocationGranted) {
-        if (status != WorkSessionStatus.ACTIVE || !foregroundLocationGranted) return@LaunchedEffect
+    // Fail-safe publisher: while the driver screen is visible and the driver has
+    // an assigned route, also send a fresh GPS fix every 5 seconds. The foreground
+    // service remains responsible for background tracking.
+    LaunchedEffect(ui.driver?.routeId, foregroundLocationGranted) {
+        if (ui.driver?.routeId == null || !foregroundLocationGranted) return@LaunchedEffect
         while (true) {
             driverLocationProvider.currentLocationSample { sample ->
                 if (sample != null) {
