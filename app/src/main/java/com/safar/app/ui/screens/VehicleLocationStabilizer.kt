@@ -10,9 +10,9 @@ import kotlin.math.sqrt
 /**
  * Stabilizes a live vehicle marker for passenger display.
  *
- * When a raw GPS fix is within 20m of the selected Safar route polyline,
- * display it on the nearest point of that route. Large unsnapped jumps are
- * ignored rather than rendered as teleportation.
+ * Smooths implausible live GPS jumps. Road snapping is intentionally handled
+ * by PassengerMapView against the actual rendered road network, because the
+ * database route path can be approximate.
  */
 internal class VehicleLocationStabilizer(
     private val snapDistanceMeters: Double = 20.0,
@@ -27,7 +27,6 @@ internal class VehicleLocationStabilizer(
 
     fun stabilize(
         locations: List<Pair<Vehicle, VehicleLocation>>,
-        routePath: List<GeoPoint>,
     ): List<Pair<Vehicle, VehicleLocation>> {
         val activeIds = locations.mapTo(mutableSetOf()) { it.first.id }
         states.keys.toList()
@@ -42,19 +41,12 @@ internal class VehicleLocationStabilizer(
     private fun stabilizeOne(
         vehicle: Vehicle,
         rawLocation: VehicleLocation,
-        routePath: List<GeoPoint>,
     ): VehicleLocation {
         val rawPoint = GeoPoint(rawLocation.latitude, rawLocation.longitude)
-        val projection = nearestPointOnPolyline(rawPoint, routePath)
-        val snappedPoint = projection
-            ?.takeIf { it.distanceMeters <= snapDistanceMeters }
-            ?.point
-
-        val targetPoint = snappedPoint ?: rawPoint
         val previous = states[vehicle.id]
 
         val displayPoint = if (previous == null) {
-            targetPoint
+            rawPoint
         } else {
             val elapsedSeconds = (
                 (rawLocation.timestampEpochMs - previous.timestampEpochMs) / 1000.0
@@ -64,16 +56,12 @@ internal class VehicleLocationStabilizer(
                 25.0,
                 maxVehicleSpeedMetersPerSecond * elapsedSeconds + 8.0,
             )
-            val distanceToTarget = distanceMeters(previous.point, targetPoint)
+            val distanceToTarget = distanceMeters(previous.point, rawPoint)
 
-            when {
-                distanceToTarget <= maxMoveMeters -> targetPoint
-                snappedPoint != null -> moveTowards(
-                    previous.point,
-                    targetPoint,
-                    maxMoveMeters,
-                )
-                else -> previous.point
+            if (distanceToTarget <= maxMoveMeters) {
+                rawPoint
+            } else {
+                moveTowards(previous.point, rawPoint, maxMoveMeters)
             }
         }
 
@@ -102,52 +90,7 @@ internal class VehicleLocationStabilizer(
             return Projection(path.first(), distanceMeters(point, path.first()))
         }
 
-        var best: Projection? = null
-        for (index in 0 until path.lastIndex) {
-            val candidate = projectOntoSegment(point, path[index], path[index + 1])
-            if (best == null || candidate.distanceMeters < best.distanceMeters) {
-                best = candidate
-            }
-        }
-        return best
-    }
-
-    private fun projectOntoSegment(
-        point: GeoPoint,
-        start: GeoPoint,
-        end: GeoPoint,
-    ): Projection {
-        val referenceLatRad = Math.toRadians((point.latitude + start.latitude + end.latitude) / 3.0)
-        val metersPerLat = 111_320.0
-        val metersPerLon = 111_320.0 * cos(referenceLatRad)
-
-        fun x(longitude: Double) = (longitude - start.longitude) * metersPerLon
-        fun y(latitude: Double) = (latitude - start.latitude) * metersPerLat
-
-        val px = x(point.longitude)
-        val py = y(point.latitude)
-        val bx = x(end.longitude)
-        val by = y(end.latitude)
-        val lengthSquared = bx * bx + by * by
-
-        val t = if (lengthSquared <= 1e-9) {
-            0.0
-        } else {
-            ((px * bx + py * by) / lengthSquared).coerceIn(0.0, 1.0)
-        }
-
-        val projected = GeoPoint(
-            latitude = start.latitude + (end.latitude - start.latitude) * t,
-            longitude = start.longitude + (end.longitude - start.longitude) * t,
-        )
-
-        return Projection(
-            point = projected,
-            distanceMeters = distanceMeters(point, projected),
-        )
-    }
-
-    private fun moveTowards(
+        var best: Projection?     private fun moveTowards(
         from: GeoPoint,
         to: GeoPoint,
         maxDistanceMeters: Double,
