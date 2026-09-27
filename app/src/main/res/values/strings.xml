@@ -110,6 +110,6 @@
     <string name="route_path_unavailable">Путь маршрута пока недоступен</string>
     <string name="retry">Повторить</string>
     <string name="find_nearest_vehicle">Найти ближайшую маршрутку</string>
-    <string name="nearest_vehicle_eta">%1$d мин</string>
+    <string name="nearest_vehicle_eta">~%1$d мин</string>
     <string name="route_number_format">Маршрут %1$s</string>
 </resources>
