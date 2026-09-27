@@ -345,6 +345,14 @@ private fun PassengerMapScreen(
                                 )
                             }
                         }
+                        ui.nearestVehicleEtaMinutes?.let { eta ->
+                            Text(
+                                text = stringResource(R.string.nearest_vehicle_eta, eta),
+                                color = SafarBlue,
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                        }
                     }
                 }
             }
