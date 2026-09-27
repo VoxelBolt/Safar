@@ -230,7 +230,21 @@ internal fun PassengerMapView(
             updateUserLocation(style, passengerLocation)
         }
 
-        if (passengerLocation != null && !centeredOnUser) {
+        // Always bring the first active vehicle into view when one appears.
+        // This is route-agnostic: route 3, 8, 15, etc. all use the same live
+        // vehicle list. Passenger location is used only when there is no active
+        // vehicle to focus.
+        val vehicle = vehicleLocations.firstOrNull()
+        if (vehicle != null && vehicle.first.id != lastFocusedVehicleId) {
+            map?.animateCamera(
+                CameraUpdateFactory.newLatLngZoom(
+                    LatLng(vehicle.second.latitude, vehicle.second.longitude),
+                    USER_FOCUS_ZOOM,
+                )
+            )
+            lastFocusedVehicleId = vehicle.first.id
+            centeredOnUser = false
+        } else if (vehicle == null && passengerLocation != null && !centeredOnUser) {
             map?.animateCamera(
                 CameraUpdateFactory.newLatLngZoom(
                     LatLng(passengerLocation.latitude, passengerLocation.longitude),
@@ -238,22 +252,6 @@ internal fun PassengerMapView(
                 )
             )
             centeredOnUser = true
-        } else if (passengerLocation == null) {
-            // When the passenger has not granted location access, make the first
-            // active vehicle visible automatically. The vehicle can be several
-            // kilometers away from the route midpoint, so leaving the camera at
-            // the route midpoint can make a perfectly valid vehicle marker look
-            // like it is missing.
-            val vehicle = vehicleLocations.firstOrNull()
-            if (vehicle != null && vehicle.first.id != lastFocusedVehicleId) {
-                map?.animateCamera(
-                    CameraUpdateFactory.newLatLngZoom(
-                        LatLng(vehicle.second.latitude, vehicle.second.longitude),
-                        USER_FOCUS_ZOOM,
-                    )
-                )
-                lastFocusedVehicleId = vehicle.first.id
-            }
         }
     }
 
