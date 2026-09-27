@@ -143,7 +143,7 @@ internal fun PassengerMapView(
     val vehicleMarkers = remember { mutableMapOf<String, Marker>() }
     val vehicleLocationStabilizer = remember(route?.id) { VehicleLocationStabilizer() }
     val stabilizedVehicleLocations = vehicleLocationStabilizer.stabilize(
-        locations = stabilizedVehicleLocations,
+        locations = vehicleLocations,
         routePath = route?.path.orEmpty(),
     )
     val vehicleMarkerIcon = remember(context) {
@@ -243,7 +243,7 @@ internal fun PassengerMapView(
             updateRoute(style, route, routeOpacity)
             updateRouteStation(style, route)
             updateHeadingSector(style, passengerLocation, headingDegrees)
-            updateVehicles(style, stabilizedVehicleLocations, route?.number)
+            updateVehicles(style, stabilizedVehicleLocations)
             updateUserLocation(style, passengerLocation)
         }
 
