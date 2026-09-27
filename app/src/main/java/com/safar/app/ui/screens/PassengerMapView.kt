@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.PointF
+import android.graphics.RectF
 import android.os.Bundle
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -670,7 +671,11 @@ private fun snapLocationToRenderedRoad(
             )
 
             val sampleFeatures = runCatching {
-                map.queryRenderedFeatures(sample, roadLayerIds)
+                map.queryRenderedFeatures(sample)
+                    .filter { feature ->
+                        feature.geometry() is LineString ||
+                            feature.geometry() is MultiLineString
+                    }
             }.getOrDefault(emptyList())
 
             features += sampleFeatures
