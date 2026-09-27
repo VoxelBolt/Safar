@@ -27,6 +27,7 @@ interface SafarApi {
     suspend fun getRoutes(): List<Route>
     suspend fun getRoute(routeId: String): Route?
     suspend fun getVehiclesForRoute(routeId: String): List<Vehicle>
+    suspend fun getAllVehicles(): List<Vehicle>
     suspend fun getActiveVehiclesForRoute(routeId: String): List<Vehicle>
 
     suspend fun getFavoriteVehicles(): List<FavoriteVehicle>
