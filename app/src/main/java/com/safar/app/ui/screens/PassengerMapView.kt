@@ -255,8 +255,18 @@ internal fun PassengerMapView(
         }
     }
 
-    LaunchedEffect(styleReady, route?.id) {
+    LaunchedEffect(styleReady, route?.id, vehicleLocations) {
         if (!styleReady || route == null || route.id == lastCameraRouteId) return@LaunchedEffect
+
+        // If a live vehicle exists, the vehicle-camera effect above owns the
+        // camera. Never move the map back to the route midpoint afterwards.
+        // Otherwise the active vehicle can be rendered outside the viewport,
+        // which makes the marker look like it disappeared.
+        if (vehicleLocations.isNotEmpty()) {
+            lastCameraRouteId = route.id
+            return@LaunchedEffect
+        }
+
         if (passengerLocation != null && !centeredOnUser) return@LaunchedEffect
         val path = route.path
         if (path.size >= 2) {
