@@ -112,6 +112,7 @@ internal fun PassengerMapView(
     vehicleLocations: List<Pair<Vehicle, VehicleLocation>>,
     passengerLocations: List<PassengerLocation> = emptyList(),
     onLocateUser: () -> Unit = {},
+    onShowNearestVehicle: () -> Unit = {},
     nearestVehicle: Pair<Vehicle, VehicleLocation>? = null,
     nearestVehicleRequestId: Long = 0L,
     routeOpacity: Float = 0.78f,
@@ -140,7 +141,7 @@ internal fun PassengerMapView(
     val stabilizedVehicleLocations = vehicleLocationStabilizer.stabilize(vehicleLocations)
     val vehicleMarkerIcon = remember(context) {
         val bitmap = decodeVehicleMarkerBitmap(context)
-        val sizePx = 68
+        val sizePx = 72
         val scaled = Bitmap.createScaledBitmap(bitmap, sizePx, sizePx, true)
         IconFactory.getInstance(context).fromBitmap(scaled)
     }
@@ -228,6 +229,11 @@ internal fun PassengerMapView(
             MapControlButton("⌖") {
                 onLocateUser()
             }
+            Spacer(Modifier.size(8.dp))
+            MapControlButton("↯") {
+                onShowNearestVehicle()
+            }
+            Spacer(Modifier.size(8.dp))
             MapControlButton("+") {
                 map?.animateCamera(CameraUpdateFactory.zoomIn())
             }
