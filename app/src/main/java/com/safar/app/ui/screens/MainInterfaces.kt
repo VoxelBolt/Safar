@@ -204,7 +204,6 @@ private fun PassengerMapScreen(
                 locationPermissionGranted = !ui.locationPermissionRequired,
                 locateRequestId = ui.locateRequestId,
                 onLocateUser = viewModel::refreshPassengerLocation,
-                onShowNearestVehicle = viewModel::showNearestVehicleOnMap,
                 nearestVehicle = ui.nearestVehicle?.let { vehicle ->
                     vehicle.currentLocation?.let { location -> vehicle to location }
                 },
@@ -305,20 +304,20 @@ private fun PassengerMapScreen(
                                 color = Muted,
                             )
                         }
-                        if (ui.selectedRoute != null) {
-                            Surface(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clickable { viewModel.showNearestVehicleOnMap() },
-                                shape = CircleShape,
-                                color = SoftBlue,
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    SafarGlyph(Glyph.BUS, SafarBlue, 22.dp)
-                                }
+                        Surface(
+                            modifier = Modifier
+                                .size(46.dp)
+                                .clickable { viewModel.showNearestVehicleOnMap() },
+                            shape = CircleShape,
+                            color = SoftBlue,
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                androidx.compose.material3.Text(
+                                    text = "⌖",
+                                    color = SafarBlue,
+                                    style = MaterialTheme.typography.titleLarge,
+                                )
                             }
-                        } else {
-                            SafarGlyph(Glyph.CHEVRON, Muted, 22.dp)
                         }
                     }
                     Spacer(Modifier.height(14.dp))
@@ -347,7 +346,7 @@ private fun PassengerMapScreen(
                             )
                             if (activeVehicle != null) {
                                 Text(
-                                    activeVehicle.routeId?.let { routeId -> ui.routes.firstOrNull { it.id == routeId }?.number }?.let { routeNumber -> stringResource(R.string.route_number_format, routeNumber) } ?: "Активных водителей: ${ui.activeVehicles.size}",
+                                    stringResource(R.string.active_vehicles_count, ui.activeVehicles.size),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Muted,
                                 )
@@ -360,18 +359,13 @@ private fun PassengerMapScreen(
                             }
                         }
                         ui.nearestVehicleEtaMinutes?.let { eta ->
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = SoftBlue,
-                            ) {
-                                Text(
-                                    text = stringResource(R.string.nearest_vehicle_eta, eta),
-                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
-                                    color = SafarBlue,
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.labelLarge,
-                                )
-                            }
+                            Text(
+                                text = "≈ $eta мин",
+                                modifier = Modifier.padding(start = 8.dp),
+                                color = SafarBlue,
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.labelLarge,
+                            )
                         }
                     }
                 }
@@ -865,6 +859,7 @@ private fun DriverHomeScreen(
                     }
                 }
             },
+            showNearestVehicleButton = false,
             vehicleLocations = emptyList(),
             passengerLocations = ui.passengerLocations,
             routeOpacity = 0.78f,
