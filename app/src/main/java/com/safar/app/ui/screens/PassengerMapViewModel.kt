@@ -207,6 +207,9 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                         activeVehicles = fresh,
                         loadingVehicles = false,
                     )
+                    if (_uiState.value.nearestVehicleTrackingEnabled) {
+                        _uiState.value.passengerLocation?.let { updateNearestVehicle(it, fresh) }
+                    }
                 }
                 .onFailure { error ->
                     _uiState.value = _uiState.value.copy(
@@ -225,6 +228,9 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                     .onSuccess { vehicles ->
                         val active = freshVehicles(vehicles).map { it.copy(active = true) }
                         _uiState.value = _uiState.value.copy(activeVehicles = active, error = null)
+                        if (_uiState.value.nearestVehicleTrackingEnabled) {
+                            _uiState.value.passengerLocation?.let { updateNearestVehicle(it, active) }
+                        }
                         android.util.Log.d(
                             "SafarVehicle",
                             "poll route=$routeId vehicles=${active.size} locations=" +
