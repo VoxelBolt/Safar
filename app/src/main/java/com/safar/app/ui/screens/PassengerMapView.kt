@@ -46,6 +46,9 @@ import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.Style
+import org.maplibre.android.annotations.IconFactory
+import org.maplibre.android.annotations.Marker
+import org.maplibre.android.annotations.MarkerOptions
 import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.FillLayer
 import org.maplibre.android.style.layers.LineLayer
@@ -136,6 +139,10 @@ internal fun PassengerMapView(
     var locateTarget by remember { mutableStateOf<GeoPoint?>(null) }
     var lastCameraRouteId by remember { mutableStateOf<String?>(null) }
     var lastFocusedVehicleId by remember { mutableStateOf<String?>(null) }
+    val vehicleMarkers = remember { mutableMapOf<String, Marker>() }
+    val vehicleMarkerIcon = remember(context) {
+        IconFactory.getInstance(context).fromBitmap(createVehicleMarkerBitmap())
+    }
 
     rememberMapLibre(context)
 
@@ -170,6 +177,7 @@ internal fun PassengerMapView(
                 mapView.apply {
                     getMapAsync { loadedMap ->
                         map = loadedMap
+                        syncVehicleMarkers(loadedMap, vehicleLocations, vehicleMarkerIcon, vehicleMarkers)
                         loadedMap.uiSettings.isCompassEnabled = false
                         loadedMap.uiSettings.isScrollGesturesEnabled = true
                         loadedMap.uiSettings.isZoomGesturesEnabled = true
@@ -194,6 +202,9 @@ internal fun PassengerMapView(
                         updateRouteStation(style, route)
                         updateHeadingSector(style, passengerLocation, headingDegrees)
                         updateVehicles(style, vehicleLocations, route?.number)
+                    }
+                    map?.let { loadedMap ->
+                        syncVehicleMarkers(loadedMap, vehicleLocations, vehicleMarkerIcon, vehicleMarkers)
                     }
                 }
             },
@@ -551,6 +562,38 @@ private fun updateHeadingSector(style: Style, center: GeoPoint?, headingDegrees:
     points += Point.fromLngLat(center.longitude, center.latitude)
     val polygon = Polygon.fromLngLats(listOf(points))
     source.setGeoJson(FeatureCollection.fromFeature(Feature.fromGeometry(polygon)))
+}
+
+
+private fun syncVehicleMarkers(
+    map: MapLibreMap,
+    locations: List<Pair<Vehicle, VehicleLocation>>,
+    icon: org.maplibre.android.annotations.Icon,
+    markers: MutableMap<String, Marker>,
+) {
+    val activeIds = locations.mapTo(mutableSetOf()) { it.first.id }
+
+    markers.keys.toList()
+        .filter { it !in activeIds }
+        .forEach { vehicleId ->
+            markers.remove(vehicleId)?.remove()
+        }
+
+    locations.forEach { (vehicle, location) ->
+        val position = LatLng(location.latitude, location.longitude)
+        val marker = markers[vehicle.id]
+        if (marker == null) {
+            markers[vehicle.id] = map.addMarker(
+                MarkerOptions()
+                    .position(position)
+                    .icon(icon)
+                    .title(vehicle.identifier)
+            )
+        } else {
+            marker.position = position
+            marker.title = vehicle.identifier
+        }
+    }
 }
 
 private fun updateVehicles(
