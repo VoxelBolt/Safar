@@ -216,7 +216,7 @@ internal fun PassengerMapView(
                         }
                         syncVehicleMarkers(
                             loadedMap,
-                            snappedVehicleLocations,
+                            stabilizedVehicleLocations,
                             vehicleMarkerIcon,
                             vehicleMarkers,
                         )
@@ -250,7 +250,7 @@ internal fun PassengerMapView(
         }
     }
 
-    LaunchedEffect(styleReady, route, passengerLocation, headingDegrees, snappedVehicleLocations) {
+    LaunchedEffect(styleReady, route, passengerLocation, headingDegrees, stabilizedVehicleLocations) {
         if (!styleReady) return@LaunchedEffect
         map?.style?.let { style ->
             updateRoute(style, route, routeOpacity)
@@ -259,11 +259,11 @@ internal fun PassengerMapView(
             updateUserLocation(style, passengerLocation)
         }
 
-        map?.style?.let { updateVehicles(it, snappedVehicleLocations) }
+        map?.style?.let { updateVehicles(it, displayVehicleLocations(stabilizedVehicleLocations, nearestVehicle)) }
         map?.let {
             syncVehicleMarkers(
                 it,
-                snappedVehicleLocations,
+                displayVehicleLocations(stabilizedVehicleLocations, nearestVehicle),
                 vehicleMarkerIcon,
                 vehicleMarkers,
             )
@@ -273,7 +273,7 @@ internal fun PassengerMapView(
         // This is route-agnostic: route 3, 8, 15, etc. all use the same live
         // vehicle list. Passenger location is used only when there is no active
         // vehicle to focus.
-        val vehicle = snappedVehicleLocations.firstOrNull()
+        val vehicle = stabilizedVehicleLocations.firstOrNull()
         if (vehicle != null && vehicle.first.id != lastFocusedVehicleId) {
             map?.animateCamera(
                 CameraUpdateFactory.newLatLngZoom(
@@ -294,14 +294,14 @@ internal fun PassengerMapView(
         }
     }
 
-    LaunchedEffect(styleReady, route?.id, snappedVehicleLocations) {
+    LaunchedEffect(styleReady, route?.id, stabilizedVehicleLocations) {
         if (!styleReady || route == null || route.id == lastCameraRouteId) return@LaunchedEffect
 
         // If a live vehicle exists, the vehicle-camera effect above owns the
         // camera. Never move the map back to the route midpoint afterwards.
         // Otherwise the active vehicle can be rendered outside the viewport,
         // which makes the marker look like it disappeared.
-        if (snappedVehicleLocations.isNotEmpty()) {
+        if (stabilizedVehicleLocations.isNotEmpty()) {
             lastCameraRouteId = route.id
             return@LaunchedEffect
         }
