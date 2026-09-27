@@ -64,9 +64,9 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
                 val selected = driver?.routeId?.let { id -> routes.firstOrNull { it.id == id } }
                 _uiState.value = _uiState.value.copy(driver = driver, routes = routes, selectedRoute = selected, workSession = session, loading = false, error = null)
                 selected?.let { switchPassengerRealtime(it.id) }
-                if (session?.status == WorkSessionStatus.ACTIVE && driver?.routeId != null) {
-                    // The work session is persisted in Supabase, so the GPS foreground
-                    // service must be restored even if Android previously killed the app.
+                if (driver?.routeId != null) {
+                    // Work Session and GPS tracking are independent systems. Restore
+                    // the location foreground service whenever a routed driver is loaded.
                     runCatching { DriverLocationService.start(getApplication()) }
                 }
             }.onFailure { error ->
@@ -144,7 +144,6 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun publishDriverLocation(point: com.safar.app.domain.model.GeoPoint) {
         val ui = _uiState.value
-        if (ui.workSession?.status != WorkSessionStatus.ACTIVE) return
         if (ui.driver?.routeId == null) return
         viewModelScope.launch {
             runCatching {
@@ -201,18 +200,16 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
             _uiState.value = _uiState.value.copy(actionInProgress = true, error = null)
             runCatching { action(session.id) }.onSuccess { updatedSession ->
                 _uiState.value = _uiState.value.copy(workSession = updatedSession, actionInProgress = false, error = null)
-                if (updatedSession.status == WorkSessionStatus.ACTIVE) {
+                // Never stop GPS when the Work Session changes. Tracking is owned
+                // by DriverLocationService and continues independently.
+                if (ui.driver?.routeId != null) {
                     runCatching { DriverLocationService.start(getApplication()) }
-                } else {
-                    runCatching { DriverLocationService.stop(getApplication()) }
                 }
             }.onFailure { error ->
                 val refreshed = runCatching { workSessionRepository.getCurrent() }.getOrNull()
                 _uiState.value = _uiState.value.copy(workSession = refreshed, actionInProgress = false, error = error.userMessage())
-                if (refreshed?.status == WorkSessionStatus.ACTIVE) {
+                if (_uiState.value.driver?.routeId != null) {
                     runCatching { DriverLocationService.start(getApplication()) }
-                } else {
-                    runCatching { DriverLocationService.stop(getApplication()) }
                 }
             }
         }
