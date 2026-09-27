@@ -216,7 +216,7 @@ internal fun PassengerMapView(
                         }
                         syncVehicleMarkers(
                             loadedMap,
-                            stabilizedVehicleLocations,
+                            displayVehicleLocations(stabilizedVehicleLocations, nearestVehicle),
                             vehicleMarkerIcon,
                             vehicleMarkers,
                         )
@@ -269,21 +269,7 @@ internal fun PassengerMapView(
             )
         }
 
-        // Always bring the first active vehicle into view when one appears.
-        // This is route-agnostic: route 3, 8, 15, etc. all use the same live
-        // vehicle list. Passenger location is used only when there is no active
-        // vehicle to focus.
-        val vehicle = stabilizedVehicleLocations.firstOrNull()
-        if (vehicle != null && vehicle.first.id != lastFocusedVehicleId) {
-            map?.animateCamera(
-                CameraUpdateFactory.newLatLngZoom(
-                    LatLng(vehicle.second.latitude, vehicle.second.longitude),
-                    USER_FOCUS_ZOOM,
-                )
-            )
-            lastFocusedVehicleId = vehicle.first.id
-            centeredOnUser = false
-        } else if (vehicle == null && passengerLocation != null && !centeredOnUser) {
+        if (passengerLocation != null && !centeredOnUser) {
             map?.animateCamera(
                 CameraUpdateFactory.newLatLngZoom(
                     LatLng(passengerLocation.latitude, passengerLocation.longitude),
