@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
-import android.graphics.Path
 import android.graphics.RectF
 import android.os.Bundle
 import androidx.compose.foundation.background
@@ -460,60 +459,40 @@ private fun setupMapLayers(style: Style, context: Context) {
 
 
 private fun createVehicleMarkerBitmap(): Bitmap {
-    val width = 112
-    val height = 128
-    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    val size = 112
+    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
-    val centerX = width / 2f
 
     val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0x33000000
         style = Paint.Style.FILL
     }
-    canvas.drawOval(
-        RectF(centerX - 24f, height - 17f, centerX + 24f, height - 5f),
+    canvas.drawRoundRect(
+        RectF(19f, 21f, 97f, 99f),
+        24f,
+        24f,
         shadowPaint,
     )
 
-    val pinPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = SafarBlue.toArgb()
         style = Paint.Style.FILL
     }
-
-    val pin = Path().apply {
-        moveTo(centerX, height - 8f)
-        cubicTo(
-            centerX - 8f, height - 24f,
-            22f, 72f,
-            22f, 50f,
-        )
-        cubicTo(
-            22f, 27f,
-            39f, 10f,
-            centerX, 10f,
-        )
-        cubicTo(
-            73f, 10f,
-            90f, 27f,
-            90f, 50f,
-        )
-        cubicTo(
-            90f, 72f,
-            centerX + 8f, height - 24f,
-            centerX, height - 8f,
-        )
-        close()
-    }
-    canvas.drawPath(pin, pinPaint)
+    canvas.drawRoundRect(
+        RectF(16f, 16f, 96f, 96f),
+        24f,
+        24f,
+        backgroundPaint,
+    )
 
     val busPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.White.toArgb()
         style = Paint.Style.FILL
     }
     canvas.drawRoundRect(
-        RectF(35f, 29f, 77f, 76f),
-        9f,
-        9f,
+        RectF(34f, 28f, 78f, 79f),
+        10f,
+        10f,
         busPaint,
     )
 
@@ -522,15 +501,15 @@ private fun createVehicleMarkerBitmap(): Bitmap {
         style = Paint.Style.FILL
     }
     canvas.drawRoundRect(
-        RectF(40f, 35f, 72f, 51f),
-        3f,
-        3f,
+        RectF(40f, 34f, 72f, 51f),
+        4f,
+        4f,
         windowPaint,
     )
-    canvas.drawRect(54f, 35f, 57f, 51f, busPaint)
+    canvas.drawRect(54f, 34f, 58f, 51f, busPaint)
 
-    canvas.drawCircle(44f, 70f, 5f, windowPaint)
-    canvas.drawCircle(68f, 70f, 5f, windowPaint)
+    canvas.drawCircle(44f, 73f, 5f, windowPaint)
+    canvas.drawCircle(68f, 73f, 5f, windowPaint)
 
     return bitmap
 }
@@ -628,7 +607,6 @@ private fun syncVehicleMarkers(
                 MarkerOptions()
                     .position(position)
                     .icon(icon)
-                    .anchor(0.5f, 1.0f)
                     .title(vehicle.identifier)
             )
         } else {
