@@ -144,7 +144,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                 val fresh = freshVehicles(vehicles).map { it.copy(active = true) }
                 _uiState.value = _uiState.value.copy(
                     passengerLocation = passenger,
-                    activeVehicles = fresh,
+                    activeVehicles = _uiState.value.activeVehicles,
                     nearestVehicleTrackingEnabled = true,
                     error = null,
                 )
