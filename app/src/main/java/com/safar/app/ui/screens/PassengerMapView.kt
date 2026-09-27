@@ -80,6 +80,7 @@ import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.LineString
+import org.maplibre.geojson.MultiLineString
 import org.maplibre.geojson.Point
 import org.maplibre.geojson.Polygon
 
@@ -206,10 +207,21 @@ internal fun PassengerMapView(
                         updateRoute(style, route, routeOpacity)
                         updateRouteStation(style, route)
                         updateHeadingSector(style, passengerLocation, headingDegrees)
-                        updateVehicles(style, stabilizedVehicleLocations)
                     }
                     map?.let { loadedMap ->
-                        syncVehicleMarkers(loadedMap, stabilizedVehicleLocations, vehicleMarkerIcon, vehicleMarkers)
+                        val displayLocations = snapVehiclesToRenderedRoad(
+                            loadedMap,
+                            stabilizedVehicleLocations,
+                        )
+                        loadedMap.style?.let { style ->
+                            updateVehicles(style, displayLocations)
+                        }
+                        syncVehicleMarkers(
+                            loadedMap,
+                            displayLocations,
+                            vehicleMarkerIcon,
+                            vehicleMarkers,
+                        )
                     }
                 }
             },
@@ -242,15 +254,27 @@ internal fun PassengerMapView(
             updateRoute(style, route, routeOpacity)
             updateRouteStation(style, route)
             updateHeadingSector(style, passengerLocation, headingDegrees)
-            updateVehicles(style, stabilizedVehicleLocations)
             updateUserLocation(style, passengerLocation)
+        }
+
+        val displayVehicleLocations = map?.let {
+            snapVehiclesToRenderedRoad(it, stabilizedVehicleLocations)
+        } ?: stabilizedVehicleLocations
+        map?.style?.let { updateVehicles(it, displayVehicleLocations) }
+        map?.let {
+            syncVehicleMarkers(
+                it,
+                displayVehicleLocations,
+                vehicleMarkerIcon,
+                vehicleMarkers,
+            )
         }
 
         // Always bring the first active vehicle into view when one appears.
         // This is route-agnostic: route 3, 8, 15, etc. all use the same live
         // vehicle list. Passenger location is used only when there is no active
         // vehicle to focus.
-        val vehicle = stabilizedVehicleLocations.firstOrNull()
+        val vehicle = displayVehicleLocations.firstOrNull()
         if (vehicle != null && vehicle.first.id != lastFocusedVehicleId) {
             map?.animateCamera(
                 CameraUpdateFactory.newLatLngZoom(
@@ -459,40 +483,37 @@ private fun setupMapLayers(style: Style, context: Context) {
 
 
 private fun createVehicleMarkerBitmap(): Bitmap {
-    val size = 112
+    val size = 96
     val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
+    val center = size / 2f
 
     val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0x33000000
+        color = 0x44000000
         style = Paint.Style.FILL
     }
-    canvas.drawRoundRect(
-        RectF(19f, 21f, 97f, 99f),
-        24f,
-        24f,
-        shadowPaint,
-    )
+    canvas.drawCircle(center + 2f, center + 3f, 38f, shadowPaint)
 
-    val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    val outerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.White.toArgb()
+        style = Paint.Style.FILL
+    }
+    canvas.drawCircle(center, center, 40f, outerPaint)
+
+    val bluePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = SafarBlue.toArgb()
         style = Paint.Style.FILL
     }
-    canvas.drawRoundRect(
-        RectF(16f, 16f, 96f, 96f),
-        24f,
-        24f,
-        backgroundPaint,
-    )
+    canvas.drawCircle(center, center, 36f, bluePaint)
 
     val busPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.White.toArgb()
         style = Paint.Style.FILL
     }
     canvas.drawRoundRect(
-        RectF(34f, 28f, 78f, 79f),
-        10f,
-        10f,
+        RectF(29f, 23f, 67f, 68f),
+        9f,
+        9f,
         busPaint,
     )
 
@@ -501,15 +522,15 @@ private fun createVehicleMarkerBitmap(): Bitmap {
         style = Paint.Style.FILL
     }
     canvas.drawRoundRect(
-        RectF(40f, 34f, 72f, 51f),
+        RectF(34f, 29f, 62f, 44f),
         4f,
         4f,
         windowPaint,
     )
-    canvas.drawRect(54f, 34f, 58f, 51f, busPaint)
+    canvas.drawRect(47f, 29f, 50f, 44f, busPaint)
 
-    canvas.drawCircle(44f, 73f, 5f, windowPaint)
-    canvas.drawCircle(68f, 73f, 5f, windowPaint)
+    canvas.drawCircle(38f, 61f, 4.5f, windowPaint)
+    canvas.drawCircle(58f, 61f, 4.5f, windowPaint)
 
     return bitmap
 }
@@ -584,6 +605,165 @@ private fun updateHeadingSector(style: Style, center: GeoPoint?, headingDegrees:
     source.setGeoJson(FeatureCollection.fromFeature(Feature.fromGeometry(polygon)))
 }
 
+
+private fun snapVehiclesToRenderedRoad(
+    map: MapLibreMap,
+    locations: List<Pair<Vehicle, VehicleLocation>>,
+): List<Pair<Vehicle, VehicleLocation>> {
+    if (locations.isEmpty()) return emptyList()
+
+    val style = map.style ?: return locations
+
+    // Query only line layers from the base style. Our own Safar route layers
+    // are excluded because route geometry can be approximate; the visible
+    // road network on the map is the authoritative road surface here.
+    val roadLayerIds = style.getLayers()
+        .filterIsInstance<LineLayer>()
+        .map { it.id }
+        .filterNot {
+            it == ROUTE_LAYER_ID ||
+                it == ROUTE_CASING_LAYER_ID
+        }
+        .toTypedArray()
+
+    if (roadLayerIds.isEmpty()) return locations
+
+    return locations.map { (vehicle, rawLocation) ->
+        val snapped = snapLocationToRenderedRoad(
+            map = map,
+            location = rawLocation,
+            roadLayerIds = roadLayerIds,
+        )
+        vehicle to snapped
+    }
+}
+
+private fun snapLocationToRenderedRoad(
+    map: MapLibreMap,
+    location: VehicleLocation,
+    roadLayerIds: Array<String>,
+): VehicleLocation {
+    val rawPoint = LatLng(location.latitude, location.longitude)
+    val screenPoint = map.projection.toScreenLocation(rawPoint)
+
+    // At the current zoom, ask MapLibre for visible road lines inside a box
+    // corresponding to 20m around the raw GPS position.
+    val metersPerPixel = runCatching {
+        map.getMetersPerPixelAtLatitude(location.latitude)
+    }.getOrDefault(1.0).coerceAtLeast(0.1)
+
+    val radiusPx = (20.0 / metersPerPixel)
+        .coerceIn(10.0, 45.0)
+        .toFloat()
+
+    val queryBox = RectF(
+        screenPoint.x - radiusPx,
+        screenPoint.y - radiusPx,
+        screenPoint.x + radiusPx,
+        screenPoint.y + radiusPx,
+    )
+
+    val features = runCatching {
+        map.queryRenderedFeatures(queryBox, roadLayerIds)
+    }.getOrDefault(emptyList())
+
+    var bestPoint: GeoPoint? = null
+    var bestDistance = Double.MAX_VALUE
+
+    features.forEach { feature ->
+        val geometry = feature.geometry() ?: return@forEach
+
+        val lines: List<List<Point>> = when (geometry) {
+            is LineString -> listOf(geometry.coordinates())
+            is MultiLineString -> geometry.coordinates()
+            else -> emptyList()
+        }
+
+        lines.forEach { points ->
+            for (index in 0 until points.lastIndex) {
+                val candidate = projectGpsPointToSegment(
+                    location,
+                    points[index],
+                    points[index + 1],
+                )
+                if (candidate.distanceMeters < bestDistance) {
+                    bestDistance = candidate.distanceMeters
+                    bestPoint = candidate.point
+                }
+            }
+        }
+    }
+
+    // Never move a vehicle onto an unrelated line. The hard 20m limit is
+    // exactly the rule requested for GPS-to-road correction.
+    val snapped = bestPoint?.takeIf { bestDistance <= 20.0 } ?: return location
+
+    return location.copy(
+        latitude = snapped.latitude,
+        longitude = snapped.longitude,
+    )
+}
+
+private data class RoadProjection(
+    val point: GeoPoint,
+    val distanceMeters: Double,
+)
+
+private fun projectGpsPointToSegment(
+    location: VehicleLocation,
+    start: Point,
+    end: Point,
+): RoadProjection {
+    val point = GeoPoint(location.latitude, location.longitude)
+    val startPoint = GeoPoint(start.latitude(), start.longitude())
+    val endPoint = GeoPoint(end.latitude(), end.longitude())
+
+    val referenceLatRad = Math.toRadians(
+        (point.latitude + startPoint.latitude + endPoint.latitude) / 3.0
+    )
+    val metersPerLat = 111_320.0
+    val metersPerLon = 111_320.0 * kotlin.math.cos(referenceLatRad)
+
+    val px = (point.longitude - startPoint.longitude) * metersPerLon
+    val py = (point.latitude - startPoint.latitude) * metersPerLat
+    val bx = (endPoint.longitude - startPoint.longitude) * metersPerLon
+    val by = (endPoint.latitude - startPoint.latitude) * metersPerLat
+
+    val lengthSquared = bx * bx + by * by
+    val t = if (lengthSquared <= 1e-9) {
+        0.0
+    } else {
+        ((px * bx + py * by) / lengthSquared).coerceIn(0.0, 1.0)
+    }
+
+    val projected = GeoPoint(
+        latitude = startPoint.latitude +
+            (endPoint.latitude - startPoint.latitude) * t,
+        longitude = startPoint.longitude +
+            (endPoint.longitude - startPoint.longitude) * t,
+    )
+
+    return RoadProjection(
+        point = projected,
+        distanceMeters = haversineDistanceMeters(point, projected),
+    )
+}
+
+private fun haversineDistanceMeters(a: GeoPoint, b: GeoPoint): Double {
+    val earthRadius = 6_371_000.0
+    val dLat = Math.toRadians(b.latitude - a.latitude)
+    val dLon = Math.toRadians(b.longitude - a.longitude)
+    val lat1 = Math.toRadians(a.latitude)
+    val lat2 = Math.toRadians(b.latitude)
+
+    val h = kotlin.math.sin(dLat / 2) * kotlin.math.sin(dLat / 2) +
+        kotlin.math.cos(lat1) * kotlin.math.cos(lat2) *
+        kotlin.math.sin(dLon / 2) * kotlin.math.sin(dLon / 2)
+
+    return 2.0 * earthRadius * kotlin.math.asin(
+        kotlin.math.sqrt(h.coerceIn(0.0, 1.0))
+    )
+}
 
 private fun syncVehicleMarkers(
     map: MapLibreMap,
