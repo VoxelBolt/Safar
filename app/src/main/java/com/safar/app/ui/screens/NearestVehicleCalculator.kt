@@ -16,6 +16,7 @@ data class NearestVehicleResult(
 
 object NearestVehicleCalculator {
     const val AVERAGE_VEHICLE_SPEED_KMH = 25.0
+    const val MAX_NEAREST_DISTANCE_METERS = 50_000.0
 
     fun findNearest(
         passenger: GeoPoint,
@@ -23,10 +24,10 @@ object NearestVehicleCalculator {
     ): NearestVehicleResult? {
         val nearest = vehicles.mapNotNull { vehicle ->
             val location = vehicle.currentLocation ?: return@mapNotNull null
-            val distance = distanceMeters(
-                passenger,
-                GeoPoint(location.latitude, location.longitude),
-            )
+            if (!passenger.isValid() || !location.latitude.isFinite() || !location.longitude.isFinite()) return@mapNotNull null
+            if (location.latitude !in -90.0..90.0 || location.longitude !in -180.0..180.0) return@mapNotNull null
+            val distance = distanceMeters(passenger, GeoPoint(location.latitude, location.longitude))
+            if (distance > MAX_NEAREST_DISTANCE_METERS) return@mapNotNull null
             vehicle to distance
         }.minByOrNull { it.second } ?: return null
 
@@ -36,6 +37,10 @@ object NearestVehicleCalculator {
             etaMinutes = etaMinutes(nearest.second),
         )
     }
+
+    private fun GeoPoint.isValid(): Boolean =
+        latitude.isFinite() && longitude.isFinite() &&
+            latitude in -90.0..90.0 && longitude in -180.0..180.0
 
     fun distanceMeters(a: GeoPoint, b: GeoPoint): Double {
         val earthRadius = 6_371_000.0
