@@ -349,6 +349,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         locationProvider.lastKnownLocation { point ->
             if (point != null) {
                 _uiState.value = _uiState.value.copy(passengerLocation = point)
+                if (_uiState.value.nearestVehicleTrackingEnabled) updateNearestVehicle(point, _uiState.value.activeVehicles)
             }
         }
         requestCurrentLocation(centerCamera = false)
@@ -356,6 +357,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             try {
                 locationProvider.locations().collectLatest { point ->
                     _uiState.value = _uiState.value.copy(passengerLocation = point)
+                    if (_uiState.value.nearestVehicleTrackingEnabled) updateNearestVehicle(point, _uiState.value.activeVehicles)
                 }
             } catch (error: CancellationException) {
                 throw error
@@ -455,7 +457,6 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         vehicleRefreshJob?.cancel()
         realtimeTransport.disconnect()
         nearestVehicleRequestJob?.cancel()
-        nearestVehicleRefreshJob?.cancel()
         super.onCleared()
     }
 
