@@ -83,6 +83,8 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
             runCatching { driverRepository.assignRoute(route.id) }
                 .onSuccess { driver ->
                     _uiState.value = _uiState.value.copy(driver = driver, selectedRoute = route, passengerLocations = emptyList(), actionInProgress = false, error = null)
+                    // A route assignment enables GPS tracking; Work Session state does not.
+                    runCatching { DriverLocationService.start(getApplication()) }
                     switchPassengerRealtime(route.id)
                 }.onFailure { error ->
                     _uiState.value = _uiState.value.copy(actionInProgress = false, error = error.userMessage())
