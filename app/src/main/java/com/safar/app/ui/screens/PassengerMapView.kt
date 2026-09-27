@@ -230,7 +230,7 @@ internal fun PassengerMapView(
                 onLocateUser()
             }
             Spacer(Modifier.size(8.dp))
-            MapControlButton("🚌") {
+            MapControlButton("⌖") {
                 onShowNearestVehicle()
             }
             Spacer(Modifier.size(8.dp))
