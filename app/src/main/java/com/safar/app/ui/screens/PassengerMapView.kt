@@ -372,29 +372,30 @@ private fun setupMapLayers(style: Style, context: Context) {
             )
         )
     }
-    if (style.getLayer(VEHICLES_LAYER_ID) == null) {
-        style.addLayer(
-            CircleLayer(VEHICLES_LAYER_ID, VEHICLES_SOURCE_ID).withProperties(
-                circleColor(SafarBlue.toArgb()),
-                circleRadius(8f),
-                circleStrokeColor(Color.White.toArgb()),
-                circleStrokeWidth(2f),
-            )
+    // Keep the vehicle marker layer above every route/POI/user layer.
+    // The marker must remain visible regardless of which route is selected.
+    style.getLayer(VEHICLES_LAYER_ID)?.let { style.removeLayer(VEHICLES_LAYER_ID) }
+    style.addLayer(
+        CircleLayer(VEHICLES_LAYER_ID, VEHICLES_SOURCE_ID).withProperties(
+            circleColor(SafarBlue.toArgb()),
+            circleRadius(11f),
+            circleStrokeColor(Color.White.toArgb()),
+            circleStrokeWidth(3f),
+            circleOpacity(1f),
         )
-    }
+    )
     if (style.getImage(VEHICLE_ICON_IMAGE_ID) == null) {
         style.addImage(VEHICLE_ICON_IMAGE_ID, createVehicleMarkerBitmap())
     }
-    if (style.getLayer(VEHICLE_ICON_LAYER_ID) == null) {
-        style.addLayer(
-            SymbolLayer(VEHICLE_ICON_LAYER_ID, VEHICLES_SOURCE_ID).withProperties(
-                iconImage(VEHICLE_ICON_IMAGE_ID),
-                iconSize(0.9f),
-                iconAllowOverlap(true),
-                iconIgnorePlacement(true),
-            )
+    style.getLayer(VEHICLE_ICON_LAYER_ID)?.let { style.removeLayer(VEHICLE_ICON_LAYER_ID) }
+    style.addLayer(
+        SymbolLayer(VEHICLE_ICON_LAYER_ID, VEHICLES_SOURCE_ID).withProperties(
+            iconImage(VEHICLE_ICON_IMAGE_ID),
+            iconSize(1.15f),
+            iconAllowOverlap(true),
+            iconIgnorePlacement(true),
         )
-    }
+    )
     if (style.getLayer(VEHICLE_LABEL_LAYER_ID) == null) {
         style.addLayer(
             SymbolLayer(VEHICLE_LABEL_LAYER_ID, VEHICLES_SOURCE_ID).withProperties(
