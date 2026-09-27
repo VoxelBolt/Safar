@@ -313,7 +313,7 @@ private fun PassengerMapScreen(
                                 color = SoftBlue,
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
-                                    SafarGlyph(Glyph.LOCATE, SafarBlue, 22.dp)
+                                    SafarGlyph(Glyph.BUS, SafarBlue, 22.dp)
                                 }
                             }
                         } else {
@@ -359,12 +359,18 @@ private fun PassengerMapScreen(
                             }
                         }
                         ui.nearestVehicleEtaMinutes?.let { eta ->
-                            Text(
-                                text = "≈ ${stringResource(R.string.nearest_vehicle_eta, eta)}",
-                                color = SafarBlue,
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.titleMedium,
-                            )
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = SoftBlue,
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.nearest_vehicle_eta, eta),
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                                    color = SafarBlue,
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
+                            }
                         }
                     }
                 }
