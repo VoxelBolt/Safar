@@ -135,6 +135,7 @@ internal fun PassengerMapView(
     var centeredOnUser by remember { mutableStateOf(false) }
     var locateTarget by remember { mutableStateOf<GeoPoint?>(null) }
     var lastCameraRouteId by remember { mutableStateOf<String?>(null) }
+    var lastFocusedVehicleId by remember { mutableStateOf<String?>(null) }
 
     rememberMapLibre(context)
 
@@ -237,6 +238,22 @@ internal fun PassengerMapView(
                 )
             )
             centeredOnUser = true
+        } else if (passengerLocation == null) {
+            // When the passenger has not granted location access, make the first
+            // active vehicle visible automatically. The vehicle can be several
+            // kilometers away from the route midpoint, so leaving the camera at
+            // the route midpoint can make a perfectly valid vehicle marker look
+            // like it is missing.
+            val vehicle = vehicleLocations.firstOrNull()
+            if (vehicle != null && vehicle.first.id != lastFocusedVehicleId) {
+                map?.animateCamera(
+                    CameraUpdateFactory.newLatLngZoom(
+                        LatLng(vehicle.second.latitude, vehicle.second.longitude),
+                        USER_FOCUS_ZOOM,
+                    )
+                )
+                lastFocusedVehicleId = vehicle.first.id
+            }
         }
     }
 
@@ -374,7 +391,7 @@ private fun setupMapLayers(style: Style, context: Context) {
         style.addLayer(
             SymbolLayer(VEHICLE_ICON_LAYER_ID, VEHICLES_SOURCE_ID).withProperties(
                 iconImage(VEHICLE_ICON_IMAGE_ID),
-                iconSize(0.72f),
+                iconSize(0.9f),
                 iconAllowOverlap(true),
                 iconIgnorePlacement(true),
             )
