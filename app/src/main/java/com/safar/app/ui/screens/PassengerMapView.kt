@@ -612,9 +612,9 @@ private fun snapVehiclesToRenderedRoad(
 
     val style = map.style ?: return locations
 
-    // Query only line layers from the base style. Our own Safar route layers
-    // are excluded because route geometry can be approximate; the visible
-    // road network on the map is the authoritative road surface here.
+    // This MapLibre version exposes queryRenderedFeatures(PointF, layerIds).
+    // Sample a small screen-space grid so we can find the actual rendered road
+    // within the requested 20m radius without relying on route.path.
     val roadLayerIds = style.getLayers()
         .filterIsInstance<LineLayer>()
         .map { it.id }
@@ -627,12 +627,11 @@ private fun snapVehiclesToRenderedRoad(
     if (roadLayerIds.isEmpty()) return locations
 
     return locations.map { (vehicle, rawLocation) ->
-        val snapped = snapLocationToRenderedRoad(
+        vehicle to snapLocationToRenderedRoad(
             map = map,
             location = rawLocation,
             roadLayerIds = roadLayerIds,
         )
-        vehicle to snapped
     }
 }
 
@@ -641,29 +640,52 @@ private fun snapLocationToRenderedRoad(
     location: VehicleLocation,
     roadLayerIds: Array<String>,
 ): VehicleLocation {
-    val rawPoint = LatLng(location.latitude, location.longitude)
-    val screenPoint = map.projection.toScreenLocation(rawPoint)
+    val screenPoint = map.projection.toScreenLocation(
+        LatLng(location.latitude, location.longitude)
+    )
 
-    // At the current zoom, ask MapLibre for visible road lines inside a box
-    // corresponding to 20m around the raw GPS position.
     val metersPerPixel = runCatching {
         map.projection.getMetersPerPixelAtLatitude(location.latitude)
     }.getOrDefault(1.0).coerceAtLeast(0.1)
 
     val radiusPx = (20.0 / metersPerPixel)
-        .coerceIn(10.0, 45.0)
+        .coerceIn(8.0, 45.0)
         .toFloat()
 
-    val queryBox = RectF(
-        screenPoint.x - radiusPx,
-        screenPoint.y - radiusPx,
-        screenPoint.x + radiusPx,
-        screenPoint.y + radiusPx,
-    )
+    val features = mutableListOf<Feature>()
+    val seenGeometry = mutableSetOf<String>()
+    val steps = 6
 
-    val features = runCatching {
-        map.queryRenderedFeatures(queryBox, roadLayerIds)
-    }.getOrDefault(emptyList())
+    for (y in 0..steps) {
+        val offsetY = (y / steps.toFloat() * 2f - 1f) * radiusPx
+
+        for (x in 0..steps) {
+            val offsetX = (x / steps.toFloat() * 2f - 1f) * radiusPx
+
+            if (offsetX * offsetX + offsetY * offsetY > radiusPx * radiusPx) {
+                continue
+            }
+
+            val sample = PointF(
+                screenPoint.x + offsetX,
+                screenPoint.y + offsetY,
+            )
+
+            val sampleFeatures = runCatching {
+                map.queryRenderedFeatures(sample, roadLayerIds)
+            }.getOrDefault(emptyList())
+
+            sampleFeatures.forEach { feature ->
+                val geometryKey = runCatching {
+                    feature.geometry()?.toJson()
+                }.getOrNull() ?: return@forEach
+
+                if (seenGeometry.add(geometryKey)) {
+                    features += feature
+                }
+            }
+        }
+    }
 
     var bestPoint: GeoPoint? = null
     var bestDistance = Double.MAX_VALUE
@@ -684,6 +706,7 @@ private fun snapLocationToRenderedRoad(
                     points[index],
                     points[index + 1],
                 )
+
                 if (candidate.distanceMeters < bestDistance) {
                     bestDistance = candidate.distanceMeters
                     bestPoint = candidate.point
@@ -692,8 +715,7 @@ private fun snapLocationToRenderedRoad(
         }
     }
 
-    // Never move a vehicle onto an unrelated line. The hard 20m limit is
-    // exactly the rule requested for GPS-to-road correction.
+    // Never move the marker if the nearest rendered line is more than 20m away.
     val snapped = bestPoint?.takeIf { bestDistance <= 20.0 } ?: return location
 
     return location.copy(
