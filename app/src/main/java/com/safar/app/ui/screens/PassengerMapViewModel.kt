@@ -266,19 +266,22 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         if (selectedRoute.id != routeId) return
 
         if (location == null || !isFresh(location.timestampEpochMs)) {
-            _uiState.value = _uiState.value.copy(
-                activeVehicles = _uiState.value.activeVehicles.filter { it.id != vehicleId },
-            )
+            val active = _uiState.value.activeVehicles.filter { it.id != vehicleId }
+            _uiState.value = _uiState.value.copy(activeVehicles = active)
+            if (_uiState.value.nearestVehicleTrackingEnabled) {
+                _uiState.value.passengerLocation?.let { updateNearestVehicle(it, active) }
+            }
             return
         }
 
         val currentVehicle = _uiState.value.activeVehicles.firstOrNull { it.id == vehicleId }
         if (currentVehicle != null) {
             val updated = currentVehicle.copy(currentLocation = location, active = true)
-            _uiState.value = _uiState.value.copy(
-                activeVehicles = _uiState.value.activeVehicles.map { if (it.id == vehicleId) updated else it },
-                error = null,
-            )
+            val active = _uiState.value.activeVehicles.map { if (it.id == vehicleId) updated else it }
+            _uiState.value = _uiState.value.copy(activeVehicles = active, error = null)
+            if (_uiState.value.nearestVehicleTrackingEnabled) {
+                _uiState.value.passengerLocation?.let { updateNearestVehicle(it, active) }
+            }
             return
         }
 
@@ -286,10 +289,11 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         vehicleRefreshJob = viewModelScope.launch {
             runCatching { vehicleRepository.getVehiclesForRoute(selectedRoute.id) }
                 .onSuccess { vehicles ->
-                    _uiState.value = _uiState.value.copy(
-                        activeVehicles = freshVehicles(vehicles).map { it.copy(active = true) },
-                        error = null,
-                    )
+                    val active = freshVehicles(vehicles).map { it.copy(active = true) }
+                    _uiState.value = _uiState.value.copy(activeVehicles = active, error = null)
+                    if (_uiState.value.nearestVehicleTrackingEnabled) {
+                        _uiState.value.passengerLocation?.let { updateNearestVehicle(it, active) }
+                    }
                 }
         }
     }
