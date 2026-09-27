@@ -636,7 +636,6 @@ private fun snapLocationToRenderedRoad(
         .toFloat()
 
     val features = mutableListOf<Feature>()
-    val seenGeometry = mutableSetOf<String>()
 
     // A denser grid is important because road lines are often only a few
     // pixels wide. The old 7x7 grid could pass between a road and never
@@ -669,12 +668,7 @@ private fun snapLocationToRenderedRoad(
                     return@forEach
                 }
 
-                val key = runCatching { geometry.toJson() }
-                    .getOrElse { geometry.toString() }
-
-                if (seenGeometry.add(key)) {
-                    features += feature
-                }
+                features += feature
             }
         }
     }
