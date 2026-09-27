@@ -285,9 +285,17 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         staleSweepJob = viewModelScope.launch {
             while (isActive) {
                 delay(STALE_SWEEP_INTERVAL_MS)
-                val fresh = freshVehicles(_uiState.value.activeVehicles)
-                if (fresh.size != _uiState.value.activeVehicles.size) {
-                    _uiState.value = _uiState.value.copy(activeVehicles = fresh)
+                val current = _uiState.value
+                val fresh = freshVehicles(current.activeVehicles)
+                val nearestStillFresh = current.nearestVehicle?.currentLocation?.timestampEpochMs
+                    ?.let(::isFresh) == true
+                if (fresh.size != current.activeVehicles.size || !nearestStillFresh && current.nearestVehicle != null) {
+                    _uiState.value = current.copy(
+                        activeVehicles = fresh,
+                        nearestVehicle = if (nearestStillFresh) current.nearestVehicle else null,
+                        nearestVehicleDistanceMeters = if (nearestStillFresh) current.nearestVehicleDistanceMeters else null,
+                        nearestVehicleEtaMinutes = if (nearestStillFresh) current.nearestVehicleEtaMinutes else null,
+                    )
                 }
             }
         }
