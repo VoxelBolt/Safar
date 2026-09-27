@@ -109,6 +109,8 @@ private const val VEHICLE_ICON_IMAGE_ID = "safar-vehicle-icon"
 // wide on screen.
 private val ROAD_LAYER_IDS = arrayOf(
     "road_minor",
+    "road_service",
+    "road_track",
     "road_minor_casing",
     "road_service_track",
     "road_service_track_casing",
@@ -671,21 +673,44 @@ private fun snapLocationToRenderedRoad(
     val radiusPx = (20.0 / metersPerPixel).toFloat()
     if (!radiusPx.isFinite() || radiusPx <= 0f) return location
 
-    val queryBox = RectF(
-        screenPoint.x - radiusPx,
-        screenPoint.y - radiusPx,
-        screenPoint.x + radiusPx,
-        screenPoint.y + radiusPx,
-    )
+    // MapLibre Android 13.6.1 exposes the PointF overload here, not a
+    // RectF query overload. Sample the complete 20m disk densely and query
+    // only the actual Liberty road layers. This keeps the search compatible
+    // with the SDK version used by the project while avoiding the old generic
+    // feature probing.
+    val steps = 20
+    val featuresById = linkedMapOf<String, Feature>()
 
-    val features = runCatching {
-        map.queryRenderedFeatures(queryBox, ROAD_LAYER_IDS)
-    }.getOrDefault(emptyList())
+    for (y in 0..steps) {
+        val offsetY = (y / steps.toFloat() * 2f - 1f) * radiusPx
+
+        for (x in 0..steps) {
+            val offsetX = (x / steps.toFloat() * 2f - 1f) * radiusPx
+
+            if (offsetX * offsetX + offsetY * offsetY > radiusPx * radiusPx) {
+                continue
+            }
+
+            val sample = PointF(
+                screenPoint.x + offsetX,
+                screenPoint.y + offsetY,
+            )
+
+            val sampleFeatures = runCatching {
+                map.queryRenderedFeatures(sample, *ROAD_LAYER_IDS)
+            }.getOrDefault(emptyList())
+
+            sampleFeatures.forEach { feature ->
+                val id = feature.id() ?: feature.toString()
+                featuresById[id] = feature
+            }
+        }
+    }
 
     var bestPoint: GeoPoint? = null
     var bestDistance = Double.MAX_VALUE
 
-    features.forEach { feature ->
+    featuresById.values.forEach { feature ->
         val geometry = feature.geometry() ?: return@forEach
 
         val lines: List<List<Point>> = when (geometry) {
