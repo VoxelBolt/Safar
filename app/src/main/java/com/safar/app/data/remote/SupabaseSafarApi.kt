@@ -288,14 +288,19 @@ class SupabaseSafarApi(
     }
 
     private fun parseTimestamp(value: String): Long {
-        // PostgREST/PostgreSQL timestamps can arrive as
-        // "2026-09-26 15:05:24.084+00", while realtime sends ISO-8601
-        // "2026-09-26T15:05:24.084Z". Support both formats.
-        return runCatching { Instant.parse(value).toEpochMilli() }
+        // PostgREST can return timestamptz with a short UTC offset:
+        // "2026-09-26 15:05:24.084+00". java.time's ISO parser expects
+        // either Z or an offset such as +00:00, so normalize that form first.
+        val normalized = value.trim()
+            .replace(' ', 'T')
+            .replace(Regex("([+-]\\d{2})$"), "$1:00")
+        return runCatching { Instant.parse(normalized).toEpochMilli() }
             .recoverCatching {
-                OffsetDateTime.parse(value.replace(' ', 'T')).toInstant().toEpochMilli()
+                OffsetDateTime.parse(normalized).toInstant().toEpochMilli()
             }
-            .getOrThrow()
+            .getOrElse {
+                throw IllegalArgumentException("Unsupported Supabase timestamp: $value", it)
+            }
     }
 
     private fun UserDto.toDomain(): User = User(
