@@ -588,69 +588,11 @@ private suspend fun snapOneVehicleToRoad(
     map: MapLibreMap?,
     location: VehicleLocation,
 ): VehicleLocation {
-    snapFromOsrm(location)?.let { return it }
-    return snapFromLoadedVectorRoads(map, location) ?: location
-}
-
-private fun snapFromLoadedVectorRoads(
-    map: MapLibreMap?,
-    location: VehicleLocation,
-): VehicleLocation? {
-    val style = map?.style ?: return null
-    val source = style.getSourceAs<VectorSource>("openmaptiles") ?: return null
-
-    val features = source.querySourceFeatures(
-        arrayOf("transportation"),
-        null,
-    )
-    if (features.isEmpty()) return null
-
-    val roadClasses = setOf(
-        "motorway",
-        "trunk",
-        "primary",
-        "secondary",
-        "tertiary",
-        "minor",
-        "service",
-        "track",
-        "unclassified",
-    )
-
-    var bestPoint: GeoPoint? = null
-    var bestDistance = Double.MAX_VALUE
-
-    features.forEach { feature ->
-        val roadClass = runCatching { feature.getStringProperty("class") }.getOrNull()
-        if (roadClass != null && roadClass !in roadClasses) return@forEach
-
-        val geometry = feature.geometry() ?: return@forEach
-        val lines: List<List<Point>> = when (geometry) {
-            is LineString -> listOf(geometry.coordinates())
-            is MultiLineString -> geometry.coordinates()
-            else -> emptyList()
-        }
-
-        lines.forEach { points ->
-            for (index in 0 until points.lastIndex) {
-                val candidate = projectGpsPointToSegment(
-                    location,
-                    points[index],
-                    points[index + 1],
-                )
-                if (candidate.distanceMeters < bestDistance) {
-                    bestDistance = candidate.distanceMeters
-                    bestPoint = candidate.point
-                }
-            }
-        }
-    }
-
-    val snapped = bestPoint?.takeIf { bestDistance <= 20.0 } ?: return null
-    return location.copy(
-        latitude = snapped.latitude,
-        longitude = snapped.longitude,
-    )
+    // Road snapping uses only the real OSM road network through OSRM.
+    // We intentionally do not query MapLibre VectorSource here because that
+    // native query can run against a tile/source lifecycle that is not ready
+    // and is not required for the 20m contract.
+    return snapFromOsrm(location) ?: location
 }
 
 private suspend fun snapFromOsrm(
@@ -659,8 +601,7 @@ private suspend fun snapFromOsrm(
     runCatching {
         val url = URL(
             "https://router.project-osrm.org/nearest/v1/driving/" +
-                "${location.longitude},${location.latitude}.json" +
-                "?number=1"
+                "${location.longitude},${location.latitude}.json?number=1"
         )
 
         val connection = (url.openConnection() as HttpURLConnection).apply {
@@ -674,72 +615,77 @@ private suspend fun snapFromOsrm(
 
         try {
             val responseCode = connection.responseCode
-            if (responseCode !in 200..299) return@runCatching null
+            if (responseCode !in 200..299) {
+                Log.d("SafarRoadSnap", "OSRM HTTP=$responseCode")
+                return@runCatching null
+            }
 
             val body = connection.inputStream.bufferedReader().use { it.readText() }
             val json = JSONObject(body)
-            if (json.optString("code") != "Ok") return@runCatching null
-
-            val waypoints = json.optJSONArray("waypoints")
-                ?: return@runCatching null
-
-            var bestDistance = Double.MAX_VALUE
-            var bestLongitude = Double.NaN
-            var bestLatitude = Double.NaN
-
-            for (index in 0 until waypoints.length()) {
-                val waypoint = waypoints.optJSONObject(index) ?: continue
-                val distance = waypoint.optDouble("distance", Double.NaN)
-                val coordinates = waypoint.optJSONArray("location") ?: continue
-                val longitude = coordinates.optDouble(0, Double.NaN)
-                val latitude = coordinates.optDouble(1, Double.NaN)
-
-                if (!distance.isFinite() ||
-                    !longitude.isFinite() ||
-                    !latitude.isFinite()
-                ) continue
-
-                if (distance < bestDistance) {
-                    bestDistance = distance
-                    bestLongitude = longitude
-                    bestLatitude = latitude
-                }
+            if (json.optString("code") != "Ok") {
+                Log.d("SafarRoadSnap", "OSRM code=${json.optString("code")}")
+                return@runCatching null
             }
 
-            Log.d("SafarRoadSnap", "vehicle GPS=${location.latitude},${location.longitude} nearestRoad=${bestDistance}m")
+            val waypoint = json.optJSONArray("waypoints")
+                ?.optJSONObject(0)
+                ?: return@runCatching null
 
-            if (bestDistance > 20.0 ||
-                !bestLongitude.isFinite() ||
-                !bestLatitude.isFinite()
+            val distance = waypoint.optDouble("distance", Double.NaN)
+            val coordinates = waypoint.optJSONArray("location")
+                ?: return@runCatching null
+
+            val longitude = coordinates.optDouble(0, Double.NaN)
+            val latitude = coordinates.optDouble(1, Double.NaN)
+
+            if (!distance.isFinite() ||
+                !longitude.isFinite() ||
+                !latitude.isFinite()
             ) {
+                return@runCatching null
+            }
+
+            Log.d(
+                "SafarRoadSnap",
+                "GPS=${location.latitude},${location.longitude} roadDistance=${distance}m"
+            )
+
+            // STRICT 20-METER RULE.
+            if (distance > 20.0) {
+                Log.d("SafarRoadSnap", "NOT SNAPPED: road is farther than 20m")
                 return@runCatching null
             }
 
             val snapped = location.copy(
-                latitude = bestLatitude,
-                longitude = bestLongitude,
+                latitude = latitude,
+                longitude = longitude,
             )
+
+            // Independent second check using the returned coordinates.
+            val actualDistance = haversineDistanceMeters(
+                GeoPoint(location.latitude, location.longitude),
+                GeoPoint(snapped.latitude, snapped.longitude),
+            )
+
+            if (actualDistance > 20.0) {
+                Log.d(
+                    "SafarRoadSnap",
+                    "NOT SNAPPED: returned point is ${actualDistance}m away"
+                )
+                return@runCatching null
+            }
 
             Log.d(
                 "SafarRoadSnap",
-                "SNAPPED =${location.latitude},${location.longitude} -> ${snapped.latitude},${snapped.longitude} (${bestDistance}m)"
+                "SNAPPED: ${distance}m -> ${snapped.latitude},${snapped.longitude}"
             )
-
-            // The feature's contract is strict: only move a vehicle when the
-            // nearest road is at most 20 meters from its actual GPS position.
-            // Check the returned coordinates independently as a second guard.
-            if (haversineDistanceMeters(
-                    GeoPoint(location.latitude, location.longitude),
-                    GeoPoint(snapped.latitude, snapped.longitude),
-                ) > 20.0
-            ) {
-                return@runCatching null
-            }
 
             snapped
         } finally {
             connection.disconnect()
         }
+    }.onFailure {
+        Log.d("SafarRoadSnap", "OSRM error: ${it.javaClass.simpleName}: ${it.message}")
     }.getOrNull()
 }
 
