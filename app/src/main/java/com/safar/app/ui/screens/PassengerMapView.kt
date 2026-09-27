@@ -7,7 +7,6 @@ import android.graphics.BitmapFactory
 import android.graphics.PointF
 import android.os.Bundle
 import android.util.Log
-import org.json.JSONObject
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -33,10 +32,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import java.net.HttpURLConnection
-import java.net.URL
 import com.safar.app.domain.model.GeoPoint
 import com.safar.app.domain.model.PassengerLocation
 import com.safar.app.domain.model.Route
@@ -68,7 +63,6 @@ import org.maplibre.android.style.layers.PropertyFactory.circleOpacity
 import org.maplibre.android.style.layers.PropertyFactory.iconAllowOverlap
 import org.maplibre.android.style.layers.PropertyFactory.iconIgnorePlacement
 import org.maplibre.android.style.layers.PropertyFactory.iconImage
-import org.maplibre.android.style.layers.PropertyFactory.iconSize
 import org.maplibre.android.style.layers.PropertyFactory.fillColor
 import org.maplibre.android.style.layers.PropertyFactory.fillOpacity
 import org.maplibre.android.style.layers.PropertyFactory.lineCap
@@ -84,7 +78,6 @@ import org.maplibre.android.style.layers.PropertyFactory.textSize
 import org.maplibre.android.style.layers.PropertyFactory.textAllowOverlap
 import org.maplibre.android.style.layers.PropertyFactory.textIgnorePlacement
 import org.maplibre.android.style.sources.GeoJsonSource
-import org.maplibre.android.style.sources.VectorSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.LineString
@@ -113,6 +106,7 @@ private const val DEFAULT_LATITUDE = 40.2829
 private const val DEFAULT_LONGITUDE = 69.6228
 private const val DEFAULT_ZOOM = 12.0
 private const val USER_FOCUS_ZOOM = 15.5
+private const val VEHICLE_ROUTE_SNAP_DISTANCE_METERS = 20.0
 
 @Composable
 internal fun PassengerMapView(
@@ -153,7 +147,7 @@ internal fun PassengerMapView(
     var snappedVehicleLocations by remember { mutableStateOf(stabilizedVehicleLocations) }
     val vehicleMarkerIcon = remember(context) {
         val bitmap = decodeVehicleMarkerBitmap(context)
-        val sizePx = (64f * context.resources.displayMetrics.density).toInt().coerceAtLeast(1)
+        val sizePx = 52
         val scaled = Bitmap.createScaledBitmap(bitmap, sizePx, sizePx, true)
         IconFactory.getInstance(context).fromBitmap(scaled)
     }
@@ -325,6 +319,7 @@ internal fun PassengerMapView(
     // Road snapping is asynchronous because the reliable fallback uses the
     // OpenStreetMap road network. Do not block the MapLibre UI thread.
     val latestStabilizedVehicleLocations by rememberUpdatedState(stabilizedVehicleLocations)
+    val latestRoute by rememberUpdatedState(route)
 
     LaunchedEffect(styleReady) {
         if (!styleReady) return@LaunchedEffect
@@ -336,9 +331,9 @@ internal fun PassengerMapView(
             snappedVehicleLocations = if (latest.isEmpty()) {
                 emptyList()
             } else {
-                snapVehiclesToRoadNetwork(
-                    map = map,
+                snapVehiclesToRoute(
                     locations = latest,
+                    routePath = latestRoute?.path.orEmpty(),
                 )
             }
 
@@ -453,9 +448,9 @@ private fun setupMapLayers(style: Style, context: Context) {
     style.addLayer(
         CircleLayer(VEHICLES_LAYER_ID, VEHICLES_SOURCE_ID).withProperties(
             circleColor(SafarBlue.toArgb()),
-            circleRadius(11f),
+            circleRadius(7f),
             circleStrokeColor(Color.White.toArgb()),
-            circleStrokeWidth(3f),
+            circleStrokeWidth(2.5f),
             circleOpacity(1f),
         )
     )
@@ -573,120 +568,61 @@ private fun updateHeadingSector(style: Style, center: GeoPoint?, headingDegrees:
 }
 
 
-private suspend fun snapVehiclesToRoadNetwork(
-    map: MapLibreMap?,
+private fun snapVehiclesToRoute(
     locations: List<Pair<Vehicle, VehicleLocation>>,
+    routePath: List<GeoPoint>,
 ): List<Pair<Vehicle, VehicleLocation>> {
-    if (locations.isEmpty()) return emptyList()
+    if (locations.isEmpty() || routePath.size < 2) return locations
 
     return locations.map { (vehicle, location) ->
-        vehicle to snapOneVehicleToRoad(map, location)
+        vehicle to snapOneVehicleToRoute(location, routePath)
     }
 }
 
-private suspend fun snapOneVehicleToRoad(
-    map: MapLibreMap?,
+private fun snapOneVehicleToRoute(
     location: VehicleLocation,
+    routePath: List<GeoPoint>,
 ): VehicleLocation {
-    // Road snapping uses only the real OSM road network through OSRM.
-    // We intentionally do not query MapLibre VectorSource here because that
-    // native query can run against a tile/source lifecycle that is not ready
-    // and is not required for the 20m contract.
-    return snapFromOsrm(location) ?: location
-}
+    var bestProjection: RoadProjection? = null
 
-private suspend fun snapFromOsrm(
-    location: VehicleLocation,
-): VehicleLocation? = withContext(Dispatchers.IO) {
-    runCatching {
-        val url = URL(
-            "https://router.project-osrm.org/nearest/v1/driving/" +
-                "${location.longitude},${location.latitude}.json?number=1"
+    for (index in 0 until routePath.lastIndex) {
+        val start = Point.fromLngLat(
+            routePath[index].longitude,
+            routePath[index].latitude,
+        )
+        val end = Point.fromLngLat(
+            routePath[index + 1].longitude,
+            routePath[index + 1].latitude,
         )
 
-        val connection = (url.openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 5000
-            readTimeout = 5000
-            useCaches = false
-            setRequestProperty("Accept", "application/json")
-            setRequestProperty("User-Agent", "Safar/1.0 Android")
+        val projection = projectGpsPointToSegment(location, start, end)
+        if (bestProjection == null || projection.distanceMeters < bestProjection.distanceMeters) {
+            bestProjection = projection
         }
+    }
 
-        try {
-            val responseCode = connection.responseCode
-            if (responseCode !in 200..299) {
-                Log.d("SafarRoadSnap", "OSRM HTTP=$responseCode")
-                return@runCatching null
-            }
+    val nearest = bestProjection ?: return location
 
-            val body = connection.inputStream.bufferedReader().use { it.readText() }
-            val json = JSONObject(body)
-            if (json.optString("code") != "Ok") {
-                Log.d("SafarRoadSnap", "OSRM code=${json.optString("code")}")
-                return@runCatching null
-            }
+    // Strict 20-meter rule: only move the displayed vehicle onto the
+    // selected bus route when the real GPS point is within 20 meters.
+    if (nearest.distanceMeters > VEHICLE_ROUTE_SNAP_DISTANCE_METERS) {
+        Log.d(
+            "SafarRouteSnap",
+            "NOT SNAPPED: GPS is ${"%.1f".format(nearest.distanceMeters)}m from route"
+        )
+        return location
+    }
 
-            val waypoint = json.optJSONArray("waypoints")
-                ?.optJSONObject(0)
-                ?: return@runCatching null
+    Log.d(
+        "SafarRouteSnap",
+        "SNAPPED: ${"%.1f".format(nearest.distanceMeters)}m -> " +
+            "${nearest.point.latitude},${nearest.point.longitude}"
+    )
 
-            val distance = waypoint.optDouble("distance", Double.NaN)
-            val coordinates = waypoint.optJSONArray("location")
-                ?: return@runCatching null
-
-            val longitude = coordinates.optDouble(0, Double.NaN)
-            val latitude = coordinates.optDouble(1, Double.NaN)
-
-            if (!distance.isFinite() ||
-                !longitude.isFinite() ||
-                !latitude.isFinite()
-            ) {
-                return@runCatching null
-            }
-
-            Log.d(
-                "SafarRoadSnap",
-                "GPS=${location.latitude},${location.longitude} roadDistance=${distance}m"
-            )
-
-            // STRICT 20-METER RULE.
-            if (distance > 20.0) {
-                Log.d("SafarRoadSnap", "NOT SNAPPED: road is farther than 20m")
-                return@runCatching null
-            }
-
-            val snapped = location.copy(
-                latitude = latitude,
-                longitude = longitude,
-            )
-
-            // Independent second check using the returned coordinates.
-            val actualDistance = haversineDistanceMeters(
-                GeoPoint(location.latitude, location.longitude),
-                GeoPoint(snapped.latitude, snapped.longitude),
-            )
-
-            if (actualDistance > 20.0) {
-                Log.d(
-                    "SafarRoadSnap",
-                    "NOT SNAPPED: returned point is ${actualDistance}m away"
-                )
-                return@runCatching null
-            }
-
-            Log.d(
-                "SafarRoadSnap",
-                "SNAPPED: ${distance}m -> ${snapped.latitude},${snapped.longitude}"
-            )
-
-            snapped
-        } finally {
-            connection.disconnect()
-        }
-    }.onFailure {
-        Log.d("SafarRoadSnap", "OSRM error: ${it.javaClass.simpleName}: ${it.message}")
-    }.getOrNull()
+    return location.copy(
+        latitude = nearest.point.latitude,
+        longitude = nearest.point.longitude,
+    )
 }
 
 private data class RoadProjection(
