@@ -2,10 +2,8 @@ package com.safar.app.ui.screens
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Paint
+import android.graphics.BitmapFactory
 import android.graphics.PointF
-import android.graphics.RectF
 import android.os.Bundle
 import org.json.JSONObject
 import androidx.compose.foundation.background
@@ -152,7 +150,7 @@ internal fun PassengerMapView(
     val stabilizedVehicleLocations = vehicleLocationStabilizer.stabilize(vehicleLocations)
     var snappedVehicleLocations by remember { mutableStateOf(stabilizedVehicleLocations) }
     val vehicleMarkerIcon = remember(context) {
-        IconFactory.getInstance(context).fromBitmap(createVehicleMarkerBitmap())
+        IconFactory.getInstance(context).fromBitmap(decodeVehicleMarkerBitmap(context))
     }
 
     rememberMapLibre(context)
@@ -328,11 +326,13 @@ internal fun PassengerMapView(
         }
 
         delay(500L)
-
-        snappedVehicleLocations = snapVehiclesToRoadNetwork(
-            map = map,
-            locations = stabilizedVehicleLocations,
-        )
+        while (true) {
+            snappedVehicleLocations = snapVehiclesToRoadNetwork(
+                map = map,
+                locations = stabilizedVehicleLocations,
+            )
+            delay(3_000L)
+        }
     }
 
     LaunchedEffect(locateRequestId) {
@@ -449,7 +449,7 @@ private fun setupMapLayers(style: Style, context: Context) {
         )
     )
     if (style.getImage(VEHICLE_ICON_IMAGE_ID) == null) {
-        style.addImage(VEHICLE_ICON_IMAGE_ID, createVehicleMarkerBitmap())
+        style.addImage(VEHICLE_ICON_IMAGE_ID, decodeVehicleMarkerBitmap(context))
     }
     style.getLayer(VEHICLE_ICON_LAYER_ID)?.let { style.removeLayer(VEHICLE_ICON_LAYER_ID) }
     style.addLayer(
@@ -496,60 +496,11 @@ private fun setupMapLayers(style: Style, context: Context) {
 }
 
 
-private fun createVehicleMarkerBitmap(): Bitmap {
-    // Bright version of the exact visual language of the supplied reference:
-    // blue rounded square + white front-facing bus, no circular badge.
-    val size = 96
-    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-
-    val bluePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.rgb(0, 112, 255)
-        style = Paint.Style.FILL
-    }
-    canvas.drawRoundRect(
-        RectF(8f, 8f, 88f, 88f),
-        7f,
-        7f,
-        bluePaint,
+private fun decodeVehicleMarkerBitmap(context: Context): Bitmap {
+    return BitmapFactory.decodeResource(
+        context.resources,
+        R.drawable.safar_vehicle_marker,
     )
-
-    val whitePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.WHITE
-        style = Paint.Style.FILL
-    }
-
-    // Bus roof/body.
-    canvas.drawRoundRect(
-        RectF(28f, 20f, 68f, 73f),
-        7f,
-        7f,
-        whitePaint,
-    )
-
-    // Windshield.
-    canvas.drawRoundRect(
-        RectF(32f, 26f, 64f, 46f),
-        4f,
-        4f,
-        bluePaint,
-    )
-    canvas.drawRect(47f, 26f, 49f, 46f, whitePaint)
-
-    // Front panel.
-    canvas.drawRect(33f, 51f, 63f, 61f, bluePaint)
-
-    // Headlights / lower details.
-    canvas.drawCircle(36f, 67f, 4.5f, bluePaint)
-    canvas.drawCircle(60f, 67f, 4.5f, bluePaint)
-    canvas.drawCircle(36f, 67f, 1.8f, whitePaint)
-    canvas.drawCircle(60f, 67f, 1.8f, whitePaint)
-
-    // Side mirrors.
-    canvas.drawRoundRect(RectF(23f, 37f, 30f, 47f), 3f, 3f, whitePaint)
-    canvas.drawRoundRect(RectF(66f, 37f, 73f, 47f), 3f, 3f, whitePaint)
-
-    return bitmap
 }
 
 private fun updateUserLocation(style: Style, point: GeoPoint?) {
@@ -638,19 +589,8 @@ private suspend fun snapOneVehicleToRoad(
     map: MapLibreMap?,
     location: VehicleLocation,
 ): VehicleLocation {
-    // First try the loaded Liberty vector tiles. The official Liberty style
-    // uses source "openmaptiles" and source-layer "transportation".
-    val vectorResult = runCatching {
-        snapFromLoadedVectorRoads(map, location)
-    }.getOrNull()
-
-    if (vectorResult != null) {
-        return vectorResult
-    }
-
-    // Reliable fallback: OSRM's Nearest service returns the closest real road
-    // coordinate and its distance from the original GPS point.
-    return snapFromOsrm(location) ?: location
+    snapFromOsrm(location)?.let { return it }
+    return snapFromLoadedVectorRoads(map, location) ?: location
 }
 
 private fun snapFromLoadedVectorRoads(
@@ -664,15 +604,28 @@ private fun snapFromLoadedVectorRoads(
         arrayOf("transportation"),
         null,
     )
-
     if (features.isEmpty()) return null
+
+    val roadClasses = setOf(
+        "motorway",
+        "trunk",
+        "primary",
+        "secondary",
+        "tertiary",
+        "minor",
+        "service",
+        "track",
+        "unclassified",
+    )
 
     var bestPoint: GeoPoint? = null
     var bestDistance = Double.MAX_VALUE
 
     features.forEach { feature ->
-        val geometry = feature.geometry() ?: return@forEach
+        val roadClass = runCatching { feature.getStringProperty("class") }.getOrNull()
+        if (roadClass != null && roadClass !in roadClasses) return@forEach
 
+        val geometry = feature.geometry() ?: return@forEach
         val lines: List<List<Point>> = when (geometry) {
             is LineString -> listOf(geometry.coordinates())
             is MultiLineString -> geometry.coordinates()
@@ -686,7 +639,6 @@ private fun snapFromLoadedVectorRoads(
                     points[index],
                     points[index + 1],
                 )
-
                 if (candidate.distanceMeters < bestDistance) {
                     bestDistance = candidate.distanceMeters
                     bestPoint = candidate.point
@@ -695,9 +647,7 @@ private fun snapFromLoadedVectorRoads(
         }
     }
 
-    val snapped = bestPoint?.takeIf { bestDistance <= 20.0 }
-        ?: return null
-
+    val snapped = bestPoint?.takeIf { bestDistance <= 20.0 } ?: return null
     return location.copy(
         latitude = snapped.latitude,
         longitude = snapped.longitude,
@@ -710,14 +660,17 @@ private suspend fun snapFromOsrm(
     runCatching {
         val url = URL(
             "https://router.project-osrm.org/nearest/v1/driving/" +
-                "${location.longitude},${location.latitude}.json?number=1"
+                "${location.longitude},${location.latitude}.json" +
+                "?number=3&radiuses=20"
         )
 
         val connection = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
-            connectTimeout = 2500
-            readTimeout = 2500
+            connectTimeout = 5000
+            readTimeout = 5000
             useCaches = false
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("User-Agent", "Safar/1.0 Android")
         }
 
         try {
@@ -726,34 +679,44 @@ private suspend fun snapFromOsrm(
 
             val body = connection.inputStream.bufferedReader().use { it.readText() }
             val json = JSONObject(body)
-
             if (json.optString("code") != "Ok") return@runCatching null
 
-            val waypoint = json.optJSONArray("waypoints")
-                ?.optJSONObject(0)
+            val waypoints = json.optJSONArray("waypoints")
                 ?: return@runCatching null
 
-            val distance = waypoint.optDouble("distance", Double.NaN)
-            val coordinates = waypoint.optJSONArray("location")
-                ?: return@runCatching null
+            var bestDistance = Double.MAX_VALUE
+            var bestLongitude = Double.NaN
+            var bestLatitude = Double.NaN
 
-            val longitude = coordinates.optDouble(0, Double.NaN)
-            val latitude = coordinates.optDouble(1, Double.NaN)
+            for (index in 0 until waypoints.length()) {
+                val waypoint = waypoints.optJSONObject(index) ?: continue
+                val distance = waypoint.optDouble("distance", Double.NaN)
+                val coordinates = waypoint.optJSONArray("location") ?: continue
+                val longitude = coordinates.optDouble(0, Double.NaN)
+                val latitude = coordinates.optDouble(1, Double.NaN)
 
-            if (!distance.isFinite() ||
-                !longitude.isFinite() ||
-                !latitude.isFinite()
+                if (!distance.isFinite() ||
+                    !longitude.isFinite() ||
+                    !latitude.isFinite()
+                ) continue
+
+                if (distance < bestDistance) {
+                    bestDistance = distance
+                    bestLongitude = longitude
+                    bestLatitude = latitude
+                }
+            }
+
+            if (bestDistance > 20.0 ||
+                !bestLongitude.isFinite() ||
+                !bestLatitude.isFinite()
             ) {
                 return@runCatching null
             }
 
-            // This is the hard rule: OSRM may find a road farther away, but
-            // Safar never moves the vehicle unless it is <= 20 meters away.
-            if (distance > 20.0) return@runCatching null
-
             location.copy(
-                latitude = latitude,
-                longitude = longitude,
+                latitude = bestLatitude,
+                longitude = bestLongitude,
             )
         } finally {
             connection.disconnect()
