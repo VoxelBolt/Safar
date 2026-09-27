@@ -107,4 +107,5 @@
     <string name="retry">Retry</string>
     <string name="find_nearest_vehicle">Find nearest minibus</string>
     <string name="nearest_vehicle_eta">%1$d min</string>
+    <string name="route_number_format">Route %1$s</string>
 </resources>
