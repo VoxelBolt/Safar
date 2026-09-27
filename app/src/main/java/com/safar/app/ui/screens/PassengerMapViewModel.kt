@@ -28,6 +28,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 data class PassengerMapUiState(
     val routes: List<Route> = emptyList(),
@@ -114,16 +116,9 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
 
         nearestVehicleRequestJob?.cancel()
         nearestVehicleRequestJob = viewModelScope.launch {
-            // Use the already-updated passenger GPS immediately. Do not wait for
-            // a second asynchronous callback: that made the button appear dead
-            // on devices where a fresh one-shot fix was delayed.
-            val passenger = _uiState.value.passengerLocation
+            val passenger = _uiState.value.passengerLocation ?: awaitFreshPassengerLocation()
             if (passenger == null) {
-                requestCurrentLocation(centerCamera = false)
-                _uiState.value = _uiState.value.copy(
-                    error = "Получаю ваше местоположение…",
-                    nearestVehicleTrackingEnabled = true,
-                )
+                _uiState.value = _uiState.value.copy(error = "Не удалось получить ваше местоположение")
                 return@launch
             }
 
@@ -133,33 +128,42 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                 error = null,
             )
 
-            val currentVehicles = freshVehicles(_uiState.value.activeVehicles)
-            if (currentVehicles.isNotEmpty()) {
-                updateNearestVehicle(passenger, currentVehicles, forceFocus = true)
+            // First use the live route snapshot so the button reacts immediately.
+            val routeSnapshot = freshVehicles(_uiState.value.activeVehicles)
+            if (routeSnapshot.isNotEmpty()) {
+                updateNearestVehicle(passenger, routeSnapshot, forceFocus = true)
             }
 
-            runCatching {
-                vehicleRepository.getAllVehicles()
-            }.onSuccess { vehicles ->
-                val fresh = freshVehicles(vehicles).map { it.copy(active = true) }
-                _uiState.value = _uiState.value.copy(
-                    passengerLocation = passenger,
-                    activeVehicles = _uiState.value.activeVehicles,
-                    nearestVehicleTrackingEnabled = true,
-                    error = null,
-                )
-                updateNearestVehicle(passenger, fresh, forceFocus = true)
-            }.onFailure { error ->
-                android.util.Log.w("SafarNearestVehicle", "Nearest snapshot failed", error)
-                if (currentVehicles.isEmpty()) {
-                    _uiState.value = _uiState.value.copy(
-                        error = "Не удалось получить актуальные маршрутки",
-                        nearestVehicleTrackingEnabled = true,
-                    )
+            // Then query the complete current-location table. This is intentionally
+            // not limited to the selected route: the feature must find the closest
+            // currently tracked minibus for the passenger.
+            runCatching { vehicleRepository.getAllVehicles() }
+                .onSuccess { vehicles ->
+                    val fresh = freshVehicles(vehicles).map { it.copy(active = true) }
+                    updateNearestVehicle(passenger, fresh, forceFocus = true)
+                    if (fresh.isEmpty()) {
+                        _uiState.value = _uiState.value.copy(
+                            error = "Сейчас нет маршруток с актуальной геопозицией",
+                        )
+                    }
                 }
-            }
+                .onFailure { error ->
+                    android.util.Log.w("SafarNearestVehicle", "Nearest snapshot failed", error)
+                    if (routeSnapshot.isEmpty()) {
+                        _uiState.value = _uiState.value.copy(
+                            error = "Не удалось получить актуальные маршрутки",
+                        )
+                    }
+                }
         }
     }
+
+    private suspend fun awaitFreshPassengerLocation(): GeoPoint? =
+        suspendCancellableCoroutine { continuation ->
+            locationProvider.currentLocationSample { sample ->
+                if (continuation.isActive) continuation.resume(sample?.point)
+            }
+        }
 
     fun selectRoute(route: Route) {
         val oldRouteId = _uiState.value.selectedRoute?.id
