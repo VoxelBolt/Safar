@@ -102,12 +102,6 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun showNearestVehicleOnMap() {
-        val route = _uiState.value.selectedRoute
-        if (route == null) {
-            _uiState.value = _uiState.value.copy(error = "Сначала выберите маршрут")
-            return
-        }
-
         if (!hasLocationPermission()) {
             _uiState.value = _uiState.value.copy(error = "Разрешите геолокацию, чтобы найти ближайшую маршрутку")
             requestCurrentLocation(centerCamera = false)
