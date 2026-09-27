@@ -103,6 +103,27 @@ private const val VEHICLE_ICON_LAYER_ID = "safar-vehicle-icon-layer"
 private const val VEHICLE_LABEL_LAYER_ID = "safar-vehicle-label-layer"
 private const val VEHICLE_ICON_IMAGE_ID = "safar-vehicle-icon"
 
+// OpenFreeMap Liberty road layers. Querying these layers directly is much more
+// reliable than probing arbitrary rendered pixels: the 20m search box can see
+// the actual transportation LineString even when the road is only a few pixels
+// wide on screen.
+private val ROAD_LAYER_IDS = arrayOf(
+    "road_minor",
+    "road_minor_casing",
+    "road_service_track",
+    "road_service_track_casing",
+    "road_link",
+    "road_link_casing",
+    "road_secondary_tertiary",
+    "road_secondary_tertiary_casing",
+    "road_trunk_primary",
+    "road_trunk_primary_casing",
+    "road_motorway",
+    "road_motorway_casing",
+    "road_motorway_link",
+    "road_motorway_link_casing",
+)
+
 private const val DEFAULT_LATITUDE = 40.2829
 private const val DEFAULT_LONGITUDE = 69.6228
 private const val DEFAULT_ZOOM = 12.0
@@ -254,6 +275,11 @@ internal fun PassengerMapView(
             updateHeadingSector(style, passengerLocation, headingDegrees)
             updateUserLocation(style, passengerLocation)
         }
+
+        // Give Liberty's transportation tiles a moment to finish their
+        // first render. The initial Compose update can happen before road
+        // features are queryable.
+        delay(800L)
 
         val displayVehicleLocations = map?.let {
             snapVehiclesToRenderedRoad(it, stabilizedVehicleLocations)
@@ -481,54 +507,64 @@ private fun setupMapLayers(style: Style, context: Context) {
 
 
 private fun createVehicleMarkerBitmap(): Bitmap {
+    // Recreate the bus glyph from the icon supplied by the user, but as a
+    // clean transparent marker and with a brighter blue so it stays visible
+    // over the Liberty map.
     val size = 96
     val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
-    val center = size / 2f
 
     val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0x44000000
+        color = 0x38000000
         style = Paint.Style.FILL
     }
-    canvas.drawCircle(center + 2f, center + 3f, 38f, shadowPaint)
+    canvas.drawRoundRect(
+        RectF(17f, 11f, 83f, 89f),
+        13f,
+        13f,
+        shadowPaint,
+    )
 
-    val outerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.White.toArgb()
-        style = Paint.Style.FILL
-    }
-    canvas.drawCircle(center, center, 40f, outerPaint)
-
+    val blue = android.graphics.Color.rgb(25, 118, 255)
     val bluePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = SafarBlue.toArgb()
-        style = Paint.Style.FILL
-    }
-    canvas.drawCircle(center, center, 36f, bluePaint)
-
-    val busPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.White.toArgb()
+        color = blue
         style = Paint.Style.FILL
     }
     canvas.drawRoundRect(
-        RectF(29f, 23f, 67f, 68f),
-        9f,
-        9f,
-        busPaint,
+        RectF(13f, 7f, 79f, 85f),
+        12f,
+        12f,
+        bluePaint,
     )
 
-    val windowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = SafarBlue.toArgb()
+    val whitePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE
         style = Paint.Style.FILL
     }
-    canvas.drawRoundRect(
-        RectF(34f, 29f, 62f, 44f),
-        4f,
-        4f,
-        windowPaint,
-    )
-    canvas.drawRect(47f, 29f, 50f, 44f, busPaint)
 
-    canvas.drawCircle(38f, 61f, 4.5f, windowPaint)
-    canvas.drawCircle(58f, 61f, 4.5f, windowPaint)
+    // Bus body.
+    canvas.drawRoundRect(
+        RectF(27f, 20f, 65f, 69f),
+        8f,
+        8f,
+        whitePaint,
+    )
+
+    // Front windshield.
+    canvas.drawRoundRect(
+        RectF(31f, 26f, 61f, 43f),
+        4f,
+        4f,
+        bluePaint,
+    )
+    canvas.drawRect(46f, 26f, 49f, 43f, whitePaint)
+
+    // Lower front panel and wheels, matching the supplied icon's silhouette.
+    canvas.drawRect(31f, 48f, 61f, 59f, whitePaint)
+    canvas.drawCircle(37f, 65f, 5f, bluePaint)
+    canvas.drawCircle(59f, 65f, 5f, bluePaint)
+    canvas.drawCircle(37f, 65f, 2f, whitePaint)
+    canvas.drawCircle(59f, 65f, 2f, whitePaint)
 
     return bitmap
 }
@@ -610,9 +646,9 @@ private fun snapVehiclesToRenderedRoad(
 ): List<Pair<Vehicle, VehicleLocation>> {
     if (locations.isEmpty()) return emptyList()
 
-    // Do not depend on Liberty style layer names. Different zoom levels can
-    // expose roads through different layer ids. We query rendered features
-    // directly and keep only LineString/MultiLineString geometries.
+    // Query a real 20m screen-space box against Liberty's transportation
+    // layers. This replaces pixel-grid probing: a narrow road cannot be missed
+    // simply because no sample pixel landed on it.
     return locations.map { (vehicle, rawLocation) ->
         vehicle to snapLocationToRenderedRoad(map, rawLocation)
     }
@@ -630,48 +666,21 @@ private fun snapLocationToRenderedRoad(
         map.projection.getMetersPerPixelAtLatitude(location.latitude)
     }.getOrDefault(1.0).coerceAtLeast(0.1)
 
-    // Search exactly 20m around the GPS point.
-    val radiusPx = (20.0 / metersPerPixel)
-        .coerceIn(6.0, 60.0)
-        .toFloat()
+    // Strict requirement: only snap when the real road geometry is <= 20m
+    // from the driver's GPS point.
+    val radiusPx = (20.0 / metersPerPixel).toFloat()
+    if (!radiusPx.isFinite() || radiusPx <= 0f) return location
 
-    val features = mutableListOf<Feature>()
+    val queryBox = RectF(
+        screenPoint.x - radiusPx,
+        screenPoint.y - radiusPx,
+        screenPoint.x + radiusPx,
+        screenPoint.y + radiusPx,
+    )
 
-    // A denser grid is important because road lines are often only a few
-    // pixels wide. The old 7x7 grid could pass between a road and never
-    // return that road from queryRenderedFeatures().
-    val steps = 12
-
-    for (y in 0..steps) {
-        val offsetY = (y / steps.toFloat() * 2f - 1f) * radiusPx
-
-        for (x in 0..steps) {
-            val offsetX = (x / steps.toFloat() * 2f - 1f) * radiusPx
-
-            if (offsetX * offsetX + offsetY * offsetY > radiusPx * radiusPx) {
-                continue
-            }
-
-            val sample = PointF(
-                screenPoint.x + offsetX,
-                screenPoint.y + offsetY,
-            )
-
-            val sampleFeatures = runCatching {
-                map.queryRenderedFeatures(sample)
-            }.getOrDefault(emptyList())
-
-            sampleFeatures.forEach { feature ->
-                val geometry = feature.geometry() ?: return@forEach
-
-                if (geometry !is LineString && geometry !is MultiLineString) {
-                    return@forEach
-                }
-
-                features += feature
-            }
-        }
-    }
+    val features = runCatching {
+        map.queryRenderedFeatures(queryBox, ROAD_LAYER_IDS)
+    }.getOrDefault(emptyList())
 
     var bestPoint: GeoPoint? = null
     var bestDistance = Double.MAX_VALUE
@@ -701,8 +710,6 @@ private fun snapLocationToRenderedRoad(
         }
     }
 
-    // The marker moves only when the real rendered line is at most 20m away.
-    // Otherwise the original GPS position is preserved.
     val snapped = bestPoint?.takeIf { bestDistance <= 20.0 } ?: return location
 
     return location.copy(
