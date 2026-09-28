@@ -137,4 +137,5 @@
     <string name="location_available">Геопозиция актуальна</string>
     <string name="location_stale">Геопозиция устарела</string>
 
+    <string name="passengers_waiting">Ждут маршрут %1$s: %2$d</string>
 </resources>
