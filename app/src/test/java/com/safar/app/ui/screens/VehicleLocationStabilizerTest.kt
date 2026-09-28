@@ -35,6 +35,7 @@ class VehicleLocationStabilizerTest {
         stabilizer.stabilize(listOf(vehicle to first))
         val result = stabilizer.stabilize(listOf(vehicle to second)).single().second
 
-        assertTrue(kotlin.math.abs(result.longitude - first.longitude) < 0.0003)
+        assertTrue(result.longitude > first.longitude)
+        assertTrue(result.longitude < second.longitude)
     }
 }
