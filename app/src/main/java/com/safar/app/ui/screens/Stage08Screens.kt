@@ -106,6 +106,10 @@ fun PassengerProfileRealScreen(
     var editOpen by remember { mutableStateOf(false) }
     var languageOpen by remember { mutableStateOf(false) }
     var infoTitle by remember { mutableStateOf<String?>(null) }
+    val notificationsInfo = stringResource(R.string.notifications_info)
+    val driverVerificationInfo = stringResource(R.string.driver_verification_info)
+    val helpInfo = stringResource(R.string.help_info)
+    val aboutInfo = stringResource(R.string.about_info)
 
     LaunchedEffect(isDriver) { viewModel.load(isDriver) }
 
@@ -141,7 +145,7 @@ fun PassengerProfileRealScreen(
                 )
                 ProfileAction(
                     stringResource(R.string.notifications),
-                    onClick = { infoTitle = stringResource(R.string.notifications_info) },
+                    onClick = { infoTitle = notificationsInfo },
                 )
                 ProfileAction(
                     stringResource(R.string.language_label),
@@ -152,17 +156,17 @@ fun PassengerProfileRealScreen(
                     ProfileAction(
                         stringResource(R.string.driver_verification),
                         value = if (ui.driver?.verified == true) stringResource(R.string.verified) else stringResource(R.string.not_verified),
-                        onClick = { infoTitle = stringResource(R.string.driver_verification_info) },
+                        onClick = { infoTitle = driverVerificationInfo },
                     )
                 }
                 ProfileAction(
                     stringResource(R.string.help),
-                    onClick = { infoTitle = stringResource(R.string.help_info) },
+                    onClick = { infoTitle = helpInfo },
                 )
                 ProfileAction(
                     stringResource(R.string.about_app),
                     value = "v0.1.0",
-                    onClick = { infoTitle = stringResource(R.string.about_info) },
+                    onClick = { infoTitle = aboutInfo },
                 )
                 Spacer(Modifier.height(14.dp))
                 Button(
