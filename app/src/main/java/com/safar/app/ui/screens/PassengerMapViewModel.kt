@@ -43,7 +43,7 @@ data class PassengerMapUiState(
     val nearestVehicleDistanceMeters: Double? = null,
     val nearestVehicleEtaMinutes: Int? = null,
     val nearestVehicleRequestId: Long = 0L,
-    val nearestVehicleTrackingEnabled: Boolean = false,
+    val nearestVehicleTrackingEnabled: Boolean = true,
     val loadingRoutes: Boolean = false,
     val loadingVehicles: Boolean = false,
     val error: String? = null,
@@ -183,7 +183,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             nearestVehicleDistanceMeters = null,
             nearestVehicleEtaMinutes = null,
             nearestVehicleRequestId = 0L,
-            nearestVehicleTrackingEnabled = false,
+            nearestVehicleTrackingEnabled = true,
             error = null,
         )
         loadVehicles(route)
