@@ -78,6 +78,8 @@ class ProfileViewModel : ViewModel() {
 
     fun retry(isDriver: Boolean) = load(isDriver)
 
-    private data class Quadruple<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)\n\n    private fun Throwable.userMessage(): String =
+    private data class Quadruple<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
+
+    private fun Throwable.userMessage(): String =
         message?.takeIf { it.isNotBlank() } ?: "Не удалось загрузить данные"
 }
