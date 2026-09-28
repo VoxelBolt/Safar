@@ -7,6 +7,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.safar.app.BuildConfig
 import com.safar.app.data.remote.SupabaseClientProvider
+import com.safar.app.data.location.DriverLocationService
 import com.safar.app.di.AppContainer
 import com.safar.app.domain.model.Route
 import com.safar.app.domain.model.UserRole
@@ -172,6 +173,16 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
                 "Сессия приложения недействительна. Перезапустите приложение и попробуйте снова."
             else ->
                 "Не удалось зарегистрироваться. Проверьте подключение к интернету и попробуйте снова."
+        }
+    }
+
+    fun logout() {
+        viewModelScope.launch {
+            runCatching { AppContainer.userRepository.signOut() }
+            AppContainer.realtimeTransport.disconnect()
+            runCatching { DriverLocationService.stop(getApplication()) }
+            preferences.edit().clear().apply()
+            _state.value = OnboardingState()
         }
     }
 
