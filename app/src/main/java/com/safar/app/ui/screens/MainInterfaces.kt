@@ -389,7 +389,7 @@ private fun PassengerMapScreen(
                         }
                         ui.nearestVehicleEtaMinutes?.let { eta ->
                             Text(
-                                text = "≈ $eta мин",
+                                text = stringResource(R.string.nearest_vehicle_eta, eta),
                                 modifier = Modifier.padding(start = 8.dp),
                                 color = SafarBlue,
                                 fontWeight = FontWeight.Bold,
@@ -890,7 +890,7 @@ private fun DriverHomeScreen(
         WorkSessionStatus.COMPLETED -> stringResource(R.string.work_finished)
     }
     val statusColor = if (status == WorkSessionStatus.ACTIVE) Success else Muted
-    val distanceKm = ((session?.distanceMeters ?: 0.0) / 1000.0).let { "%.1f".format(it) }
+    val distanceKm = stringResource(R.string.distance_km_format, (session?.distanceMeters ?: 0.0) / 1000.0)
     val routeNumber = ui.selectedRoute?.number ?: stringResource(R.string.route_not_selected)
 
     Box(
@@ -932,7 +932,7 @@ private fun DriverHomeScreen(
                 shadowElevation = 4.dp,
             ) {
                 Text(
-                    text = "Ждут маршрут ${routeNumber}: ${ui.passengerLocations.size}",
+                    text = stringResource(R.string.passengers_waiting, routeNumber, ui.passengerLocations.size),
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     color = SafarNavy,
                     style = MaterialTheme.typography.labelLarge,
@@ -1172,7 +1172,7 @@ private fun DriverHomeScreen(
                 ui.error?.let { error ->
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        error,
+                        stringResource(R.string.generic_load_error),
                         color = Danger,
                         style = MaterialTheme.typography.labelSmall,
                         modifier = Modifier.fillMaxWidth(),
