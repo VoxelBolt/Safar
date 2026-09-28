@@ -13,12 +13,14 @@ data class FavoriteUiState(
     val loading: Boolean = false,
     val vehicles: List<Vehicle> = emptyList(),
     val favoriteIds: Set<String> = emptySet(),
+    val routeNumbers: Map<String, String> = emptyMap(),
     val error: String? = null,
 )
 
 class FavoriteViewModel : ViewModel() {
     private val favoriteRepository = AppContainer.favoriteRepository
     private val vehicleRepository = AppContainer.vehicleRepository
+    private val routeRepository = AppContainer.routeRepository
 
     private val _uiState = MutableStateFlow(FavoriteUiState())
     val uiState: StateFlow<FavoriteUiState> = _uiState.asStateFlow()
@@ -30,12 +32,14 @@ class FavoriteViewModel : ViewModel() {
             runCatching {
                 val favorites = favoriteRepository.getFavorites()
                 val vehicles = vehicleRepository.getAllVehicles()
-                favorites.map { it.vehicleId }.toSet() to vehicles
-            }.onSuccess { (ids, vehicles) ->
+                val routes = routeRepository.getRoutes().associate { it.id to it.number }
+                Triple(favorites.map { it.vehicleId }.toSet(), vehicles, routes)
+            }.onSuccess { (ids, vehicles, routes) ->
                 _uiState.value = FavoriteUiState(
                     loading = false,
                     vehicles = vehicles.filter { it.id in ids },
                     favoriteIds = ids,
+                    routeNumbers = routes,
                 )
             }.onFailure { error ->
                 _uiState.value = _uiState.value.copy(
