@@ -122,32 +122,43 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                 error = null,
             )
 
-            // First use the live route snapshot so the button reacts immediately.
+            // The button means "show the nearest vehicle for the selected route".
+            // Use the already live route snapshot first so the map can react immediately.
             val routeSnapshot = freshVehicles(_uiState.value.activeVehicles)
             if (routeSnapshot.isNotEmpty()) {
                 updateNearestVehicle(passenger, routeSnapshot, forceFocus = true)
+                return@launch
             }
 
-            // Then query the complete current-location table. This is intentionally
-            // not limited to the selected route: the feature must find the closest
-            // currently tracked minibus for the passenger.
-            runCatching { vehicleRepository.getAllVehicles() }
+            // If the live snapshot is empty, refresh the selected route once.
+            val routeId = _uiState.value.selectedRoute?.id
+            if (routeId == null) {
+                _uiState.value = _uiState.value.copy(
+                    error = "Сначала выберите маршрут",
+                )
+                return@launch
+            }
+
+            runCatching { vehicleRepository.getVehiclesForRoute(routeId) }
                 .onSuccess { vehicles ->
                     val fresh = freshVehicles(vehicles).map { it.copy(active = true) }
-                    updateNearestVehicle(passenger, fresh, forceFocus = true)
                     if (fresh.isEmpty()) {
                         _uiState.value = _uiState.value.copy(
+                            nearestVehicle = null,
+                            nearestVehicleDistanceMeters = null,
+                            nearestVehicleEtaMinutes = null,
                             error = "Сейчас нет маршруток с актуальной геопозицией",
                         )
+                    } else {
+                        _uiState.value = _uiState.value.copy(error = null)
+                        updateNearestVehicle(passenger, fresh, forceFocus = true)
                     }
                 }
                 .onFailure { error ->
-                    android.util.Log.w("SafarNearestVehicle", "Nearest snapshot failed", error)
-                    if (routeSnapshot.isEmpty()) {
-                        _uiState.value = _uiState.value.copy(
-                            error = "Не удалось получить актуальные маршрутки",
-                        )
-                    }
+                    android.util.Log.w("SafarNearestVehicle", "Nearest route refresh failed", error)
+                    _uiState.value = _uiState.value.copy(
+                        error = "Не удалось получить актуальные маршрутки",
+                    )
                 }
         }
     }
