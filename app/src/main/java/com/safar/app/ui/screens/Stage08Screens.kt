@@ -180,10 +180,11 @@ fun PassengerProfileRealScreen(
         }
     }
 
-    if (editOpen && ui.user != null) {
+    val currentUser = ui.user
+    if (editOpen && currentUser != null) {
         ProfileEditDialog(
-            initialName = ui.user.name,
-            initialPhone = ui.user.phone,
+            initialName = currentUser.name,
+            initialPhone = currentUser.phone,
             saving = ui.saving,
             onDismiss = { editOpen = false },
             onSave = { name, phone ->
