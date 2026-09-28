@@ -134,9 +134,16 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
 
                 // Always refresh the selected route when the user explicitly presses
                 // the nearest-vehicle button. This avoids relying on a stale UI snapshot.
-                val vehicles = runCatching {
+                val activeVehicles = runCatching {
                     vehicleRepository.getActiveVehiclesForRoute(routeId)
-                }.getOrElse {
+                }.getOrElse { emptyList() }
+
+                // Some backend snapshots may contain a valid current location
+                // while the active flag has not propagated yet. Fall back to the
+                // route snapshot instead of telling the passenger there is no bus.
+                val vehicles = if (activeVehicles.isNotEmpty()) {
+                    activeVehicles
+                } else {
                     vehicleRepository.getVehiclesForRoute(routeId)
                 }
 
