@@ -30,8 +30,7 @@ jobs:
 
       - name: Install Android build packages
         run: |
-          sdkmanager "platforms;android-36" "build-tools;35.0.0" "platform-tools"
-          sed -i -e "s/compileSdk = 37/compileSdk = 36/" -e "s/targetSdk = 37/targetSdk = 36/" app/build.gradle.kts
+          sdkmanager "platforms;android-37" "build-tools;35.0.0" "platform-tools"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
