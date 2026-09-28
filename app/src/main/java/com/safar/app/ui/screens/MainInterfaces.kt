@@ -341,7 +341,7 @@ private fun PassengerMapScreen(
                                     Surface(
                                         modifier = Modifier
                                             .size(46.dp)
-                                            .clickable(enabled = favoriteVehicle.id !in ui.favoriteToggleInProgress) {
+                                            .clickable {
                                                 onToggleFavorite(favoriteVehicle)
                                             },
                                         shape = CircleShape,
