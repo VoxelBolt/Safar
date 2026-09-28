@@ -141,11 +141,14 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     }
 
     private suspend fun loadAllFreshVehicles(): List<Vehicle> {
-        val all = runCatching { vehicleRepository.getAllVehicles() }.getOrNull()
-        if (!all.isNullOrEmpty()) {
-            return freshVehicles(all).map { it.copy(active = true) }
-        }
+        val allFresh = runCatching { vehicleRepository.getAllVehicles() }
+            .getOrDefault(emptyList())
+            .let { freshVehicles(it).map { vehicle -> vehicle.copy(active = true) } }
 
+        if (allFresh.isNotEmpty()) return allFresh
+
+        // If the all-vehicle query is restricted by RLS or temporarily empty,
+        // fall back to the currently selected route so the button still works.
         val routeId = _uiState.value.selectedRoute?.id ?: return emptyList()
         return runCatching { vehicleRepository.getVehiclesForRoute(routeId) }
             .getOrDefault(emptyList())
