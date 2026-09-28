@@ -134,17 +134,21 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
 
                 // Always refresh the selected route when the user explicitly presses
                 // the nearest-vehicle button. This avoids relying on a stale UI snapshot.
-                val activeVehicles = runCatching {
-                    vehicleRepository.getActiveVehiclesForRoute(routeId)
-                }.getOrElse { emptyList() }
+                // First use the vehicles already rendered on the map. This
+                // makes the button deterministic even if the separate "active"
+                // endpoint is temporarily empty.
+                val visibleVehicles = _uiState.value.activeVehicles
+                    .filter { it.routeId == null || it.routeId == routeId }
+                    .filter { it.currentLocation != null }
 
-                // Some backend snapshots may contain a valid current location
-                // while the active flag has not propagated yet. Fall back to the
-                // route snapshot instead of telling the passenger there is no bus.
-                val vehicles = if (activeVehicles.isNotEmpty()) {
-                    activeVehicles
+                val vehicles = if (visibleVehicles.isNotEmpty()) {
+                    visibleVehicles
                 } else {
-                    vehicleRepository.getVehiclesForRoute(routeId)
+                    runCatching {
+                        vehicleRepository.getActiveVehiclesForRoute(routeId)
+                    }.getOrElse { emptyList() }.ifEmpty {
+                        vehicleRepository.getVehiclesForRoute(routeId)
+                    }
                 }
 
                 val usable = vehicles
@@ -330,7 +334,19 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         vehicles: List<Vehicle>,
         forceFocus: Boolean = false,
     ) {
-        val candidates = (vehicles + listOfNotNull(_uiState.value.nearestVehicle)).distinctBy { it.id }.filter { isFresh(it.currentLocation?.timestampEpochMs) }
+        // The repository snapshot is already the source of truth for the
+        // currently visible route. Do not discard a vehicle here just because
+        // its recorded_at is a little old; that was making the button silently
+        // produce no nearest vehicle even though the marker was on the map.
+        val candidates = (vehicles + listOfNotNull(_uiState.value.nearestVehicle))
+            .distinctBy { it.id }
+            .filter { vehicle ->
+                val location = vehicle.currentLocation
+                location != null &&
+                    location.latitude.isFinite() &&
+                    location.longitude.isFinite()
+            }
+
         val result = NearestVehicleCalculator.findNearest(passenger, candidates)
         _uiState.value = _uiState.value.copy(
             nearestVehicle = result?.vehicle,
