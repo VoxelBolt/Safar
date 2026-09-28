@@ -1015,6 +1015,29 @@ private fun DriverHomeScreen(
             }
         }
 
+        if (foregroundLocationGranted && !backgroundLocationGranted) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(horizontal = 16.dp)
+                    .padding(top = 136.dp),
+                shape = RoundedCornerShape(16.dp),
+                color = SafarWhite,
+                shadowElevation = 5.dp,
+            ) {
+                Column(Modifier.padding(13.dp)) {
+                    Text(stringResource(R.string.driver_tracking_background), color = SafarNavy, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(4.dp))
+                    Text(stringResource(R.string.driver_tracking_background_hint), color = Muted, style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = onRequestBackgroundLocationPermission) {
+                        Text(stringResource(R.string.driver_tracking_settings))
+                    }
+                }
+            }
+        }
+
         // Compact, responsive work-session panel. The map stays the primary
         // surface and the session controls no longer consume half the screen
         // on phones with smaller heights or larger system fonts.
