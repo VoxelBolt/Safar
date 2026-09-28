@@ -58,6 +58,22 @@ class DriverLocationService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+
+        // Android gives a foreground service started with startForegroundService()
+        // only a short window to promote itself. Do this before any network or
+        // location setup so registration/callback work can never consume that
+        // window.
+        if (!hasLocationPermission()) {
+            stopSelf()
+            return
+        }
+        runCatching {
+            startForegroundNow("Запуск геолокации водителя")
+        }.onFailure { error ->
+            android.util.Log.e(TAG, "Could not promote DriverLocationService to foreground", error)
+            stopSelf()
+        }
+
         connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         networkAvailable = isNetworkAvailable()
         runCatching { connectivityManager.registerDefaultNetworkCallback(networkCallback) }
@@ -76,15 +92,29 @@ class DriverLocationService : Service() {
             return START_NOT_STICKY
         }
         try {
-            val notification = buildNotification(if (networkAvailable) "Геопозиция передаётся пассажирам" else "Нет интернета — отправка приостановлена")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
-            else startForeground(NOTIFICATION_ID, notification)
+            startForegroundNow(
+                if (networkAvailable) "Геопозиция передаётся пассажирам"
+                else "Нет интернета — отправка приостановлена"
+            )
         } catch (_: SecurityException) {
             stopSelf()
             return START_NOT_STICKY
         }
         startPublishingIfNeeded()
         return START_STICKY
+    }
+
+    private fun startForegroundNow(content: String) {
+        val notification = buildNotification(content)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
     }
 
     private fun startPublishingIfNeeded() {
@@ -248,7 +278,19 @@ class DriverLocationService : Service() {
         private const val DRIVER_REFRESH_MS = 30_000L
         private const val PUBLISH_INTERVAL_MS = 10_000L
         private const val TAG = "SafarDriverGPS"
-        fun start(context: Context) { ContextCompat.startForegroundService(context, Intent(context, DriverLocationService::class.java)) }
+        fun start(context: Context) {
+            val hasPermission =
+                ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            if (!hasPermission) {
+                android.util.Log.w(TAG, "DriverLocationService.start skipped: location permission is not granted")
+                return
+            }
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, DriverLocationService::class.java),
+            )
+        }
         fun stop(context: Context) { context.startService(Intent(context, DriverLocationService::class.java).setAction(ACTION_STOP)) }
     }
 }
