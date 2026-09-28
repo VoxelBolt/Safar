@@ -106,7 +106,7 @@
     <string name="route_path_unavailable">Роҳи масир ҳоло дастрас нест</string>
     <string name="retry">Аз нав кӯшиш кардан</string>
     <string name="find_nearest_vehicle">Нақлиёти наздиктаринро ёфтан</string>
-    <string name="nearest_vehicle_eta">~%1$d дақ</string>
+    <string name="nearest_vehicle_eta">≠ %1$d дақ</string>
     <string name="route_number_format">Масири %1$s</string>
     <string name="active_vehicles_count">Нақлиётҳои фаъол: %1$d</string>
 
