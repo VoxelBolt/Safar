@@ -915,7 +915,6 @@ private fun DriverHomeScreen(
                     }
                 }
             },
-            showNearestVehicleButton = false,
             vehicleLocations = emptyList(),
             passengerLocations = ui.passengerLocations,
             routeOpacity = 0.78f,
@@ -1417,7 +1416,7 @@ private fun DriverSummaryCard(
 }
 
 @Composable
-private fun SegmentedControl(labels: List<String>, selected: Int, onSelected: (Int) -> Unit) {
+fun SegmentedControl(labels: List<String>, selected: Int, onSelected: (Int) -> Unit) {
     Surface(shape = RoundedCornerShape(16.dp), color = Color(0xFFEFF3F9)) {
         Row(Modifier.padding(3.dp)) {
             labels.forEachIndexed { index, label ->
@@ -1548,7 +1547,7 @@ private fun SecondaryActionButton(
 }
 
 @Composable
-private fun EmptyState(glyph: Glyph, title: String, subtitle: String) {
+fun EmptyState(glyph: Glyph, title: String, subtitle: String) {
     Column(
         Modifier.fillMaxSize().padding(bottom = 80.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1564,7 +1563,7 @@ private fun EmptyState(glyph: Glyph, title: String, subtitle: String) {
     }
 }
 
-private enum class Glyph { MAP, STAR, STAR_FILLED, PERSON, HOME, STATS, SEARCH, PIN, LOCATE, BUS, CHEVRON, BACK, PLUS, CLOCK, ROUTE, SETTINGS, BELL, LANGUAGE, HELP, INFO, LOGOUT, PLAY, PAUSE, CHECK, SHIELD }
+enum class Glyph { MAP, STAR, STAR_FILLED, PERSON, HOME, STATS, SEARCH, PIN, LOCATE, BUS, CHEVRON, BACK, PLUS, CLOCK, ROUTE, SETTINGS, BELL, LANGUAGE, HELP, INFO, LOGOUT, PLAY, PAUSE, CHECK, SHIELD }
 
 @Composable
 private fun SafarBottomBar(
