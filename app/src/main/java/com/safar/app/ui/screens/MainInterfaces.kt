@@ -313,9 +313,9 @@ private fun PassengerMapScreen(
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 androidx.compose.material3.Text(
-                                    text = "⌖",
+                                    text = "🚍",
                                     color = SafarBlue,
-                                    style = MaterialTheme.typography.titleLarge,
+                                    style = MaterialTheme.typography.titleMedium,
                                 )
                             }
                         }
