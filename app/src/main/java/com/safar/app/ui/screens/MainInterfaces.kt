@@ -350,33 +350,41 @@ private fun PassengerMapScreen(
                                         fontWeight = FontWeight.Bold,
                                         style = MaterialTheme.typography.labelSmall,
                                     )
-                                } else if (etaMinutes != null) {
-                                    Text(
-                                        text = stringResource(R.string.nearest_vehicle_eta, etaMinutes),
-                                        color = SafarBlue,
-                                        fontWeight = FontWeight.Bold,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        maxLines = 1,
-                                    )
                                 }
                             }
 
                             val favoriteVehicle = activeVehicleForFavorite(ui.activeVehicles, ui.nearestVehicle)
                             if (favoriteVehicle != null) {
-                                Surface(
-                                    modifier = Modifier
-                                        .size(46.dp)
-                                        .clickable {
-                                            onToggleFavorite(favoriteVehicle)
-                                        },
-                                    shape = CircleShape,
-                                    color = SoftBlue,
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
                                 ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        SafarGlyph(
-                                            if (isFavorite(favoriteVehicle.id)) Glyph.STAR_FILLED else Glyph.STAR,
-                                            SafarBlue,
-                                            23.dp,
+                                    Surface(
+                                        modifier = Modifier
+                                            .size(46.dp)
+                                            .clickable {
+                                                onToggleFavorite(favoriteVehicle)
+                                            },
+                                        shape = CircleShape,
+                                        color = SoftBlue,
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            SafarGlyph(
+                                                if (isFavorite(favoriteVehicle.id)) Glyph.STAR_FILLED else Glyph.STAR,
+                                                SafarBlue,
+                                                23.dp,
+                                            )
+                                        }
+                                    }
+
+                                    // ETA belongs to the selected vehicle/favorite
+                                    // control, so it stays directly under the star.
+                                    if (!ui.findingNearestVehicle && etaMinutes != null) {
+                                        Text(
+                                            text = stringResource(R.string.nearest_vehicle_eta, etaMinutes),
+                                            color = SafarBlue,
+                                            fontWeight = FontWeight.Bold,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            maxLines = 1,
                                         )
                                     }
                                 }
