@@ -113,4 +113,28 @@
     <string name="nearest_vehicle_eta">~%1$d мин</string>
     <string name="route_number_format">Маршрут %1$s</string>
     <string name="active_vehicles_count">Активные маршрутки: %1$d</string>
+
+    <string name="refresh">Обновить</string>
+    <string name="loading">Загрузка…</string>
+    <string name="generic_load_error">Не удалось загрузить данные. Проверьте подключение к интернету.</string>
+    <string name="generic_save_error">Не удалось сохранить изменения. Проверьте подключение и попробуйте снова.</string>
+    <string name="save">Сохранить</string>
+    <string name="saving">Сохранение…</string>
+    <string name="cancel">Отмена</string>
+    <string name="ok">ОК</string>
+    <string name="verified">Подтверждён</string>
+    <string name="not_verified">Не подтверждён</string>
+    <string name="notifications_info">Настройки уведомлений будут доступны в следующей версии MVP.</string>
+    <string name="help_info">Если карта или данные не загружаются, проверьте интернет и нажмите «Повторить».</string>
+    <string name="about_info">Safar — приложение для отслеживания городского транспорта.</string>
+    <string name="driver_verification_info">Статус подтверждения берётся из профиля водителя в Supabase.</string>
+    <string name="statistics_empty_title">Недостаточно данных</string>
+    <string name="statistics_empty_subtitle">Завершите рабочую сессию, чтобы появилась статистика.</string>
+    <string name="statistics_sessions_count">Рабочих сессий: %1$d</string>
+    <string name="work_duration_format">%1$d ч %2$02d мин</string>
+    <string name="distance_km_format">%.1f км</string>
+    <string name="distance_m_format">%1$d м</string>
+    <string name="location_available">Геопозиция актуальна</string>
+    <string name="location_stale">Геопозиция устарела</string>
+
 </resources>
