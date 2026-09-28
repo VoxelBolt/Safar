@@ -1416,7 +1416,7 @@ private fun DriverSummaryCard(
 }
 
 @Composable
-fun SegmentedControl(labels: List<String>, selected: Int, onSelected: (Int) -> Unit) {
+internal fun SegmentedControl(labels: List<String>, selected: Int, onSelected: (Int) -> Unit) {
     Surface(shape = RoundedCornerShape(16.dp), color = Color(0xFFEFF3F9)) {
         Row(Modifier.padding(3.dp)) {
             labels.forEachIndexed { index, label ->
@@ -1547,7 +1547,7 @@ private fun SecondaryActionButton(
 }
 
 @Composable
-fun EmptyState(glyph: Glyph, title: String, subtitle: String) {
+internal fun EmptyState(glyph: Glyph, title: String, subtitle: String) {
     Column(
         Modifier.fillMaxSize().padding(bottom = 80.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1563,7 +1563,7 @@ fun EmptyState(glyph: Glyph, title: String, subtitle: String) {
     }
 }
 
-enum class Glyph { MAP, STAR, STAR_FILLED, PERSON, HOME, STATS, SEARCH, PIN, LOCATE, BUS, CHEVRON, BACK, PLUS, CLOCK, ROUTE, SETTINGS, BELL, LANGUAGE, HELP, INFO, LOGOUT, PLAY, PAUSE, CHECK, SHIELD }
+internal enum class Glyph { MAP, STAR, STAR_FILLED, PERSON, HOME, STATS, SEARCH, PIN, LOCATE, BUS, CHEVRON, BACK, PLUS, CLOCK, ROUTE, SETTINGS, BELL, LANGUAGE, HELP, INFO, LOGOUT, PLAY, PAUSE, CHECK, SHIELD }
 
 @Composable
 private fun SafarBottomBar(
