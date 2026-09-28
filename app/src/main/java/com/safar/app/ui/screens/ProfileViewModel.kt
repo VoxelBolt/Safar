@@ -22,6 +22,13 @@ data class ProfileUiState(
     val error: String? = null,
 )
 
+private data class ProfileLoadResult(
+    val user: User,
+    val driver: Driver?,
+    val route: Route?,
+    val vehicle: Vehicle?,
+)
+
 class ProfileViewModel : ViewModel() {
     private val userRepository = AppContainer.userRepository
     private val driverRepository = AppContainer.driverRepository
@@ -33,21 +40,30 @@ class ProfileViewModel : ViewModel() {
 
     fun load(isDriver: Boolean) {
         if (_uiState.value.loading) return
+
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(loading = true, error = null)
+
             runCatching {
                 val user = userRepository.getCurrentUser()
-                    ?: error("Профиль не найден")
+                    ?: throw IllegalStateException("Профиль не найден")
                 val driver = if (isDriver) driverRepository.getDriver() else null
                 val route = driver?.routeId?.let { routeRepository.getRoute(it) }
-                val vehicle = driver?.vehicleId?.let { id -> vehicleRepository.getAllVehicles().firstOrNull { it.id == id } }
-                Quadruple(user, driver, route, vehicle)
-            }.onSuccess { (user, driver, route, vehicle) ->
-                _uiState.value = ProfileUiState(user, driver, route, vehicle)
-            }.onFailure { error ->
+                val vehicle = driver?.vehicleId?.let { id ->
+                    vehicleRepository.getAllVehicles().firstOrNull { it.id == id }
+                }
+                ProfileLoadResult(user, driver, route, vehicle)
+            }.onSuccess { result ->
+                _uiState.value = ProfileUiState(
+                    user = result.user,
+                    driver = result.driver,
+                    route = result.route,
+                    vehicle = result.vehicle,
+                )
+            }.onFailure { throwable ->
                 _uiState.value = _uiState.value.copy(
                     loading = false,
-                    error = error.userMessage(),
+                    error = throwable.userMessage(),
                 )
             }
         }
@@ -55,30 +71,38 @@ class ProfileViewModel : ViewModel() {
 
     fun save(name: String, phone: String) {
         if (_uiState.value.saving) return
+
         val cleanName = name.trim()
         val cleanPhone = phone.trim()
+
         if (cleanName.isBlank() || cleanPhone.isBlank()) {
             _uiState.value = _uiState.value.copy(error = "Заполните имя и номер телефона")
             return
         }
+
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(saving = true, error = null)
-            runCatching { userRepository.updateCurrentUser(cleanName, cleanPhone) }
-                .onSuccess { user ->
-                    _uiState.value = _uiState.value.copy(user = user, saving = false, error = null)
-                }
-                .onFailure { error ->
-                    _uiState.value = _uiState.value.copy(
-                        saving = false,
-                        error = error.userMessage(),
-                    )
-                }
+
+            runCatching {
+                userRepository.updateCurrentUser(cleanName, cleanPhone)
+            }.onSuccess { user ->
+                _uiState.value = _uiState.value.copy(
+                    user = user,
+                    saving = false,
+                    error = null,
+                )
+            }.onFailure { throwable ->
+                _uiState.value = _uiState.value.copy(
+                    saving = false,
+                    error = throwable.userMessage(),
+                )
+            }
         }
     }
 
-    fun retry(isDriver: Boolean) = load(isDriver)
-
-    private data class Quadruple<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
+    fun retry(isDriver: Boolean) {
+        load(isDriver)
+    }
 
     private fun Throwable.userMessage(): String =
         message?.takeIf { it.isNotBlank() } ?: "Не удалось загрузить данные"
