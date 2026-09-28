@@ -32,7 +32,8 @@ jobs:
         run: |
           sdkmanager "build-tools;35.0.0" "platform-tools"
           curl -fsSL "https://dl.google.com/android/repository/platform-37.0_r01.zip" -o /tmp/platform-37.0_r01.zip
-          unzip -q /tmp/platform-37.0_r01.zip -d "$ANDROID_HOME/platforms"
+          unzip -o -q /tmp/platform-37.0_r01.zip -d "$ANDROID_HOME/platforms"
+          rm -rf "$ANDROID_HOME/platforms/android-37"
           mv "$ANDROID_HOME/platforms/android-37.0" "$ANDROID_HOME/platforms/android-37"
 
       - name: Set up Gradle
