@@ -123,7 +123,7 @@
     <string name="notifications_info">Notification settings will be available in a later MVP version.</string>
     <string name="help_info">If the map or data does not load, check your connection and tap Retry.</string>
     <string name="about_info">Safar is an app for tracking city transport.</string>
-    <string name="driver_verification_info">Verification status comes from the driver's Supabase profile.</string>
+    <string name="driver_verification_info">Verification status comes from the Supabase profile of the driver.</string>
     <string name="statistics_empty_title">Not enough data</string>
     <string name="statistics_empty_subtitle">Finish a work session to see statistics.</string>
     <string name="statistics_sessions_count">Work sessions: %1$d</string>
