@@ -6,6 +6,7 @@ import com.safar.app.di.AppContainer
 import com.safar.app.domain.model.Driver
 import com.safar.app.domain.model.Route
 import com.safar.app.domain.model.User
+import com.safar.app.domain.model.Vehicle
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,6 +16,7 @@ data class ProfileUiState(
     val user: User? = null,
     val driver: Driver? = null,
     val route: Route? = null,
+    val vehicle: Vehicle? = null,
     val loading: Boolean = false,
     val saving: Boolean = false,
     val error: String? = null,
@@ -24,6 +26,7 @@ class ProfileViewModel : ViewModel() {
     private val userRepository = AppContainer.userRepository
     private val driverRepository = AppContainer.driverRepository
     private val routeRepository = AppContainer.routeRepository
+    private val vehicleRepository = AppContainer.vehicleRepository
 
     private val _uiState = MutableStateFlow(ProfileUiState())
     val uiState: StateFlow<ProfileUiState> = _uiState.asStateFlow()
@@ -37,9 +40,10 @@ class ProfileViewModel : ViewModel() {
                     ?: error("Профиль не найден")
                 val driver = if (isDriver) driverRepository.getDriver() else null
                 val route = driver?.routeId?.let { routeRepository.getRoute(it) }
-                Triple(user, driver, route)
-            }.onSuccess { (user, driver, route) ->
-                _uiState.value = ProfileUiState(user, driver, route)
+                val vehicle = driver?.vehicleId?.let { id -> vehicleRepository.getAllVehicles().firstOrNull { it.id == id } }
+                Quadruple(user, driver, route, vehicle)
+            }.onSuccess { (user, driver, route, vehicle) ->
+                _uiState.value = ProfileUiState(user, driver, route, vehicle)
             }.onFailure { error ->
                 _uiState.value = _uiState.value.copy(
                     loading = false,
@@ -74,6 +78,6 @@ class ProfileViewModel : ViewModel() {
 
     fun retry(isDriver: Boolean) = load(isDriver)
 
-    private fun Throwable.userMessage(): String =
+    private data class Quadruple<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)\n\n    private fun Throwable.userMessage(): String =
         message?.takeIf { it.isNotBlank() } ?: "Не удалось загрузить данные"
 }
