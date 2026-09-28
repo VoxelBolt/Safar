@@ -96,6 +96,7 @@ fun PassengerFavoritesRealScreen(
 @Composable
 fun PassengerProfileRealScreen(
     isDriver: Boolean,
+    currentLanguageTag: String,
     onLanguageSelected: (String) -> Unit,
     onLogout: () -> Unit,
     modifier: Modifier = Modifier,
@@ -144,7 +145,7 @@ fun PassengerProfileRealScreen(
                 )
                 ProfileAction(
                     stringResource(R.string.language_label),
-                    value = languageName(ui.user?.let { null } ?: "ru"),
+                    value = languageName(currentLanguageTag),
                     onClick = { languageOpen = true },
                 )
                 if (isDriver) {
@@ -194,7 +195,7 @@ fun PassengerProfileRealScreen(
 
     if (languageOpen) {
         LanguageDialog(
-            current = "ru",
+            current = currentLanguageTag,
             onDismiss = { languageOpen = false },
             onSelect = {
                 onLanguageSelected(it)
@@ -221,6 +222,7 @@ fun DriverProfileRealScreen(
 ) {
     PassengerProfileRealScreen(
         isDriver = true,
+        currentLanguageTag = currentLanguageTag,
         onLanguageSelected = onLanguageSelected,
         onLogout = onLogout,
         modifier = modifier,
@@ -443,16 +445,18 @@ private fun ErrorMessage(onRetry: () -> Unit) {
     }
 }
 
+@Composable
 private fun formatWorkDuration(seconds: Long): String {
     val safe = seconds.coerceAtLeast(0L)
     val h = safe / 3600
     val m = (safe % 3600) / 60
-    return "%d ч %02d мин".format(h, m)
+    return stringResource(R.string.work_duration_format, h, m)
 }
 
+@Composable
 private fun formatDistance(meters: Double): String =
-    if (meters >= 1000.0) "%.1f км".format(Locale.getDefault(), meters / 1000.0)
-    else "%d м".format(meters.coerceAtLeast(0.0).toLong())
+    if (meters >= 1000.0) stringResource(R.string.distance_km_format, meters / 1000.0)
+    else stringResource(R.string.distance_m_format, meters.coerceAtLeast(0.0).toLong())
 
 private fun languageName(tag: String): String = when (tag.lowercase()) {
     "en" -> "English"
