@@ -112,7 +112,6 @@ internal fun PassengerMapView(
     vehicleLocations: List<Pair<Vehicle, VehicleLocation>>,
     passengerLocations: List<PassengerLocation> = emptyList(),
     onLocateUser: () -> Unit = {},
-    onShowNearestVehicle: () -> Unit = {},
     nearestVehicle: Pair<Vehicle, VehicleLocation>? = null,
     nearestVehicleRequestId: Long = 0L,
     routeOpacity: Float = 0.78f,
@@ -228,10 +227,6 @@ internal fun PassengerMapView(
         ) {
             MapControlButton("⌖") {
                 onLocateUser()
-            }
-            Spacer(Modifier.size(8.dp))
-            MapControlButton("↯") {
-                onShowNearestVehicle()
             }
             Spacer(Modifier.size(8.dp))
             MapControlButton("+") {
