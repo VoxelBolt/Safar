@@ -14,6 +14,7 @@ data class FavoriteUiState(
     val vehicles: List<Vehicle> = emptyList(),
     val favoriteIds: Set<String> = emptySet(),
     val routeNumbers: Map<String, String> = emptyMap(),
+    val favoriteToggleInProgress: Set<String> = emptySet(),
     val error: String? = null,
 )
 
@@ -53,30 +54,43 @@ class FavoriteViewModel : ViewModel() {
     fun isFavorite(vehicleId: String): Boolean = vehicleId in _uiState.value.favoriteIds
 
     fun toggle(vehicle: Vehicle) {
-        val favorite = isFavorite(vehicle.id)
+        val vehicleId = vehicle.id
+        if (vehicleId in _uiState.value.favoriteToggleInProgress) return
+
+        val favorite = isFavorite(vehicleId)
+        _uiState.value = _uiState.value.copy(
+            favoriteToggleInProgress = _uiState.value.favoriteToggleInProgress + vehicleId,
+            error = null,
+        )
+
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(error = null)
             runCatching {
                 if (favorite) {
-                    favoriteRepository.removeFavorite(vehicle.id)
+                    favoriteRepository.removeFavorite(vehicleId)
                 } else {
-                    favoriteRepository.addFavorite(vehicle.id)
+                    favoriteRepository.addFavorite(vehicleId)
                 }
             }.onSuccess {
                 val ids = _uiState.value.favoriteIds.toMutableSet()
-                if (favorite) ids.remove(vehicle.id) else ids.add(vehicle.id)
+                if (favorite) ids.remove(vehicleId) else ids.add(vehicleId)
+
                 val vehicles = if (favorite) {
-                    _uiState.value.vehicles.filterNot { it.id == vehicle.id }
+                    _uiState.value.vehicles.filterNot { it.id == vehicleId }
                 } else {
                     (_uiState.value.vehicles + vehicle).distinctBy { it.id }
                 }
+
                 _uiState.value = _uiState.value.copy(
                     favoriteIds = ids,
                     vehicles = vehicles,
+                    favoriteToggleInProgress = _uiState.value.favoriteToggleInProgress - vehicleId,
                     error = null,
                 )
             }.onFailure { error ->
-                _uiState.value = _uiState.value.copy(error = error.userMessage())
+                _uiState.value = _uiState.value.copy(
+                    favoriteToggleInProgress = _uiState.value.favoriteToggleInProgress - vehicleId,
+                    error = error.userMessage(),
+                )
             }
         }
     }
