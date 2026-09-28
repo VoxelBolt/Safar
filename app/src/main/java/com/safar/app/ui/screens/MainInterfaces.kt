@@ -112,9 +112,10 @@ private val Danger = Color(0xFFE44949)
 private val DangerSoft = Color(0xFFFFF0F0)
 
 @Composable
-fun PassengerMainScreen(state: OnboardingState) {
+fun PassengerMainScreen(state: OnboardingState, onLanguageSelected: (String) -> Unit, onLogout: () -> Unit) {
     var tab by remember { mutableStateOf(PassengerTab.MAP) }
     val mapViewModel: PassengerMapViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    val favoriteViewModel: FavoriteViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
@@ -127,6 +128,7 @@ fun PassengerMainScreen(state: OnboardingState) {
     LaunchedEffect(Unit) {
         mapViewModel.loadRoutes()
         mapViewModel.refreshLocationPermissionState()
+        favoriteViewModel.load()
     }
 
     Scaffold(
@@ -147,6 +149,8 @@ fun PassengerMainScreen(state: OnboardingState) {
         when (tab) {
             PassengerTab.MAP -> PassengerMapScreen(
                 viewModel = mapViewModel,
+                isFavorite = { vehicleId -> favoriteViewModel.isFavorite(vehicleId) },
+                onToggleFavorite = { vehicle -> favoriteViewModel.toggle(vehicle) },
                 onRequestLocationPermission = {
                     permissionLauncher.launch(
                         arrayOf(
@@ -157,8 +161,13 @@ fun PassengerMainScreen(state: OnboardingState) {
                 },
                 modifier = Modifier.padding(padding),
             )
-            PassengerTab.FAVORITES -> PassengerFavoritesScreen(modifier = Modifier.padding(padding))
-            PassengerTab.PROFILE -> PassengerProfileScreen(state = state, modifier = Modifier.padding(padding))
+            PassengerTab.FAVORITES -> PassengerFavoritesRealScreen(viewModel = favoriteViewModel, modifier = Modifier.padding(padding))
+            PassengerTab.PROFILE -> PassengerProfileRealScreen(
+                isDriver = false,
+                onLanguageSelected = onLanguageSelected,
+                onLogout = onLogout,
+                modifier = Modifier.padding(padding),
+            )
         }
     }
 }
@@ -168,6 +177,8 @@ private enum class PassengerTab { MAP, FAVORITES, PROFILE }
 @Composable
 private fun PassengerMapScreen(
     viewModel: PassengerMapViewModel,
+    isFavorite: (String) -> Boolean,
+    onToggleFavorite: (Vehicle) -> Unit,
     onRequestLocationPermission: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -304,19 +315,35 @@ private fun PassengerMapScreen(
                                 color = Muted,
                             )
                         }
-                        Surface(
-                            modifier = Modifier
-                                .size(46.dp)
-                                .clickable { viewModel.showNearestVehicleOnMap() },
-                            shape = CircleShape,
-                            color = SoftBlue,
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                androidx.compose.material3.Text(
-                                    text = "⌖",
-                                    color = SafarBlue,
-                                    style = MaterialTheme.typography.titleLarge,
-                                )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Surface(
+                                modifier = Modifier
+                                    .size(46.dp)
+                                    .clickable { viewModel.showNearestVehicleOnMap() },
+                                shape = CircleShape,
+                                color = SoftBlue,
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    SafarGlyph(Glyph.LOCATE, SafarBlue, 23.dp)
+                                }
+                            }
+                            val favoriteVehicle = activeVehicleForFavorite(ui.activeVehicles, ui.nearestVehicle)
+                            if (favoriteVehicle != null) {
+                                Surface(
+                                    modifier = Modifier
+                                        .size(46.dp)
+                                        .clickable { onToggleFavorite(favoriteVehicle) },
+                                    shape = CircleShape,
+                                    color = SoftBlue,
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        SafarGlyph(
+                                            if (isFavorite(favoriteVehicle.id)) Glyph.STAR_FILLED else Glyph.STAR,
+                                            SafarBlue,
+                                            23.dp,
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -497,6 +524,9 @@ private fun OutlinedRetryButton(onClick: () -> Unit) {
     }
 }
 
+private fun activeVehicleForFavorite(active: List<Vehicle>, nearest: Vehicle?): Vehicle? =
+    nearest ?: active.firstOrNull()
+
 private data class VehicleMock(val identifier: String, val route: String, val direction: String, val eta: String, val distance: String, val active: Boolean)
 
 @Composable
@@ -655,7 +685,7 @@ private fun ProfileMenuCard(rows: List<ProfileRow>) {
 }
 
 @Composable
-fun DriverMainScreen(state: OnboardingState) {
+fun DriverMainScreen(state: OnboardingState, onLanguageSelected: (String) -> Unit, onLogout: () -> Unit) {
     var tab by remember { mutableStateOf(DriverTab.HOME) }
     val driverViewModel: DriverViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val ui by driverViewModel.uiState.collectAsState()
@@ -738,8 +768,12 @@ fun DriverMainScreen(state: OnboardingState) {
                 onRequestTrackingPermission = ::requestDriverTrackingPermission,
                 modifier = Modifier.padding(padding),
             )
-            DriverTab.STATS -> DriverStatisticsScreen(modifier = Modifier.padding(padding))
-            DriverTab.PROFILE -> DriverProfileScreen(state = state, route = ui.selectedRoute, modifier = Modifier.padding(padding))
+            DriverTab.STATS -> DriverStatisticsRealScreen(modifier = Modifier.padding(padding))
+            DriverTab.PROFILE -> DriverProfileRealScreen(
+                onLanguageSelected = onLanguageSelected,
+                onLogout = onLogout,
+                modifier = Modifier.padding(padding),
+            )
         }
     }
 }
