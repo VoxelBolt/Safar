@@ -44,6 +44,7 @@ data class PassengerMapUiState(
     val nearestVehicleEtaMinutes: Int? = null,
     val nearestVehicleRequestId: Long = 0L,
     val nearestVehicleTrackingEnabled: Boolean = true,
+    val findingNearestVehicle: Boolean = false,
     val loadingRoutes: Boolean = false,
     val loadingVehicles: Boolean = false,
     val error: String? = null,
@@ -108,58 +109,74 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             return
         }
 
+        val routeId = _uiState.value.selectedRoute?.id
+        if (routeId == null) {
+            _uiState.value = _uiState.value.copy(error = "Сначала выберите маршрут")
+            return
+        }
+
         nearestVehicleRequestJob?.cancel()
         nearestVehicleRequestJob = viewModelScope.launch {
-            val passenger = _uiState.value.passengerLocation ?: awaitFreshPassengerLocation()
-            if (passenger == null) {
-                _uiState.value = _uiState.value.copy(error = "Не удалось получить ваше местоположение")
-                return@launch
-            }
-
             _uiState.value = _uiState.value.copy(
-                passengerLocation = passenger,
+                findingNearestVehicle = true,
                 nearestVehicleTrackingEnabled = true,
                 error = null,
             )
 
-            // The button means "show the nearest vehicle for the selected route".
-            // Use the already live route snapshot first so the map can react immediately.
-            val routeSnapshot = freshVehicles(_uiState.value.activeVehicles)
-            if (routeSnapshot.isNotEmpty()) {
-                updateNearestVehicle(passenger, routeSnapshot, forceFocus = true)
-                return@launch
-            }
-
-            // If the live snapshot is empty, refresh the selected route once.
-            val routeId = _uiState.value.selectedRoute?.id
-            if (routeId == null) {
-                _uiState.value = _uiState.value.copy(
-                    error = "Сначала выберите маршрут",
-                )
-                return@launch
-            }
-
-            runCatching { vehicleRepository.getVehiclesForRoute(routeId) }
-                .onSuccess { vehicles ->
-                    val fresh = freshVehicles(vehicles).map { it.copy(active = true) }
-                    if (fresh.isEmpty()) {
-                        _uiState.value = _uiState.value.copy(
-                            nearestVehicle = null,
-                            nearestVehicleDistanceMeters = null,
-                            nearestVehicleEtaMinutes = null,
-                            error = "Сейчас нет маршруток с актуальной геопозицией",
-                        )
-                    } else {
-                        _uiState.value = _uiState.value.copy(error = null)
-                        updateNearestVehicle(passenger, fresh, forceFocus = true)
-                    }
+            try {
+                val passenger = _uiState.value.passengerLocation ?: awaitFreshPassengerLocation()
+                if (passenger == null) {
+                    _uiState.value = _uiState.value.copy(error = "Не удалось получить ваше местоположение")
+                    return@launch
                 }
-                .onFailure { error ->
-                    android.util.Log.w("SafarNearestVehicle", "Nearest route refresh failed", error)
+
+                _uiState.value = _uiState.value.copy(passengerLocation = passenger)
+
+                // Always refresh the selected route when the user explicitly presses
+                // the nearest-vehicle button. This avoids relying on a stale UI snapshot.
+                val vehicles = runCatching {
+                    vehicleRepository.getActiveVehiclesForRoute(routeId)
+                }.getOrElse {
+                    vehicleRepository.getVehiclesForRoute(routeId)
+                }
+
+                val usable = vehicles
+                    .filter { it.currentLocation != null }
+                    .map { it.copy(active = true) }
+
+                _uiState.value = _uiState.value.copy(activeVehicles = usable)
+
+                if (usable.isEmpty()) {
                     _uiState.value = _uiState.value.copy(
-                        error = "Не удалось получить актуальные маршрутки",
+                        nearestVehicle = null,
+                        nearestVehicleDistanceMeters = null,
+                        nearestVehicleEtaMinutes = null,
+                        error = "Сейчас нет маршруток с геопозицией",
+                    )
+                    return@launch
+                }
+
+                updateNearestVehicle(
+                    passenger = passenger,
+                    vehicles = usable,
+                    forceFocus = true,
+                )
+
+                if (_uiState.value.nearestVehicle == null) {
+                    _uiState.value = _uiState.value.copy(
+                        error = "Не удалось определить ближайшую маршрутку",
                     )
                 }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                android.util.Log.w("SafarNearestVehicle", "Nearest route refresh failed", error)
+                _uiState.value = _uiState.value.copy(
+                    error = "Не удалось получить актуальные маршрутки",
+                )
+            } finally {
+                _uiState.value = _uiState.value.copy(findingNearestVehicle = false)
+            }
         }
     }
 
@@ -487,7 +504,10 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             ContextCompat.checkSelfPermission(getApplication(), Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
     private companion object {
-        const val LOCATION_FRESHNESS_MS = 60_000L
-        const val STALE_SWEEP_INTERVAL_MS = 5_000L
+        // GPS records can arrive with small network/realtime delays. Keep a
+        // few minutes of history usable so the nearest vehicle and ETA do not
+        // disappear between two location updates.
+        const val LOCATION_FRESHNESS_MS = 5 * 60_000L
+        const val STALE_SWEEP_INTERVAL_MS = 15_000L
     }
 }
