@@ -164,6 +164,7 @@ fun PassengerMainScreen(state: OnboardingState, onLanguageSelected: (String) -> 
             PassengerTab.FAVORITES -> PassengerFavoritesRealScreen(viewModel = favoriteViewModel, modifier = Modifier.padding(padding))
             PassengerTab.PROFILE -> PassengerProfileRealScreen(
                 isDriver = false,
+                currentLanguageTag = state.languageTag,
                 onLanguageSelected = onLanguageSelected,
                 onLogout = onLogout,
                 modifier = Modifier.padding(padding),
@@ -770,6 +771,7 @@ fun DriverMainScreen(state: OnboardingState, onLanguageSelected: (String) -> Uni
             )
             DriverTab.STATS -> DriverStatisticsRealScreen(modifier = Modifier.padding(padding))
             DriverTab.PROFILE -> DriverProfileRealScreen(
+                currentLanguageTag = state.languageTag,
                 onLanguageSelected = onLanguageSelected,
                 onLogout = onLogout,
                 modifier = Modifier.padding(padding),
