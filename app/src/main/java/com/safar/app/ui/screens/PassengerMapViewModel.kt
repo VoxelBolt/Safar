@@ -287,9 +287,6 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             val updated = currentVehicle.copy(currentLocation = location, active = true)
             val active = _uiState.value.activeVehicles.map { if (it.id == vehicleId) updated else it }
             _uiState.value = _uiState.value.copy(activeVehicles = active, error = null)
-            if (_uiState.value.nearestVehicleTrackingEnabled) {
-                _uiState.value.passengerLocation?.let { updateNearestVehicle(it, active) }
-            }
             return
         }
 
@@ -299,9 +296,6 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                 .onSuccess { vehicles ->
                     val active = freshVehicles(vehicles).map { it.copy(active = true) }
                     _uiState.value = _uiState.value.copy(activeVehicles = active, error = null)
-                    if (_uiState.value.nearestVehicleTrackingEnabled) {
-                        _uiState.value.passengerLocation?.let { updateNearestVehicle(it, active) }
-                    }
                 }
         }
     }
