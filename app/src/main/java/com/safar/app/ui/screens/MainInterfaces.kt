@@ -321,9 +321,11 @@ private fun PassengerMapScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.Top,
                         ) {
-                            // The locate button is the explicit "find nearest" action.
-                            // Keep its ETA directly underneath so the user immediately
-                            // sees the result of the action.
+                            val calculatedNearest = ui.passengerLocation?.let { passenger ->
+                                NearestVehicleCalculator.findNearest(passenger, ui.activeVehicles)
+                            }
+                            val etaMinutes = ui.nearestVehicleEtaMinutes ?: calculatedNearest?.etaMinutes
+
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                             ) {
@@ -348,16 +350,14 @@ private fun PassengerMapScreen(
                                         fontWeight = FontWeight.Bold,
                                         style = MaterialTheme.typography.labelSmall,
                                     )
-                                } else {
-                                    ui.nearestVehicleEtaMinutes?.let { eta ->
-                                        Text(
-                                            text = stringResource(R.string.nearest_vehicle_eta, eta),
-                                            color = SafarBlue,
-                                            fontWeight = FontWeight.Bold,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            maxLines = 1,
-                                        )
-                                    }
+                                } else if (etaMinutes != null) {
+                                    Text(
+                                        text = stringResource(R.string.nearest_vehicle_eta, etaMinutes),
+                                        color = SafarBlue,
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1,
+                                    )
                                 }
                             }
 
@@ -1011,43 +1011,25 @@ private fun DriverHomeScreen(
         }
 
         if (!foregroundLocationGranted) {
-            Surface(
+            DriverPermissionCompactCard(
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
+                    .align(Alignment.TopStart)
                     .statusBarsPadding()
-                    .padding(horizontal = 16.dp)
-                    .padding(top = 88.dp),
-                shape = RoundedCornerShape(22.dp),
-                color = SafarWhite,
-                shadowElevation = 7.dp,
-            ) {
-                DriverTrackingPermissionCard(
-                    title = stringResource(R.string.driver_tracking_title),
-                    description = stringResource(R.string.driver_tracking_description),
-                    actionText = stringResource(R.string.driver_tracking_allow),
-                    onClick = onRequestTrackingPermission,
-                )
-            }
+                    .padding(start = 16.dp, top = 76.dp),
+                text = stringResource(R.string.driver_tracking_title),
+                onClick = onRequestTrackingPermission,
+            )
         }
 
         if (foregroundLocationGranted && !backgroundLocationGranted) {
-            Surface(
+            DriverPermissionCompactCard(
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
+                    .align(Alignment.TopStart)
                     .statusBarsPadding()
-                    .padding(horizontal = 16.dp)
-                    .padding(top = 88.dp),
-                shape = RoundedCornerShape(22.dp),
-                color = SafarWhite,
-                shadowElevation = 7.dp,
-            ) {
-                DriverTrackingPermissionCard(
-                    title = stringResource(R.string.driver_tracking_background),
-                    description = stringResource(R.string.driver_tracking_background_hint),
-                    actionText = stringResource(R.string.driver_tracking_settings),
-                    onClick = onRequestBackgroundLocationPermission,
-                )
-            }
+                    .padding(start = 16.dp, top = 76.dp),
+                text = stringResource(R.string.driver_tracking_background),
+                onClick = onRequestBackgroundLocationPermission,
+            )
         }
 
         // Compact, responsive work-session panel. The map stays the primary
@@ -1223,42 +1205,30 @@ private fun formatDuration(totalSeconds: Long): String {
 }
 
 @Composable
-private fun DriverTrackingPermissionCard(
-    title: String,
-    description: String,
-    actionText: String,
+private fun DriverPermissionCompactCard(
+    modifier: Modifier = Modifier,
+    text: String,
     onClick: () -> Unit,
 ) {
-    Column(Modifier.padding(horizontal = 18.dp, vertical = 16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Surface(shape = CircleShape, color = SoftBlue) {
-                Box(Modifier.size(42.dp), contentAlignment = Alignment.Center) {
-                    SafarGlyph(Glyph.PIN, SafarBlue, 22.dp)
-                }
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    title,
-                    color = SafarNavy,
-                    fontWeight = FontWeight.SemiBold,
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                Spacer(Modifier.height(3.dp))
-                Text(
-                    description,
-                    color = Muted,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-        }
-
-        Spacer(Modifier.height(8.dp))
-        TextButton(onClick = onClick) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(14.dp),
+        color = SafarWhite,
+        shadowElevation = 3.dp,
+    ) {
+        Row(
+            modifier = Modifier
+                .clickable(onClick = onClick)
+                .padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SafarGlyph(Glyph.PIN, Muted, 20.dp)
+            Spacer(Modifier.width(7.dp))
             Text(
-                actionText,
-                color = SafarBlue,
-                fontWeight = FontWeight.SemiBold,
+                text = text,
+                style = MaterialTheme.typography.labelLarge,
+                color = SafarNavy,
+                maxLines = 2,
             )
         }
     }
