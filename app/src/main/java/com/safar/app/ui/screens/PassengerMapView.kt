@@ -196,6 +196,7 @@ internal fun PassengerMapView(
                                 .target(LatLng(DEFAULT_LATITUDE, DEFAULT_LONGITUDE))
                                 .zoom(DEFAULT_ZOOM)
                                 .build()
+                            onMapCenterChanged(GeoPoint(DEFAULT_LATITUDE, DEFAULT_LONGITUDE))
                         }
                     }
                 }
