@@ -871,7 +871,6 @@ private fun DriverHomeScreen(
             driverLocationProvider.currentLocationSample { sample ->
                 if (sample != null) {
                     driverLocation = sample.point
-                    driverLocateRequestId += 1L
                     onPublishDriverLocation(sample.point)
                 }
             }
@@ -945,7 +944,9 @@ private fun DriverHomeScreen(
                     }
                 }
             },
-            vehicleLocations = emptyList(),
+            vehicleLocations = ui.activeVehicles
+                .filter { it.id != ui.driver?.vehicleId }
+                .mapNotNull { vehicle -> vehicle.currentLocation?.let { vehicle to it } },
             passengerLocations = ui.passengerLocations,
             routeOpacity = 0.78f,
             modifier = Modifier.fillMaxSize(),
