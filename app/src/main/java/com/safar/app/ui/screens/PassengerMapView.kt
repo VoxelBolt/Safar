@@ -181,8 +181,9 @@ internal fun PassengerMapView(
                         map = loadedMap
                         syncVehicleMarkers(loadedMap, displayVehicleLocations(stabilizedVehicleLocations, nearestVehicle), vehicleMarkerIcon, vehicleMarkers)
                         loadedMap.addOnCameraIdleListener {
-                            val target = loadedMap.cameraPosition.target
-                            onMapCenterChanged(GeoPoint(target.latitude, target.longitude))
+                            loadedMap.cameraPosition.target?.let { target ->
+                                onMapCenterChanged(GeoPoint(target.latitude, target.longitude))
+                            }
                         }
                         loadedMap.uiSettings.isCompassEnabled = false
                         loadedMap.uiSettings.isScrollGesturesEnabled = true
