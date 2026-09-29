@@ -72,6 +72,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     init {
         refreshLocationPermissionState()
         startStaleSweep()
+        startEtaRefresh()
     }
 
     fun loadRoutes() {
@@ -109,86 +110,58 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             return
         }
 
-        val routeId = _uiState.value.selectedRoute?.id
-        if (routeId == null) {
-            _uiState.value = _uiState.value.copy(error = "Сначала выберите маршрут")
+        val passenger = _uiState.value.passengerLocation
+        if (passenger != null) {
+            focusNearestVehicle(passenger)
             return
         }
 
         nearestVehicleRequestJob?.cancel()
         nearestVehicleRequestJob = viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(
-                findingNearestVehicle = true,
-                nearestVehicleTrackingEnabled = true,
-                error = null,
-            )
-
+            _uiState.value = _uiState.value.copy(findingNearestVehicle = true, error = null)
             try {
-                val passenger = _uiState.value.passengerLocation ?: awaitFreshPassengerLocation()
-                if (passenger == null) {
+                val freshPassenger = awaitFreshPassengerLocation()
+                if (freshPassenger == null) {
                     _uiState.value = _uiState.value.copy(error = "Не удалось получить ваше местоположение")
                     return@launch
                 }
-
-                _uiState.value = _uiState.value.copy(passengerLocation = passenger)
-
-                // Always refresh the selected route when the user explicitly presses
-                // the nearest-vehicle button. This avoids relying on a stale UI snapshot.
-                // First use the vehicles already rendered on the map. This
-                // makes the button deterministic even if the separate "active"
-                // endpoint is temporarily empty.
-                val visibleVehicles = _uiState.value.activeVehicles
-                    .filter { it.routeId == null || it.routeId == routeId }
-                    .filter { it.currentLocation != null }
-
-                val vehicles = if (visibleVehicles.isNotEmpty()) {
-                    visibleVehicles
-                } else {
-                    runCatching {
-                        vehicleRepository.getActiveVehiclesForRoute(routeId)
-                    }.getOrElse { emptyList() }.ifEmpty {
-                        vehicleRepository.getVehiclesForRoute(routeId)
-                    }
-                }
-
-                val usable = vehicles
-                    .filter { it.currentLocation != null }
-                    .map { it.copy(active = true) }
-
-                _uiState.value = _uiState.value.copy(activeVehicles = usable)
-
-                if (usable.isEmpty()) {
-                    _uiState.value = _uiState.value.copy(
-                        nearestVehicle = null,
-                        nearestVehicleDistanceMeters = null,
-                        nearestVehicleEtaMinutes = null,
-                        error = "Сейчас нет маршруток с геопозицией",
-                    )
-                    return@launch
-                }
-
-                updateNearestVehicle(
-                    passenger = passenger,
-                    vehicles = usable,
-                    forceFocus = true,
-                )
-
-                if (_uiState.value.nearestVehicle == null) {
-                    _uiState.value = _uiState.value.copy(
-                        error = "Не удалось определить ближайшую маршрутку",
-                    )
-                }
+                _uiState.value = _uiState.value.copy(passengerLocation = freshPassenger)
+                focusNearestVehicle(freshPassenger)
             } catch (error: CancellationException) {
                 throw error
-            } catch (error: Exception) {
-                android.util.Log.w("SafarNearestVehicle", "Nearest route refresh failed", error)
-                _uiState.value = _uiState.value.copy(
-                    error = "Не удалось получить актуальные маршрутки",
-                )
             } finally {
                 _uiState.value = _uiState.value.copy(findingNearestVehicle = false)
             }
         }
+    }
+
+    private fun focusNearestVehicle(passenger: GeoPoint) {
+        val routeId = _uiState.value.selectedRoute?.id
+        val vehicles = _uiState.value.activeVehicles
+            .filter { routeId == null || it.routeId == null || it.routeId == routeId }
+            .filter { it.currentLocation != null }
+
+        // Use the same coordinates that are already rendered as blue vehicle
+        // markers. No second "active" lookup is required for the button.
+        val result = NearestVehicleCalculator.findNearest(passenger, vehicles)
+        if (result == null) {
+            _uiState.value = _uiState.value.copy(
+                nearestVehicle = null,
+                nearestVehicleDistanceMeters = null,
+                nearestVehicleEtaMinutes = null,
+                error = "Сейчас нет маршруток с геопозицией",
+            )
+            return
+        }
+
+        _uiState.value = _uiState.value.copy(
+            nearestVehicle = result.vehicle,
+            nearestVehicleDistanceMeters = result.distanceMeters,
+            nearestVehicleEtaMinutes = result.etaMinutes,
+            nearestVehicleRequestId = _uiState.value.nearestVehicleRequestId + 1L,
+            nearestVehicleTrackingEnabled = true,
+            error = null,
+        )
     }
 
     private suspend fun awaitFreshPassengerLocation(): GeoPoint? =
@@ -358,6 +331,22 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                 _uiState.value.nearestVehicleRequestId
             },
         )
+    }
+
+    private fun startEtaRefresh() {
+        viewModelScope.launch {
+            while (isActive) {
+                delay(60_000L)
+                val state = _uiState.value
+                val passenger = state.passengerLocation ?: continue
+                val result = NearestVehicleCalculator.findNearest(passenger, state.activeVehicles)
+                _uiState.value = state.copy(
+                    nearestVehicle = result?.vehicle,
+                    nearestVehicleDistanceMeters = result?.distanceMeters,
+                    nearestVehicleEtaMinutes = result?.etaMinutes,
+                )
+            }
+        }
     }
 
     private fun startStaleSweep() {
