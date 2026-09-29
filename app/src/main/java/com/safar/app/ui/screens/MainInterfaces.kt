@@ -216,6 +216,7 @@ private fun PassengerMapScreen(
                 locationPermissionGranted = !ui.locationPermissionRequired,
                 locateRequestId = ui.locateRequestId,
                 onLocateUser = viewModel::refreshPassengerLocation,
+                onMapCenterChanged = viewModel::onMapCenterChanged,
                 nearestVehicle = ui.nearestVehicle?.let { vehicle ->
                     vehicle.currentLocation?.let { location -> vehicle to location }
                 },
@@ -326,7 +327,9 @@ private fun PassengerMapScreen(
                                     ui.activeVehicles.filter { it.currentLocation != null },
                                 )
                             }
-                            val etaMinutes = calculatedNearest?.etaMinutes ?: ui.nearestVehicleEtaMinutes
+                            val etaMinutes = calculatedNearest?.etaMinutes
+                                ?: ui.nearestVehicleEtaMinutes
+                                ?: ui.nearestVehicleDistanceMeters?.let(NearestVehicleCalculator::etaMinutes)
 
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
