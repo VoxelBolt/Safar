@@ -193,7 +193,13 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
 
     fun onMapCenterChanged(point: GeoPoint) {
         if (!point.latitude.isFinite() || !point.longitude.isFinite()) return
-        _uiState.value = _uiState.value.copy(mapCenterLocation = point)
+        val state = _uiState.value
+        _uiState.value = state.copy(mapCenterLocation = point)
+        // If Android has no passenger GPS fix, keep the nearest vehicle/ETA usable
+        // from the actual map camera instead of leaving the UI empty.
+        if (state.passengerLocation == null && state.nearestVehicleTrackingEnabled && state.activeVehicles.isNotEmpty()) {
+            updateNearestVehicle(point, state.activeVehicles)
+        }
     }
 
     fun selectRoute(route: Route) {
