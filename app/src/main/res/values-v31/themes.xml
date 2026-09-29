@@ -4,6 +4,5 @@
         <item name="android:windowSplashScreenBackground">@color/safar_splash_background</item>
         <item name="android:windowSplashScreenAnimatedIcon">@drawable/safar_logo</item>
         <item name="android:windowSplashScreenIconBackgroundColor">@color/safar_splash_background</item>
-        <item name="android:postSplashScreenTheme">@style/Theme.Safar</item>
     </style>
 </resources>
