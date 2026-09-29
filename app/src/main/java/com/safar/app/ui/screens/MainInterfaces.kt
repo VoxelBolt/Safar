@@ -890,7 +890,6 @@ private fun DriverHomeScreen(
         driverLocationProvider.currentLocation { point ->
             if (point != null) {
                 driverLocation = point
-                driverLocateRequestId += 1L
             }
         }
 
