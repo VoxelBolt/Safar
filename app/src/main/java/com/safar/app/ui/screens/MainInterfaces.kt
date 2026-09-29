@@ -796,7 +796,6 @@ fun DriverMainScreen(state: OnboardingState, onLanguageSelected: (String) -> Uni
                 onFinishWork = driverViewModel::finishWork,
                 onPublishDriverLocation = driverViewModel::publishDriverLocation,
                 foregroundLocationGranted = foregroundLocationGranted,
-                backgroundLocationGranted = backgroundLocationGranted,
                 onRequestTrackingPermission = ::requestDriverTrackingPermission,
                 modifier = Modifier.padding(padding),
             )
