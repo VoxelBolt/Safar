@@ -334,39 +334,16 @@ private fun PassengerMapScreen(
                                 ?: ui.nearestVehicleEtaMinutes
                                 ?: ui.nearestVehicleDistanceMeters?.let(NearestVehicleCalculator::etaMinutes)
 
-                            Column(
-                                modifier = Modifier.width(74.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
+                            Surface(
+                                onClick = { viewModel.showNearestVehicleOnMap() },
+                                enabled = !ui.findingNearestVehicle,
+                                modifier = Modifier.size(46.dp),
+                                shape = CircleShape,
+                                color = SoftBlue,
                             ) {
-                                Surface(
-                                    onClick = { viewModel.showNearestVehicleOnMap() },
-                                    enabled = !ui.findingNearestVehicle,
-                                    modifier = Modifier.size(46.dp),
-                                    shape = CircleShape,
-                                    color = SoftBlue,
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        SafarGlyph(Glyph.LOCATE, SafarBlue, 23.dp)
-                                    }
+                                Box(contentAlignment = Alignment.Center) {
+                                    SafarGlyph(Glyph.LOCATE, SafarBlue, 23.dp)
                                 }
-
-                                Spacer(Modifier.height(2.dp))
-
-                                Text(
-                                    text = if (ui.findingNearestVehicle) {
-                                        "…"
-                                    } else {
-                                        etaMinutes?.let {
-                                            stringResource(R.string.nearest_vehicle_eta, it)
-                                        } ?: "—"
-                                    },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    color = SafarBlue,
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    textAlign = TextAlign.Center,
-                                    maxLines = 1,
-                                )
                             }
 
                             val favoriteVehicle = activeVehicleForFavorite(ui.activeVehicles, ui.nearestVehicle)
@@ -407,7 +384,10 @@ private fun PassengerMapScreen(
                     )
                     Spacer(Modifier.height(8.dp))
                     val activeVehicle = ui.nearestVehicle ?: ui.activeVehicles.firstOrNull()
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         Surface(
                             shape = CircleShape,
                             color = if (activeVehicle != null) SuccessSoft else Color(0xFFF0F2F5),
@@ -434,6 +414,21 @@ private fun PassengerMapScreen(
                                 )
                             }
                         }
+
+                        Text(
+                            text = if (ui.findingNearestVehicle) {
+                                "…"
+                            } else {
+                                etaMinutes?.let {
+                                    stringResource(R.string.nearest_vehicle_eta, it)
+                                } ?: "—"
+                            },
+                            color = SafarBlue,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleSmall,
+                            textAlign = TextAlign.End,
+                            maxLines = 1,
+                        )
                     }
                 }
             }
