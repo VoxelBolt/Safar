@@ -2,7 +2,6 @@ package com.safar.app.ui.screens
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.collectAsState
@@ -727,16 +726,11 @@ fun DriverMainScreen(state: OnboardingState, onLanguageSelected: (String) -> Uni
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var foregroundLocationGranted by remember { mutableStateOf(hasForegroundLocationPermission(context)) }
-    var backgroundLocationGranted by remember { mutableStateOf(hasBackgroundLocationPermission(context)) }
     // Driver GPS tracking is independent from the Work Session timer. A driver
     // with location permission and an assigned route stays visible to passengers
     // even after Pause/Finish.
     val trackingReady = foregroundLocationGranted &&
         ui.driver?.routeId != null
-
-    val backgroundPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { backgroundLocationGranted = hasBackgroundLocationPermission(context) }
 
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -744,7 +738,6 @@ fun DriverMainScreen(state: OnboardingState, onLanguageSelected: (String) -> Uni
         foregroundLocationGranted = result[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
             result[Manifest.permission.ACCESS_COARSE_LOCATION] == true ||
             hasForegroundLocationPermission(context)
-        backgroundLocationGranted = hasBackgroundLocationPermission(context)
         // GPS publishing starts as soon as the driver has permission and an assigned route; it is not tied to the timer.
     }
 
@@ -752,7 +745,6 @@ fun DriverMainScreen(state: OnboardingState, onLanguageSelected: (String) -> Uni
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 foregroundLocationGranted = hasForegroundLocationPermission(context)
-                backgroundLocationGranted = hasBackgroundLocationPermission(context)
                 // Re-issue the start command every time the driver screen becomes
                 // visible. If Android restarted/killed the FGS while the Compose
                 // state stayed unchanged, the old LaunchedEffect would not fire
@@ -809,15 +801,6 @@ fun DriverMainScreen(state: OnboardingState, onLanguageSelected: (String) -> Uni
                 foregroundLocationGranted = foregroundLocationGranted,
                 backgroundLocationGranted = backgroundLocationGranted,
                 onRequestTrackingPermission = ::requestDriverTrackingPermission,
-                onRequestBackgroundLocationPermission = {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        context.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                            data = android.net.Uri.parse("package:${context.packageName}")
-                        })
-                    } else {
-                        backgroundPermissionLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
-                    }
-                },
                 modifier = Modifier.padding(padding),
             )
             DriverTab.STATS -> DriverStatisticsRealScreen(modifier = Modifier.padding(padding))
@@ -842,9 +825,7 @@ private fun DriverHomeScreen(
     onFinishWork: () -> Unit,
     onPublishDriverLocation: (GeoPoint) -> Unit,
     foregroundLocationGranted: Boolean,
-    backgroundLocationGranted: Boolean,
     onRequestTrackingPermission: () -> Unit,
-    onRequestBackgroundLocationPermission: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -1019,25 +1000,30 @@ private fun DriverHomeScreen(
         }
 
         if (!foregroundLocationGranted) {
-            DriverPermissionCompactCard(
+            Surface(
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .statusBarsPadding()
                     .padding(start = 16.dp, top = 76.dp),
-                text = stringResource(R.string.driver_tracking_title),
-                onClick = onRequestTrackingPermission,
-            )
-        }
-
-        if (foregroundLocationGranted && !backgroundLocationGranted) {
-            DriverPermissionCompactCard(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .statusBarsPadding()
-                    .padding(start = 16.dp, top = 76.dp),
-                text = stringResource(R.string.driver_tracking_background),
-                onClick = onRequestBackgroundLocationPermission,
-            )
+                shape = RoundedCornerShape(14.dp),
+                color = SafarWhite,
+                shadowElevation = 3.dp,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .clickable { onRequestTrackingPermission() }
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    SafarGlyph(Glyph.PIN, Muted, 20.dp)
+                    Spacer(Modifier.width(7.dp))
+                    Text(
+                        stringResource(R.string.location_permission_needed),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = SafarNavy,
+                    )
+                }
+            }
         }
 
         // Compact, responsive work-session panel. The map stays the primary
@@ -1212,35 +1198,6 @@ private fun formatDuration(totalSeconds: Long): String {
     return "%02d:%02d:%02d".format(hours, minutes, seconds)
 }
 
-@Composable
-private fun DriverPermissionCompactCard(
-    modifier: Modifier = Modifier,
-    text: String,
-    onClick: () -> Unit,
-) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(14.dp),
-        color = SafarWhite,
-        shadowElevation = 3.dp,
-    ) {
-        Row(
-            modifier = Modifier
-                .clickable(onClick = onClick)
-                .padding(horizontal = 12.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            SafarGlyph(Glyph.PIN, Muted, 20.dp)
-            Spacer(Modifier.width(7.dp))
-            Text(
-                text = text,
-                style = MaterialTheme.typography.labelLarge,
-                color = SafarNavy,
-                maxLines = 2,
-            )
-        }
-    }
-}
 
 @Composable
 private fun DriverStatisticsScreen(modifier: Modifier = Modifier) {
