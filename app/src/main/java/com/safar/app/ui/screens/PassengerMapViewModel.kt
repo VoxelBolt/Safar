@@ -39,7 +39,7 @@ data class PassengerMapUiState(
     val activeVehicles: List<Vehicle> = emptyList(),
     val passengerLocation: GeoPoint? = null,
     // Last map camera position. Used only as a fallback when Android has no GPS fix (for example on an emulator).
-    val mapCenterLocation: GeoPoint? = null,
+    val mapCenterLocation: GeoPoint? = GeoPoint(40.2829, 69.6228),
     val headingDegrees: Float? = null,
     val locateRequestId: Long = 0L,
     val nearestVehicle: Vehicle? = null,
@@ -107,17 +107,16 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun showNearestVehicleOnMap() {
-        if (!hasLocationPermission()) {
-            _uiState.value = _uiState.value.copy(error = "Разрешите геолокацию, чтобы найти ближайшую маршрутку")
-            return
-        }
-
         nearestVehicleRequestJob?.cancel()
         nearestVehicleRequestJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(findingNearestVehicle = true, error = null)
             try {
                 val stateBeforeLocation = _uiState.value
-                val freshGpsLocation = withTimeoutOrNull(8_000L) { awaitFreshPassengerLocation() }
+                val freshGpsLocation = if (hasLocationPermission()) {
+                    withTimeoutOrNull(8_000L) { awaitFreshPassengerLocation() }
+                } else {
+                    null
+                }
                 // On an emulator (or when Android temporarily has no GPS fix) there may be
                 // no passenger coordinate at all. The map still has a real camera coordinate,
                 // so use it as a deterministic fallback instead of making the button appear dead.
@@ -125,7 +124,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                     ?: stateBeforeLocation.passengerLocation
                     ?: stateBeforeLocation.mapCenterLocation
                 if (passenger == null) {
-                    _uiState.value = _uiState.value.copy(error = "Не удалось определить точку пассажира")
+                    _uiState.value = _uiState.value.copy(error = "Не удалось определить точку карты")
                     return@launch
                 }
                 val locationSource = when {
@@ -195,9 +194,9 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         if (!point.latitude.isFinite() || !point.longitude.isFinite()) return
         val state = _uiState.value
         _uiState.value = state.copy(mapCenterLocation = point)
-        // If Android has no passenger GPS fix, keep the nearest vehicle/ETA usable
-        // from the actual map camera instead of leaving the UI empty.
-        if (state.passengerLocation == null && state.nearestVehicleTrackingEnabled && state.activeVehicles.isNotEmpty()) {
+        // The map center is the fallback passenger reference whenever Android has
+        // no usable GPS fix. Recalculate immediately so ETA is always available.
+        if (state.passengerLocation == null && state.nearestVehicleTrackingEnabled) {
             updateNearestVehicle(point, state.activeVehicles)
         }
     }
