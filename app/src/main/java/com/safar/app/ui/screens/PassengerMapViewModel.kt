@@ -38,6 +38,8 @@ data class PassengerMapUiState(
     val selectedRoute: Route? = null,
     val activeVehicles: List<Vehicle> = emptyList(),
     val passengerLocation: GeoPoint? = null,
+    // Last map camera position. Used only as a fallback when Android has no GPS fix (for example on an emulator).
+    val mapCenterLocation: GeoPoint? = null,
     val headingDegrees: Float? = null,
     val locateRequestId: Long = 0L,
     val nearestVehicle: Vehicle? = null,
@@ -114,13 +116,26 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         nearestVehicleRequestJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(findingNearestVehicle = true, error = null)
             try {
-                val passenger = withTimeoutOrNull(5_000L) { awaitFreshPassengerLocation() }
-                    ?: _uiState.value.passengerLocation
+                val stateBeforeLocation = _uiState.value
+                val freshGpsLocation = withTimeoutOrNull(8_000L) { awaitFreshPassengerLocation() }
+                // On an emulator (or when Android temporarily has no GPS fix) there may be
+                // no passenger coordinate at all. The map still has a real camera coordinate,
+                // so use it as a deterministic fallback instead of making the button appear dead.
+                val passenger = freshGpsLocation
+                    ?: stateBeforeLocation.passengerLocation
+                    ?: stateBeforeLocation.mapCenterLocation
                 if (passenger == null) {
-                    _uiState.value = _uiState.value.copy(error = "Не удалось получить ваше местоположение")
+                    _uiState.value = _uiState.value.copy(error = "Не удалось определить точку пассажира")
                     return@launch
                 }
-                _uiState.value = _uiState.value.copy(passengerLocation = passenger)
+                val locationSource = when {
+                    freshGpsLocation != null -> "gps"
+                    stateBeforeLocation.passengerLocation != null -> "cached_gps"
+                    else -> "map_center_fallback"
+                }
+                if (freshGpsLocation != null) {
+                    _uiState.value = _uiState.value.copy(passengerLocation = freshGpsLocation)
+                }
 
                 var vehicles = _uiState.value.activeVehicles.filter { it.currentLocation != null }
                 if (vehicles.isEmpty()) {
@@ -146,7 +161,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
 
                 android.util.Log.d(
                     "SafarNearest",
-                    "button: passenger=${passenger.latitude},${passenger.longitude} " +
+                    "button: source=" + locationSource + " passenger=" + passenger.latitude + "," + passenger.longitude + " " +
                         "vehicle=${result.vehicle.identifier} " +
                         "vehicleLocation=${result.vehicle.currentLocation?.latitude},${result.vehicle.currentLocation?.longitude} " +
                         "distance=${result.distanceMeters}m eta=${result.etaMinutes}min",
@@ -175,6 +190,11 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                 }
             }
         }
+
+    fun onMapCenterChanged(point: GeoPoint) {
+        if (!point.latitude.isFinite() || !point.longitude.isFinite()) return
+        _uiState.value = _uiState.value.copy(mapCenterLocation = point)
+    }
 
     fun selectRoute(route: Route) {
         val oldRouteId = _uiState.value.selectedRoute?.id
@@ -343,7 +363,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             while (isActive) {
                 delay(60_000L)
                 val state = _uiState.value
-                val passenger = state.passengerLocation ?: continue
+                val passenger = state.passengerLocation ?: state.mapCenterLocation ?: continue
                 val result = NearestVehicleCalculator.findNearest(passenger, state.activeVehicles)
                 _uiState.value = state.copy(
                     nearestVehicle = result?.vehicle,
