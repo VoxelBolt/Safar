@@ -321,7 +321,10 @@ private fun PassengerMapScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.Top,
                         ) {
-                            val calculatedNearest = ui.passengerLocation?.let { passenger ->
+                            // Prefer the real passenger GPS position. If Android has no fix,
+                            // use the actual map center that the user is looking at.
+                            val referencePoint = ui.passengerLocation ?: ui.mapCenterLocation
+                            val calculatedNearest = referencePoint?.let { passenger ->
                                 NearestVehicleCalculator.findNearest(
                                     passenger,
                                     ui.activeVehicles.filter { it.currentLocation != null },
@@ -334,16 +337,17 @@ private fun PassengerMapScreen(
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                             ) {
-                                Surface(
-                                    onClick = { viewModel.showNearestVehicleOnMap() },
-                                    enabled = !ui.findingNearestVehicle,
-                                    modifier = Modifier.size(46.dp),
-                                    shape = CircleShape,
-                                    color = SoftBlue,
+                                Box(
+                                    modifier = Modifier
+                                        .size(46.dp)
+                                        .clip(CircleShape)
+                                        .background(SoftBlue)
+                                        .clickable(enabled = !ui.findingNearestVehicle) {
+                                            viewModel.showNearestVehicleOnMap()
+                                        },
+                                    contentAlignment = Alignment.Center,
                                 ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        SafarGlyph(Glyph.LOCATE, SafarBlue, 23.dp)
-                                    }
+                                    SafarGlyph(Glyph.LOCATE, SafarBlue, 23.dp)
                                 }
 
                                 if (ui.findingNearestVehicle) {
