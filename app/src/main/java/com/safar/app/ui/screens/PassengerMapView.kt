@@ -303,13 +303,26 @@ internal fun PassengerMapView(
 
     LaunchedEffect(styleReady, nearestVehicleRequestId, nearestVehicle) {
         if (!styleReady || nearestVehicleRequestId <= 0L || nearestVehicle == null) return@LaunchedEffect
-        map?.cancelTransitions()
-        map?.animateCamera(
-            CameraUpdateFactory.newLatLngZoom(
-                LatLng(nearestVehicle.second.latitude, nearestVehicle.second.longitude),
-                USER_FOCUS_ZOOM,
-            )
+
+        val target = LatLng(
+            nearestVehicle.second.latitude,
+            nearestVehicle.second.longitude,
         )
+        map?.let { loadedMap ->
+            // Explicit nearest-vehicle focus: move immediately so no animation
+            // can be interrupted by another camera effect.
+            loadedMap.cancelTransitions()
+            loadedMap.moveCamera(
+                CameraUpdateFactory.newLatLngZoom(
+                    target,
+                    USER_FOCUS_ZOOM,
+                )
+            )
+            android.util.Log.d(
+                "SafarNearest",
+                "CAMERA moved to ${target.latitude},${target.longitude}",
+            )
+        }
         centeredOnUser = true
     }
 
