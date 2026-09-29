@@ -111,41 +111,42 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         nearestVehicleRequestJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(findingNearestVehicle = true, error = null)
             try {
-                val stateBeforeLocation = _uiState.value
-                val freshGpsLocation = if (hasLocationPermission()) {
-                    withTimeoutOrNull(8_000L) { awaitFreshPassengerLocation() }
-                } else {
-                    null
-                }
-                // On an emulator (or when Android temporarily has no GPS fix) there may be
-                // no passenger coordinate at all. The map still has a real camera coordinate,
-                // so use it as a deterministic fallback instead of making the button appear dead.
-                val passenger = freshGpsLocation
-                    ?: stateBeforeLocation.passengerLocation
-                    ?: stateBeforeLocation.mapCenterLocation
+                val state = _uiState.value
+
+                // Do not wait for a fresh GPS fix here. The button must respond immediately.
+                // Use the latest passenger fix when available; otherwise use the exact map
+                // camera position reported by PassengerMapView.
+                val passenger = state.passengerLocation ?: state.mapCenterLocation
+                android.util.Log.d(
+                    "SafarNearest",
+                    "CLICK source=" + if (state.passengerLocation != null) "gps" else "map_center" +
+                        " passenger=" + passenger?.latitude + "," + passenger?.longitude,
+                )
+
                 if (passenger == null) {
                     _uiState.value = _uiState.value.copy(error = "Не удалось определить точку карты")
                     return@launch
                 }
-                val locationSource = when {
-                    freshGpsLocation != null -> "gps"
-                    stateBeforeLocation.passengerLocation != null -> "cached_gps"
-                    else -> "map_center_fallback"
-                }
-                if (freshGpsLocation != null) {
-                    _uiState.value = _uiState.value.copy(passengerLocation = freshGpsLocation)
-                }
 
-                var vehicles = _uiState.value.activeVehicles.filter { it.currentLocation != null }
+                var vehicles = state.activeVehicles
+                    .filter { it.currentLocation != null }
                 if (vehicles.isEmpty()) {
-                    val routeId = _uiState.value.selectedRoute?.id
+                    val routeId = state.selectedRoute?.id
                     if (routeId != null) {
                         vehicles = runCatching { vehicleRepository.getVehiclesForRoute(routeId) }
                             .getOrElse { emptyList() }
-                            .filter { it.currentLocation != null }
+                            .filter { it.currentLocation != null && isFresh(it.currentLocation?.timestampEpochMs) }
                             .map { it.copy(active = true) }
                     }
                 }
+
+                android.util.Log.d(
+                    "SafarNearest",
+                    "candidates=" + vehicles.size +
+                        " locations=" + vehicles.joinToString {
+                            it.identifier + ":" + it.currentLocation?.latitude + "," + it.currentLocation?.longitude
+                        },
+                )
 
                 val result = NearestVehicleCalculator.findNearest(passenger, vehicles)
                 if (result == null) {
@@ -160,10 +161,8 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
 
                 android.util.Log.d(
                     "SafarNearest",
-                    "button: source=" + locationSource + " passenger=" + passenger.latitude + "," + passenger.longitude + " " +
-                        "vehicle=${result.vehicle.identifier} " +
-                        "vehicleLocation=${result.vehicle.currentLocation?.latitude},${result.vehicle.currentLocation?.longitude} " +
-                        "distance=${result.distanceMeters}m eta=${result.etaMinutes}min",
+                    "RESULT vehicle=" + result.vehicle.identifier +
+                        " distance=" + result.distanceMeters + "m eta=" + result.etaMinutes + "min",
                 )
 
                 _uiState.value = _uiState.value.copy(
@@ -180,6 +179,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             }
         }
     }
+
     private suspend fun awaitFreshPassengerLocation(): GeoPoint? =
         suspendCancellableCoroutine { continuation ->
             locationProvider.currentLocationSample { sample ->
