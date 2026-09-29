@@ -332,11 +332,9 @@ private fun PassengerMapScreen(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                             ) {
                                 Surface(
-                                    modifier = Modifier
-                                        .size(46.dp)
-                                        .clickable(enabled = !ui.findingNearestVehicle) {
-                                            viewModel.showNearestVehicleOnMap()
-                                        },
+                                    onClick = { viewModel.showNearestVehicleOnMap() },
+                                    enabled = !ui.findingNearestVehicle,
+                                    modifier = Modifier.size(46.dp),
                                     shape = CircleShape,
                                     color = SoftBlue,
                                 ) {
