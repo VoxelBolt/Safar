@@ -321,9 +321,12 @@ private fun PassengerMapScreen(
                             verticalAlignment = Alignment.Top,
                         ) {
                             val calculatedNearest = ui.passengerLocation?.let { passenger ->
-                                NearestVehicleCalculator.findNearest(passenger, ui.activeVehicles)
+                                NearestVehicleCalculator.findNearest(
+                                    passenger,
+                                    ui.activeVehicles.filter { it.currentLocation != null },
+                                )
                             }
-                            val etaMinutes = ui.nearestVehicleEtaMinutes ?: calculatedNearest?.etaMinutes
+                            val etaMinutes = calculatedNearest?.etaMinutes ?: ui.nearestVehicleEtaMinutes
 
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
