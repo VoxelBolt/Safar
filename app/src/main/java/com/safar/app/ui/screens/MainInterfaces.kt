@@ -383,6 +383,22 @@ private fun PassengerMapScreen(
                         color = SafarNavy,
                     )
                     Spacer(Modifier.height(8.dp))
+
+                    // ETA is displayed beside the nearest transport row.
+                    // Calculate it from the same passenger point and vehicle list
+                    // used by the nearest-vehicle action, with the ViewModel value
+                    // as a fallback while the next location update is arriving.
+                    val referencePoint = ui.passengerLocation ?: ui.mapCenterLocation
+                    val etaCandidates = (ui.activeVehicles + listOfNotNull(ui.nearestVehicle))
+                        .distinctBy { it.id }
+                        .filter { it.currentLocation != null }
+                    val calculatedNearest = referencePoint?.let { passenger ->
+                        NearestVehicleCalculator.findNearest(passenger, etaCandidates)
+                    }
+                    val etaMinutes = calculatedNearest?.etaMinutes
+                        ?: ui.nearestVehicleEtaMinutes
+                        ?: ui.nearestVehicleDistanceMeters?.let(NearestVehicleCalculator::etaMinutes)
+
                     val activeVehicle = ui.nearestVehicle ?: ui.activeVehicles.firstOrNull()
                     Row(
                         modifier = Modifier.fillMaxWidth(),
