@@ -22,6 +22,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -106,13 +107,6 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     fun showNearestVehicleOnMap() {
         if (!hasLocationPermission()) {
             _uiState.value = _uiState.value.copy(error = "Разрешите геолокацию, чтобы найти ближайшую маршрутку")
-            requestCurrentLocation(centerCamera = false)
-            return
-        }
-
-        val passenger = _uiState.value.passengerLocation
-        if (passenger != null) {
-            focusNearestVehicle(passenger)
             return
         }
 
@@ -120,53 +114,65 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         nearestVehicleRequestJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(findingNearestVehicle = true, error = null)
             try {
-                val freshPassenger = awaitFreshPassengerLocation()
-                if (freshPassenger == null) {
+                val passenger = withTimeoutOrNull(5_000L) { awaitFreshPassengerLocation() }
+                    ?: _uiState.value.passengerLocation
+                if (passenger == null) {
                     _uiState.value = _uiState.value.copy(error = "Не удалось получить ваше местоположение")
                     return@launch
                 }
-                _uiState.value = _uiState.value.copy(passengerLocation = freshPassenger)
-                focusNearestVehicle(freshPassenger)
-            } catch (error: CancellationException) {
-                throw error
+                _uiState.value = _uiState.value.copy(passengerLocation = passenger)
+
+                var vehicles = _uiState.value.activeVehicles.filter { it.currentLocation != null }
+                if (vehicles.isEmpty()) {
+                    val routeId = _uiState.value.selectedRoute?.id
+                    if (routeId != null) {
+                        vehicles = runCatching { vehicleRepository.getVehiclesForRoute(routeId) }
+                            .getOrElse { emptyList() }
+                            .filter { it.currentLocation != null }
+                            .map { it.copy(active = true) }
+                    }
+                }
+
+                val result = NearestVehicleCalculator.findNearest(passenger, vehicles)
+                if (result == null) {
+                    _uiState.value = _uiState.value.copy(
+                        nearestVehicle = null,
+                        nearestVehicleDistanceMeters = null,
+                        nearestVehicleEtaMinutes = null,
+                        error = "Сейчас нет маршруток с геопозицией",
+                    )
+                    return@launch
+                }
+
+                android.util.Log.d(
+                    "SafarNearest",
+                    "button: passenger=${passenger.latitude},${passenger.longitude} " +
+                        "vehicle=${result.vehicle.identifier} " +
+                        "vehicleLocation=${result.vehicle.currentLocation?.latitude},${result.vehicle.currentLocation?.longitude} " +
+                        "distance=${result.distanceMeters}m eta=${result.etaMinutes}min",
+                )
+
+                _uiState.value = _uiState.value.copy(
+                    activeVehicles = if (_uiState.value.activeVehicles.isEmpty()) vehicles else _uiState.value.activeVehicles,
+                    nearestVehicle = result.vehicle,
+                    nearestVehicleDistanceMeters = result.distanceMeters,
+                    nearestVehicleEtaMinutes = result.etaMinutes,
+                    nearestVehicleRequestId = _uiState.value.nearestVehicleRequestId + 1L,
+                    nearestVehicleTrackingEnabled = true,
+                    error = null,
+                )
             } finally {
                 _uiState.value = _uiState.value.copy(findingNearestVehicle = false)
             }
         }
     }
-
-    private fun focusNearestVehicle(passenger: GeoPoint) {
-        // Use exactly the coordinates already rendered as blue vehicle
-        // markers. Do not add another route/backend filter here: if the marker
-        // is visible, it must be eligible for the nearest-vehicle action.
-        val vehicles = _uiState.value.activeVehicles
-            .filter { it.currentLocation != null }
-
-        val result = NearestVehicleCalculator.findNearest(passenger, vehicles)
-        if (result == null) {
-            _uiState.value = _uiState.value.copy(
-                nearestVehicle = null,
-                nearestVehicleDistanceMeters = null,
-                nearestVehicleEtaMinutes = null,
-                error = "Сейчас нет маршруток с геопозицией",
-            )
-            return
-        }
-
-        _uiState.value = _uiState.value.copy(
-            nearestVehicle = result.vehicle,
-            nearestVehicleDistanceMeters = result.distanceMeters,
-            nearestVehicleEtaMinutes = result.etaMinutes,
-            nearestVehicleRequestId = _uiState.value.nearestVehicleRequestId + 1L,
-            nearestVehicleTrackingEnabled = true,
-            error = null,
-        )
-    }
-
     private suspend fun awaitFreshPassengerLocation(): GeoPoint? =
         suspendCancellableCoroutine { continuation ->
             locationProvider.currentLocationSample { sample ->
-                if (continuation.isActive) continuation.resume(sample?.point)
+                val point = sample?.point
+                if (continuation.isActive && point != null) {
+                    continuation.resume(point)
+                }
             }
         }
 
