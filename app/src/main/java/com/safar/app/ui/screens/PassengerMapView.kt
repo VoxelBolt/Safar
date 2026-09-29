@@ -296,12 +296,14 @@ internal fun PassengerMapView(
 
     LaunchedEffect(styleReady, nearestVehicleRequestId, nearestVehicle) {
         if (!styleReady || nearestVehicleRequestId <= 0L || nearestVehicle == null) return@LaunchedEffect
+        map?.cancelTransitions()
         map?.animateCamera(
             CameraUpdateFactory.newLatLngZoom(
                 LatLng(nearestVehicle.second.latitude, nearestVehicle.second.longitude),
                 USER_FOCUS_ZOOM,
             )
         )
+        centeredOnUser = true
     }
 
     LaunchedEffect(locateRequestId) {
