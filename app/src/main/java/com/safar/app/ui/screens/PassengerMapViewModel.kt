@@ -136,13 +136,12 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     }
 
     private fun focusNearestVehicle(passenger: GeoPoint) {
-        val routeId = _uiState.value.selectedRoute?.id
+        // Use exactly the coordinates already rendered as blue vehicle
+        // markers. Do not add another route/backend filter here: if the marker
+        // is visible, it must be eligible for the nearest-vehicle action.
         val vehicles = _uiState.value.activeVehicles
-            .filter { routeId == null || it.routeId == null || it.routeId == routeId }
             .filter { it.currentLocation != null }
 
-        // Use the same coordinates that are already rendered as blue vehicle
-        // markers. No second "active" lookup is required for the button.
         val result = NearestVehicleCalculator.findNearest(passenger, vehicles)
         if (result == null) {
             _uiState.value = _uiState.value.copy(
