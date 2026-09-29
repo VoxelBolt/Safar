@@ -100,7 +100,7 @@ private const val VEHICLE_LABEL_LAYER_ID = "safar-vehicle-label-layer"
 private const val DEFAULT_LATITUDE = 40.2829
 private const val DEFAULT_LONGITUDE = 69.6228
 private const val DEFAULT_ZOOM = 12.0
-private const val USER_FOCUS_ZOOM = 15.5
+private const val USER_FOCUS_ZOOM = 16.0
 
 @Composable
 internal fun PassengerMapView(
@@ -109,6 +109,7 @@ internal fun PassengerMapView(
     headingDegrees: Float?,
     locationPermissionGranted: Boolean,
     locateRequestId: Long = 0L,
+    onMapCenterChanged: (GeoPoint) -> Unit = {},
     vehicleLocations: List<Pair<Vehicle, VehicleLocation>>,
     passengerLocations: List<PassengerLocation> = emptyList(),
     onLocateUser: () -> Unit = {},
@@ -179,6 +180,10 @@ internal fun PassengerMapView(
                     getMapAsync { loadedMap ->
                         map = loadedMap
                         syncVehicleMarkers(loadedMap, displayVehicleLocations(stabilizedVehicleLocations, nearestVehicle), vehicleMarkerIcon, vehicleMarkers)
+                        loadedMap.addOnCameraIdleListener {
+                            val target = loadedMap.cameraPosition.target
+                            onMapCenterChanged(GeoPoint(target.latitude, target.longitude))
+                        }
                         loadedMap.uiSettings.isCompassEnabled = false
                         loadedMap.uiSettings.isScrollGesturesEnabled = true
                         loadedMap.uiSettings.isZoomGesturesEnabled = true
