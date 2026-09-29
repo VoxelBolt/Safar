@@ -335,6 +335,7 @@ private fun PassengerMapScreen(
                                 ?: ui.nearestVehicleDistanceMeters?.let(NearestVehicleCalculator::etaMinutes)
 
                             Column(
+                                modifier = Modifier.width(74.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally,
                             ) {
                                 Surface(
@@ -349,22 +350,23 @@ private fun PassengerMapScreen(
                                     }
                                 }
 
-                                if (ui.findingNearestVehicle) {
-                                    Text(
-                                        text = "…",
-                                        color = SafarBlue,
-                                        fontWeight = FontWeight.Bold,
-                                        style = MaterialTheme.typography.labelSmall,
-                                    )
-                                } else if (etaMinutes != null) {
-                                    Text(
-                                        text = stringResource(R.string.nearest_vehicle_eta, etaMinutes),
-                                        color = SafarBlue,
-                                        fontWeight = FontWeight.Bold,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        maxLines = 1,
-                                    )
-                                }
+                                Spacer(Modifier.height(2.dp))
+
+                                Text(
+                                    text = if (ui.findingNearestVehicle) {
+                                        "…"
+                                    } else {
+                                        etaMinutes?.let {
+                                            stringResource(R.string.nearest_vehicle_eta, it)
+                                        } ?: "—"
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = SafarBlue,
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 1,
+                                )
                             }
 
                             val favoriteVehicle = activeVehicleForFavorite(ui.activeVehicles, ui.nearestVehicle)
