@@ -305,7 +305,10 @@ internal fun PassengerMapView(
         lastCameraRouteId = route.id
     }
 
-    LaunchedEffect(styleReady, nearestVehicleRequestId, nearestVehicle) {
+    // The nearest-vehicle camera move is a one-shot action. Do NOT key this
+    // effect by nearestVehicle itself: its coordinates are refreshed by realtime
+    // polling, and doing so would silently re-center the map every few seconds.
+    LaunchedEffect(styleReady, nearestVehicleRequestId) {
         if (!styleReady || nearestVehicleRequestId <= 0L || nearestVehicle == null) return@LaunchedEffect
 
         val target = LatLng(
