@@ -349,6 +349,14 @@ private fun PassengerMapScreen(
                                         fontWeight = FontWeight.Bold,
                                         style = MaterialTheme.typography.labelSmall,
                                     )
+                                } else if (etaMinutes != null) {
+                                    Text(
+                                        text = stringResource(R.string.nearest_vehicle_eta, etaMinutes),
+                                        color = SafarBlue,
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1,
+                                    )
                                 }
                             }
 
@@ -375,17 +383,6 @@ private fun PassengerMapScreen(
                                         }
                                     }
 
-                                    // ETA belongs to the selected vehicle/favorite
-                                    // control, so it stays directly under the star.
-                                    if (!ui.findingNearestVehicle && etaMinutes != null) {
-                                        Text(
-                                            text = stringResource(R.string.nearest_vehicle_eta, etaMinutes),
-                                            color = SafarBlue,
-                                            fontWeight = FontWeight.Bold,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            maxLines = 1,
-                                        )
-                                    }
                                 }
                             }
                         }
