@@ -109,11 +109,11 @@ fun SafarNavHost(
         }
 
         composable(SafarDestination.PassengerMain.route) {
-            PassengerMainScreen(state = state)
+            PassengerMainScreen(state = state, onLanguageSelected = viewModel::selectLanguage, onLogout = viewModel::logout)
         }
 
         composable(SafarDestination.DriverMain.route) {
-            DriverMainScreen(state = state)
+            DriverMainScreen(state = state, onLanguageSelected = viewModel::selectLanguage, onLogout = viewModel::logout)
         }
     }
 }

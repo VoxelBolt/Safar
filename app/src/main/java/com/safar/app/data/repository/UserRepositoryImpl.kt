@@ -11,4 +11,6 @@ class UserRepositoryImpl(
 
     override suspend fun updateCurrentUser(name: String, phone: String): User =
         api.updateCurrentUser(name, phone)
+
+    override suspend fun signOut() = api.signOut()
 }

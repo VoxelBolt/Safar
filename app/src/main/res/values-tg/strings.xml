@@ -106,7 +106,32 @@
     <string name="route_path_unavailable">Роҳи масир ҳоло дастрас нест</string>
     <string name="retry">Аз нав кӯшиш кардан</string>
     <string name="find_nearest_vehicle">Нақлиёти наздиктаринро ёфтан</string>
-    <string name="nearest_vehicle_eta">~%1$d дақ</string>
+    <string name="nearest_vehicle_eta">≠ %1$d дақ</string>
     <string name="route_number_format">Масири %1$s</string>
     <string name="active_vehicles_count">Нақлиётҳои фаъол: %1$d</string>
+
+    <string name="refresh">Навсозӣ</string>
+    <string name="loading">Боркунӣ…</string>
+    <string name="generic_load_error">Маълумотро бор кардан нашуд. Пайвасти интернетро санҷед.</string>
+    <string name="generic_save_error">Тағйиротро нигоҳ доштан нашуд. Пайвастро санҷед ва дубора кӯшиш кунед.</string>
+    <string name="save">Нигоҳ доштан</string>
+    <string name="saving">Нигоҳдорӣ…</string>
+    <string name="cancel">Бекор кардан</string>
+    <string name="ok">Хуб</string>
+    <string name="verified">Тасдиқшуда</string>
+    <string name="not_verified">Тасдиқ нашудааст</string>
+    <string name="notifications_info">Танзимоти огоҳиномаҳо дар версияи минбаъдаи MVP дастрас мешаванд.</string>
+    <string name="help_info">Агар харита ё маълумот бор нашавад, пайвастшавиро санҷед ва «Аз нав кӯшиш кардан»-ро пахш кунед.</string>
+    <string name="about_info">Safar — барнома барои пайгирии нақлиёти шаҳрӣ.</string>
+    <string name="driver_verification_info">Ҳолати тасдиқ аз профили ронанда дар Supabase гирифта мешавад.</string>
+    <string name="statistics_empty_title">Маълумот кофӣ нест</string>
+    <string name="statistics_empty_subtitle">Барои дидани омор як сессияи кориро анҷом диҳед.</string>
+    <string name="statistics_sessions_count">Сессияҳои корӣ: %1$d</string>
+    <string name="work_duration_format">%1$d соат %2$02d дақ</string>
+    <string name="distance_km_format">%.1f км</string>
+    <string name="distance_m_format">%1$d м</string>
+    <string name="location_available">Ҷойгиршавӣ нав аст</string>
+    <string name="location_stale">Ҷойгиршавӣ кӯҳна аст</string>
+
+    <string name="passengers_waiting">Интизори масири %1$s: %2$d</string>
 </resources>

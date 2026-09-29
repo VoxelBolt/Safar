@@ -51,6 +51,10 @@ class SupabaseSafarApi(
             ?.toDomain()
     }
 
+    override suspend fun signOut() {
+        client.auth.signOut()
+    }
+
     override suspend fun updateCurrentUser(name: String, phone: String): User {
         ensureAnonymousSession()
         val authUserId = requireNotNull(client.auth.currentUserOrNull()?.id)
@@ -236,6 +240,22 @@ class SupabaseSafarApi(
             .decodeList<WorkSessionDto>()
             .firstOrNull()
             ?.toDomain()
+    }
+
+    override suspend fun getWorkSessionHistory(startEpochMs: Long?, endEpochMs: Long?): List<WorkSession> {
+        ensureAnonymousSession()
+        val driverId = requireNotNull(client.auth.currentUserOrNull()?.id)
+        return client.from("work_sessions")
+            .select {
+                filter {
+                    eq("driver_id", driverId)
+                    startEpochMs?.let { gte("started_at", Instant.ofEpochMilli(it).toString()) }
+                    endEpochMs?.let { lte("started_at", Instant.ofEpochMilli(it).toString()) }
+                }
+            }
+            .decodeList<WorkSessionDto>()
+            .sortedByDescending { it.startedAt }
+            .map { it.toDomain() }
     }
 
     override suspend fun startWorkSession(): WorkSession {

@@ -100,7 +100,7 @@ private const val VEHICLE_LABEL_LAYER_ID = "safar-vehicle-label-layer"
 private const val DEFAULT_LATITUDE = 40.2829
 private const val DEFAULT_LONGITUDE = 69.6228
 private const val DEFAULT_ZOOM = 12.0
-private const val USER_FOCUS_ZOOM = 15.5
+private const val USER_FOCUS_ZOOM = 16.0
 
 @Composable
 internal fun PassengerMapView(
@@ -109,6 +109,7 @@ internal fun PassengerMapView(
     headingDegrees: Float?,
     locationPermissionGranted: Boolean,
     locateRequestId: Long = 0L,
+    onMapCenterChanged: (GeoPoint) -> Unit = {},
     vehicleLocations: List<Pair<Vehicle, VehicleLocation>>,
     passengerLocations: List<PassengerLocation> = emptyList(),
     onLocateUser: () -> Unit = {},
@@ -179,6 +180,11 @@ internal fun PassengerMapView(
                     getMapAsync { loadedMap ->
                         map = loadedMap
                         syncVehicleMarkers(loadedMap, displayVehicleLocations(stabilizedVehicleLocations, nearestVehicle), vehicleMarkerIcon, vehicleMarkers)
+                        loadedMap.addOnCameraIdleListener {
+                            loadedMap.cameraPosition.target?.let { target ->
+                                onMapCenterChanged(GeoPoint(target.latitude, target.longitude))
+                            }
+                        }
                         loadedMap.uiSettings.isCompassEnabled = false
                         loadedMap.uiSettings.isScrollGesturesEnabled = true
                         loadedMap.uiSettings.isZoomGesturesEnabled = true
@@ -191,6 +197,7 @@ internal fun PassengerMapView(
                                 .target(LatLng(DEFAULT_LATITUDE, DEFAULT_LONGITUDE))
                                 .zoom(DEFAULT_ZOOM)
                                 .build()
+                            onMapCenterChanged(GeoPoint(DEFAULT_LATITUDE, DEFAULT_LONGITUDE))
                         }
                     }
                 }
@@ -256,16 +263,20 @@ internal fun PassengerMapView(
                 vehicleMarkers,
             )
         }
+    }
 
-        if (passengerLocation != null && !centeredOnUser) {
-            map?.animateCamera(
-                CameraUpdateFactory.newLatLngZoom(
-                    LatLng(passengerLocation.latitude, passengerLocation.longitude),
-                    USER_FOCUS_ZOOM,
-                )
+    // Initial centering happens once, when the first usable passenger/driver
+    // location becomes available. Subsequent GPS updates must never move the
+    // camera: the user is free to pan and zoom the map.
+    LaunchedEffect(styleReady, passengerLocation) {
+        if (!styleReady || centeredOnUser || passengerLocation == null) return@LaunchedEffect
+        map?.moveCamera(
+            CameraUpdateFactory.newLatLngZoom(
+                LatLng(passengerLocation.latitude, passengerLocation.longitude),
+                USER_FOCUS_ZOOM,
             )
-            centeredOnUser = true
-        }
+        )
+        centeredOnUser = true
     }
 
     LaunchedEffect(styleReady, route?.id, stabilizedVehicleLocations) {
@@ -294,21 +305,40 @@ internal fun PassengerMapView(
         lastCameraRouteId = route.id
     }
 
-    LaunchedEffect(styleReady, nearestVehicleRequestId, nearestVehicle) {
+    // The nearest-vehicle camera move is a one-shot action. Do NOT key this
+    // effect by nearestVehicle itself: its coordinates are refreshed by realtime
+    // polling, and doing so would silently re-center the map every few seconds.
+    LaunchedEffect(styleReady, nearestVehicleRequestId) {
         if (!styleReady || nearestVehicleRequestId <= 0L || nearestVehicle == null) return@LaunchedEffect
-        map?.animateCamera(
-            CameraUpdateFactory.newLatLngZoom(
-                LatLng(nearestVehicle.second.latitude, nearestVehicle.second.longitude),
-                USER_FOCUS_ZOOM,
-            )
+
+        val target = LatLng(
+            nearestVehicle.second.latitude,
+            nearestVehicle.second.longitude,
         )
+        map?.let { loadedMap ->
+            // Explicit nearest-vehicle focus: move immediately so no animation
+            // can be interrupted by another camera effect.
+            loadedMap.cancelTransitions()
+            loadedMap.moveCamera(
+                CameraUpdateFactory.newLatLngZoom(
+                    target,
+                    USER_FOCUS_ZOOM,
+                )
+            )
+            android.util.Log.d(
+                "SafarNearest",
+                "CAMERA moved to ${target.latitude},${target.longitude}",
+            )
+        }
+        centeredOnUser = true
     }
 
     LaunchedEffect(locateRequestId) {
         if (!styleReady || locateRequestId <= 0L) return@LaunchedEffect
 
         val target = passengerLocation ?: return@LaunchedEffect
-        map?.animateCamera(
+        map?.cancelTransitions()
+        map?.moveCamera(
             CameraUpdateFactory.newLatLngZoom(
                 LatLng(target.latitude, target.longitude),
                 USER_FOCUS_ZOOM,

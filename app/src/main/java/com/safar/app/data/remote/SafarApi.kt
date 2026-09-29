@@ -19,6 +19,7 @@ interface SafarApi {
     suspend fun ensureAnonymousSession()
     suspend fun getCurrentUser(): User?
     suspend fun updateCurrentUser(name: String, phone: String): User
+    suspend fun signOut()
 
     suspend fun registerPassenger(name: String, phone: String): User
     suspend fun registerDriver(name: String, phone: String, vehicleIdentifier: String): Driver
@@ -40,6 +41,7 @@ interface SafarApi {
     suspend fun pauseWorkSession(sessionId: String): WorkSession
     suspend fun resumeWorkSession(sessionId: String): WorkSession
     suspend fun finishWorkSession(sessionId: String): WorkSession
+    suspend fun getWorkSessionHistory(startEpochMs: Long? = null, endEpochMs: Long? = null): List<WorkSession>
 
     suspend fun submitVehicleLocation(
         latitude: Double,

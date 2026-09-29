@@ -11,6 +11,7 @@ import com.safar.app.domain.model.WorkSession
 interface UserRepository {
     suspend fun getCurrentUser(): User?
     suspend fun updateCurrentUser(name: String, phone: String): User
+    suspend fun signOut()
 }
 
 interface RouteRepository {
@@ -47,6 +48,7 @@ interface WorkSessionRepository {
     suspend fun pause(sessionId: String): WorkSession
     suspend fun resume(sessionId: String): WorkSession
     suspend fun finish(sessionId: String): WorkSession
+    suspend fun getHistory(startEpochMs: Long? = null, endEpochMs: Long? = null): List<WorkSession>
 }
 
 interface DriverLocationRepository {

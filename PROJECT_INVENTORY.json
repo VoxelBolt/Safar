@@ -33,7 +33,15 @@
     "driver route assignment from Supabase",
     "driver work session lifecycle",
     "wall-clock work-session timer with pause accounting",
-    "driver home loading/error/empty states"
+    "driver home loading/error/empty states",
+    "persistent favorite vehicles with RLS access",
+    "real passenger profile and editable user data",
+    "real driver profile with vehicle, route, and verification status",
+    "work-session statistics from Supabase history",
+    "Russian/English/Tajik Stage 08/09 UI localization",
+    "foreground and background location permission UX",
+    "logout/session reset",
+    "Stage 08/09 error and empty states"
   ],
   "not_implemented": [
     "map",
@@ -41,10 +49,7 @@
     "background location",
     "foreground service",
     "realtime transport",
-    "ETA",
-    "favorites",
-    "profile",
-    "statistics"
+    "ETA"
   ],
   "api_base_url": "Supabase project URL supplied through SUPABASE_URL",
   "package": "com.safar.app"

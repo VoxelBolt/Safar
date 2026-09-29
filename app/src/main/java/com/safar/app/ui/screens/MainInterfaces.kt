@@ -112,9 +112,10 @@ private val Danger = Color(0xFFE44949)
 private val DangerSoft = Color(0xFFFFF0F0)
 
 @Composable
-fun PassengerMainScreen(state: OnboardingState) {
+fun PassengerMainScreen(state: OnboardingState, onLanguageSelected: (String) -> Unit, onLogout: () -> Unit) {
     var tab by remember { mutableStateOf(PassengerTab.MAP) }
     val mapViewModel: PassengerMapViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    val favoriteViewModel: FavoriteViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
@@ -127,6 +128,7 @@ fun PassengerMainScreen(state: OnboardingState) {
     LaunchedEffect(Unit) {
         mapViewModel.loadRoutes()
         mapViewModel.refreshLocationPermissionState()
+        favoriteViewModel.load()
     }
 
     Scaffold(
@@ -147,6 +149,8 @@ fun PassengerMainScreen(state: OnboardingState) {
         when (tab) {
             PassengerTab.MAP -> PassengerMapScreen(
                 viewModel = mapViewModel,
+                isFavorite = { vehicleId -> favoriteViewModel.isFavorite(vehicleId) },
+                onToggleFavorite = { vehicle -> favoriteViewModel.toggle(vehicle) },
                 onRequestLocationPermission = {
                     permissionLauncher.launch(
                         arrayOf(
@@ -157,8 +161,14 @@ fun PassengerMainScreen(state: OnboardingState) {
                 },
                 modifier = Modifier.padding(padding),
             )
-            PassengerTab.FAVORITES -> PassengerFavoritesScreen(modifier = Modifier.padding(padding))
-            PassengerTab.PROFILE -> PassengerProfileScreen(state = state, modifier = Modifier.padding(padding))
+            PassengerTab.FAVORITES -> PassengerFavoritesRealScreen(viewModel = favoriteViewModel, modifier = Modifier.padding(padding))
+            PassengerTab.PROFILE -> PassengerProfileRealScreen(
+                isDriver = false,
+                currentLanguageTag = state.languageTag,
+                onLanguageSelected = onLanguageSelected,
+                onLogout = onLogout,
+                modifier = Modifier.padding(padding),
+            )
         }
     }
 }
@@ -168,6 +178,8 @@ private enum class PassengerTab { MAP, FAVORITES, PROFILE }
 @Composable
 private fun PassengerMapScreen(
     viewModel: PassengerMapViewModel,
+    isFavorite: (String) -> Boolean,
+    onToggleFavorite: (Vehicle) -> Unit,
     onRequestLocationPermission: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -204,6 +216,7 @@ private fun PassengerMapScreen(
                 locationPermissionGranted = !ui.locationPermissionRequired,
                 locateRequestId = ui.locateRequestId,
                 onLocateUser = viewModel::refreshPassengerLocation,
+                onMapCenterChanged = viewModel::onMapCenterChanged,
                 nearestVehicle = ui.nearestVehicle?.let { vehicle ->
                     vehicle.currentLocation?.let { location -> vehicle to location }
                 },
@@ -304,19 +317,59 @@ private fun PassengerMapScreen(
                                 color = Muted,
                             )
                         }
-                        Surface(
-                            modifier = Modifier
-                                .size(46.dp)
-                                .clickable { viewModel.showNearestVehicleOnMap() },
-                            shape = CircleShape,
-                            color = SoftBlue,
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.Top,
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                androidx.compose.material3.Text(
-                                    text = "⌖",
-                                    color = SafarBlue,
-                                    style = MaterialTheme.typography.titleLarge,
-                                )
+                            // Prefer the real passenger GPS position. If Android has no fix,
+                            // use the actual map center that the user is looking at.
+                            val referencePoint = ui.passengerLocation ?: ui.mapCenterLocation
+                            val etaCandidates = (ui.activeVehicles + listOfNotNull(ui.nearestVehicle))
+                                .distinctBy { it.id }
+                                .filter { it.currentLocation != null }
+                            val calculatedNearest = referencePoint?.let { passenger ->
+                                NearestVehicleCalculator.findNearest(passenger, etaCandidates)
+                            }
+                            val etaMinutes = calculatedNearest?.etaMinutes
+                                ?: ui.nearestVehicleEtaMinutes
+                                ?: ui.nearestVehicleDistanceMeters?.let(NearestVehicleCalculator::etaMinutes)
+
+                            Surface(
+                                onClick = { viewModel.showNearestVehicleOnMap() },
+                                enabled = !ui.findingNearestVehicle,
+                                modifier = Modifier.size(46.dp),
+                                shape = CircleShape,
+                                color = SoftBlue,
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    SafarGlyph(Glyph.LOCATE, SafarBlue, 23.dp)
+                                }
+                            }
+
+                            val favoriteVehicle = activeVehicleForFavorite(ui.activeVehicles, ui.nearestVehicle)
+                            if (favoriteVehicle != null) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                ) {
+                                    Surface(
+                                        modifier = Modifier
+                                            .size(46.dp)
+                                            .clickable {
+                                                onToggleFavorite(favoriteVehicle)
+                                            },
+                                        shape = CircleShape,
+                                        color = SoftBlue,
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            SafarGlyph(
+                                                if (isFavorite(favoriteVehicle.id)) Glyph.STAR_FILLED else Glyph.STAR,
+                                                SafarBlue,
+                                                23.dp,
+                                            )
+                                        }
+                                    }
+
+                                }
                             }
                         }
                     }
@@ -330,8 +383,27 @@ private fun PassengerMapScreen(
                         color = SafarNavy,
                     )
                     Spacer(Modifier.height(8.dp))
+
+                    // ETA is displayed beside the nearest transport row.
+                    // Calculate it from the same passenger point and vehicle list
+                    // used by the nearest-vehicle action, with the ViewModel value
+                    // as a fallback while the next location update is arriving.
+                    val referencePoint = ui.passengerLocation ?: ui.mapCenterLocation
+                    val etaCandidates = (ui.activeVehicles + listOfNotNull(ui.nearestVehicle))
+                        .distinctBy { it.id }
+                        .filter { it.currentLocation != null }
+                    val calculatedNearest = referencePoint?.let { passenger ->
+                        NearestVehicleCalculator.findNearest(passenger, etaCandidates)
+                    }
+                    val etaMinutes = calculatedNearest?.etaMinutes
+                        ?: ui.nearestVehicleEtaMinutes
+                        ?: ui.nearestVehicleDistanceMeters?.let(NearestVehicleCalculator::etaMinutes)
+
                     val activeVehicle = ui.nearestVehicle ?: ui.activeVehicles.firstOrNull()
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         Surface(
                             shape = CircleShape,
                             color = if (activeVehicle != null) SuccessSoft else Color(0xFFF0F2F5),
@@ -358,15 +430,21 @@ private fun PassengerMapScreen(
                                 )
                             }
                         }
-                        ui.nearestVehicleEtaMinutes?.let { eta ->
-                            Text(
-                                text = "≈ $eta мин",
-                                modifier = Modifier.padding(start = 8.dp),
-                                color = SafarBlue,
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.labelLarge,
-                            )
-                        }
+
+                        Text(
+                            text = if (ui.findingNearestVehicle) {
+                                "…"
+                            } else {
+                                etaMinutes?.let {
+                                    stringResource(R.string.nearest_vehicle_eta, it)
+                                } ?: "—"
+                            },
+                            color = SafarBlue,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleSmall,
+                            textAlign = TextAlign.End,
+                            maxLines = 1,
+                        )
                     }
                 }
             }
@@ -496,6 +574,9 @@ private fun OutlinedRetryButton(onClick: () -> Unit) {
         Text(stringResource(R.string.retry), modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), color = SafarBlue, fontWeight = FontWeight.SemiBold)
     }
 }
+
+private fun activeVehicleForFavorite(active: List<Vehicle>, nearest: Vehicle?): Vehicle? =
+    nearest ?: active.firstOrNull()
 
 private data class VehicleMock(val identifier: String, val route: String, val direction: String, val eta: String, val distance: String, val active: Boolean)
 
@@ -655,7 +736,7 @@ private fun ProfileMenuCard(rows: List<ProfileRow>) {
 }
 
 @Composable
-fun DriverMainScreen(state: OnboardingState) {
+fun DriverMainScreen(state: OnboardingState, onLanguageSelected: (String) -> Unit, onLogout: () -> Unit) {
     var tab by remember { mutableStateOf(DriverTab.HOME) }
     val driverViewModel: DriverViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val ui by driverViewModel.uiState.collectAsState()
@@ -738,8 +819,13 @@ fun DriverMainScreen(state: OnboardingState) {
                 onRequestTrackingPermission = ::requestDriverTrackingPermission,
                 modifier = Modifier.padding(padding),
             )
-            DriverTab.STATS -> DriverStatisticsScreen(modifier = Modifier.padding(padding))
-            DriverTab.PROFILE -> DriverProfileScreen(state = state, route = ui.selectedRoute, modifier = Modifier.padding(padding))
+            DriverTab.STATS -> DriverStatisticsRealScreen(modifier = Modifier.padding(padding))
+            DriverTab.PROFILE -> DriverProfileRealScreen(
+                currentLanguageTag = state.languageTag,
+                onLanguageSelected = onLanguageSelected,
+                onLogout = onLogout,
+                modifier = Modifier.padding(padding),
+            )
         }
     }
 }
@@ -785,7 +871,6 @@ private fun DriverHomeScreen(
             driverLocationProvider.currentLocationSample { sample ->
                 if (sample != null) {
                     driverLocation = sample.point
-                    driverLocateRequestId += 1L
                     onPublishDriverLocation(sample.point)
                 }
             }
@@ -805,7 +890,6 @@ private fun DriverHomeScreen(
         driverLocationProvider.currentLocation { point ->
             if (point != null) {
                 driverLocation = point
-                driverLocateRequestId += 1L
             }
         }
 
@@ -834,7 +918,7 @@ private fun DriverHomeScreen(
         WorkSessionStatus.COMPLETED -> stringResource(R.string.work_finished)
     }
     val statusColor = if (status == WorkSessionStatus.ACTIVE) Success else Muted
-    val distanceKm = ((session?.distanceMeters ?: 0.0) / 1000.0).let { "%.1f".format(it) }
+    val distanceKm = stringResource(R.string.distance_km_format, (session?.distanceMeters ?: 0.0) / 1000.0)
     val routeNumber = ui.selectedRoute?.number ?: stringResource(R.string.route_not_selected)
 
     Box(
@@ -859,8 +943,9 @@ private fun DriverHomeScreen(
                     }
                 }
             },
-            showNearestVehicleButton = false,
-            vehicleLocations = emptyList(),
+            vehicleLocations = ui.activeVehicles
+                .filter { it.id != ui.driver?.vehicleId }
+                .mapNotNull { vehicle -> vehicle.currentLocation?.let { vehicle to it } },
             passengerLocations = ui.passengerLocations,
             routeOpacity = 0.78f,
             modifier = Modifier.fillMaxSize(),
@@ -876,7 +961,7 @@ private fun DriverHomeScreen(
                 shadowElevation = 4.dp,
             ) {
                 Text(
-                    text = "Ждут маршрут ${routeNumber}: ${ui.passengerLocations.size}",
+                    text = stringResource(R.string.passengers_waiting, routeNumber, ui.passengerLocations.size),
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     color = SafarNavy,
                     style = MaterialTheme.typography.labelLarge,
@@ -933,27 +1018,25 @@ private fun DriverHomeScreen(
         if (!foregroundLocationGranted) {
             Surface(
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
+                    .align(Alignment.TopStart)
                     .statusBarsPadding()
-                    .padding(horizontal = 16.dp)
-                    .padding(top = 88.dp),
-                shape = RoundedCornerShape(16.dp),
+                    .padding(start = 16.dp, top = 76.dp),
+                shape = RoundedCornerShape(14.dp),
                 color = SafarWhite,
-                shadowElevation = 5.dp,
+                shadowElevation = 3.dp,
             ) {
                 Row(
                     modifier = Modifier
-                        .clickable(onClick = onRequestTrackingPermission)
-                        .padding(horizontal = 13.dp, vertical = 10.dp),
+                        .clickable { onRequestTrackingPermission() }
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    SafarGlyph(Glyph.PIN, SafarBlue, 19.dp)
-                    Spacer(Modifier.width(8.dp))
+                    SafarGlyph(Glyph.PIN, Muted, 20.dp)
+                    Spacer(Modifier.width(7.dp))
                     Text(
-                        stringResource(R.string.driver_tracking_allow),
-                        color = SafarNavy,
+                        stringResource(R.string.location_permission_needed),
                         style = MaterialTheme.typography.labelLarge,
-                        maxLines = 1,
+                        color = SafarNavy,
                     )
                 }
             }
@@ -1093,7 +1176,7 @@ private fun DriverHomeScreen(
                 ui.error?.let { error ->
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        error,
+                        stringResource(R.string.generic_load_error),
                         color = Danger,
                         style = MaterialTheme.typography.labelSmall,
                         modifier = Modifier.fillMaxWidth(),
@@ -1128,47 +1211,6 @@ private fun formatDuration(totalSeconds: Long): String {
     return "%02d:%02d:%02d".format(hours, minutes, seconds)
 }
 
-@Composable
-private fun DriverTrackingPermissionCard(
-    onRequestPermission: () -> Unit,
-) {
-    Surface(
-        shape = RoundedCornerShape(24.dp),
-        color = SafarWhite,
-        shadowElevation = 2.dp,
-    ) {
-        Column(Modifier.padding(18.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(shape = CircleShape, color = SoftBlue) {
-                    Box(Modifier.size(42.dp), contentAlignment = Alignment.Center) {
-                        SafarGlyph(Glyph.PIN, SafarBlue, 22.dp)
-                    }
-                }
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        stringResource(R.string.driver_tracking_title),
-                        color = SafarNavy,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        stringResource(R.string.driver_tracking_description),
-                        color = Muted,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
-            PrimaryActionButton(
-                text = stringResource(R.string.driver_tracking_allow),
-                glyph = Glyph.PIN,
-                enabled = true,
-                onClick = onRequestPermission,
-            )
-        }
-    }
-}
 
 @Composable
 private fun DriverStatisticsScreen(modifier: Modifier = Modifier) {
@@ -1335,7 +1377,7 @@ private fun DriverSummaryCard(
 }
 
 @Composable
-private fun SegmentedControl(labels: List<String>, selected: Int, onSelected: (Int) -> Unit) {
+internal fun SegmentedControl(labels: List<String>, selected: Int, onSelected: (Int) -> Unit) {
     Surface(shape = RoundedCornerShape(16.dp), color = Color(0xFFEFF3F9)) {
         Row(Modifier.padding(3.dp)) {
             labels.forEachIndexed { index, label ->
@@ -1466,7 +1508,7 @@ private fun SecondaryActionButton(
 }
 
 @Composable
-private fun EmptyState(glyph: Glyph, title: String, subtitle: String) {
+internal fun EmptyState(glyph: Glyph, title: String, subtitle: String) {
     Column(
         Modifier.fillMaxSize().padding(bottom = 80.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1482,7 +1524,7 @@ private fun EmptyState(glyph: Glyph, title: String, subtitle: String) {
     }
 }
 
-private enum class Glyph { MAP, STAR, STAR_FILLED, PERSON, HOME, STATS, SEARCH, PIN, LOCATE, BUS, CHEVRON, BACK, PLUS, CLOCK, ROUTE, SETTINGS, BELL, LANGUAGE, HELP, INFO, LOGOUT, PLAY, PAUSE, CHECK, SHIELD }
+internal enum class Glyph { MAP, STAR, STAR_FILLED, PERSON, HOME, STATS, SEARCH, PIN, LOCATE, BUS, CHEVRON, BACK, PLUS, CLOCK, ROUTE, SETTINGS, BELL, LANGUAGE, HELP, INFO, LOGOUT, PLAY, PAUSE, CHECK, SHIELD }
 
 @Composable
 private fun SafarBottomBar(

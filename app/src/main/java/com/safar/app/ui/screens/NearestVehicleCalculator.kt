@@ -16,8 +16,6 @@ data class NearestVehicleResult(
 
 object NearestVehicleCalculator {
     const val AVERAGE_VEHICLE_SPEED_KMH = 25.0
-    const val MAX_NEAREST_DISTANCE_METERS = 50_000.0
-
     fun findNearest(
         passenger: GeoPoint,
         vehicles: List<Vehicle>,
@@ -27,7 +25,9 @@ object NearestVehicleCalculator {
             if (!passenger.isValid() || !location.latitude.isFinite() || !location.longitude.isFinite()) return@mapNotNull null
             if (location.latitude !in -90.0..90.0 || location.longitude !in -180.0..180.0) return@mapNotNull null
             val distance = distanceMeters(passenger, GeoPoint(location.latitude, location.longitude))
-            if (distance > MAX_NEAREST_DISTANCE_METERS) return@mapNotNull null
+            // A vehicle must not disappear from the "nearest" action just because
+            // the passenger and driver test devices currently have different GPS
+            // locations. The nearest active vehicle is valid at any distance.
             vehicle to distance
         }.minByOrNull { it.second } ?: return null
 

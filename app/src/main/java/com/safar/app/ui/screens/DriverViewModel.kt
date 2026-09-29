@@ -11,6 +11,7 @@ import com.safar.app.domain.model.Driver
 import com.safar.app.domain.model.Route
 import com.safar.app.domain.model.WorkSession
 import com.safar.app.domain.model.WorkSessionStatus
+import com.safar.app.domain.model.Vehicle
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,6 +30,7 @@ data class DriverUiState(
     val selectedRoute: Route? = null,
     val workSession: WorkSession? = null,
     val passengerLocations: List<PassengerLocation> = emptyList(),
+    val activeVehicles: List<Vehicle> = emptyList(),
     val loading: Boolean = false,
     val actionInProgress: Boolean = false,
     val error: String? = null,
@@ -38,6 +40,7 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
     private val driverRepository = AppContainer.driverRepository
     private val routeRepository = AppContainer.routeRepository
     private val workSessionRepository = AppContainer.workSessionRepository
+    private val vehicleRepository = AppContainer.vehicleRepository
     private val realtimeTransport: RealtimeTransport = AppContainer.realtimeTransport
 
     private val _uiState = MutableStateFlow(DriverUiState())
@@ -45,6 +48,7 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
 
     private var realtimeJob: Job? = null
     private var staleSweepJob: Job? = null
+    private var vehiclePollingJob: Job? = null
 
     init {
         startPassengerStaleSweep()
@@ -63,7 +67,10 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
             }.onSuccess { (driver, routes, session) ->
                 val selected = driver?.routeId?.let { id -> routes.firstOrNull { it.id == id } }
                 _uiState.value = _uiState.value.copy(driver = driver, routes = routes, selectedRoute = selected, workSession = session, loading = false, error = null)
-                selected?.let { switchPassengerRealtime(it.id) }
+                selected?.let {
+                    switchPassengerRealtime(it.id)
+                    startVehiclePolling(it.id)
+                }
                 if (driver?.routeId != null) {
                     // Work Session and GPS tracking are independent systems. Restore
                     // the location foreground service whenever a routed driver is loaded.
@@ -82,13 +89,33 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
             _uiState.value = ui.copy(actionInProgress = true, error = null)
             runCatching { driverRepository.assignRoute(route.id) }
                 .onSuccess { driver ->
-                    _uiState.value = _uiState.value.copy(driver = driver, selectedRoute = route, passengerLocations = emptyList(), actionInProgress = false, error = null)
+                    _uiState.value = _uiState.value.copy(driver = driver, selectedRoute = route, passengerLocations = emptyList(), activeVehicles = emptyList(), actionInProgress = false, error = null)
+                    startVehiclePolling(route.id)
                     // A route assignment enables GPS tracking; Work Session state does not.
                     runCatching { DriverLocationService.start(getApplication()) }
                     switchPassengerRealtime(route.id)
                 }.onFailure { error ->
                     _uiState.value = _uiState.value.copy(actionInProgress = false, error = error.userMessage())
                 }
+        }
+    }
+
+    private fun startVehiclePolling(routeId: String) {
+        vehiclePollingJob?.cancel()
+        vehiclePollingJob = viewModelScope.launch {
+            while (isActive && _uiState.value.selectedRoute?.id == routeId) {
+                runCatching { vehicleRepository.getVehiclesForRoute(routeId) }
+                    .onSuccess { vehicles ->
+                        val active = vehicles
+                            .filter { it.active && isFresh(it.currentLocation?.timestampEpochMs) && it.currentLocation != null }
+                            .map { it.copy(active = true) }
+                        _uiState.value = _uiState.value.copy(activeVehicles = active, error = null)
+                    }
+                    .onFailure { error ->
+                        android.util.Log.w("SafarDriverVehicle", "poll failed", error)
+                    }
+                delay(VEHICLE_POLL_INTERVAL_MS)
+            }
         }
     }
 
@@ -134,7 +161,7 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private fun isFresh(timestampEpochMs: Long): Boolean = timestampEpochMs > 0L && System.currentTimeMillis() - timestampEpochMs <= LOCATION_FRESHNESS_MS
+    private fun isFresh(timestampEpochMs: Long?): Boolean = timestampEpochMs != null && timestampEpochMs > 0L && System.currentTimeMillis() - timestampEpochMs <= LOCATION_FRESHNESS_MS
 
     /**
      * Foreground-screen fallback for driver GPS.
@@ -222,6 +249,7 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
     override fun onCleared() {
         realtimeJob?.cancel()
         staleSweepJob?.cancel()
+        vehiclePollingJob?.cancel()
         realtimeTransport.disconnect()
         super.onCleared()
     }
@@ -230,5 +258,6 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
         const val SIX_HOURS_MS = 6 * 60 * 60 * 1000L
         const val LOCATION_FRESHNESS_MS = 60_000L
         const val PASSENGER_STALE_SWEEP_INTERVAL_MS = 5_000L
+        const val VEHICLE_POLL_INTERVAL_MS = 10_000L
     }
 }

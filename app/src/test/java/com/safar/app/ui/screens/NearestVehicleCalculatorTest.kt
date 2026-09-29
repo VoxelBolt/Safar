@@ -34,6 +34,23 @@ class NearestVehicleCalculatorTest {
     }
 
     @Test
+    fun findNearest_doesNotDropTheOnlyVehicleWhenItIsFarAway() {
+        val passenger = GeoPoint(32.7767, -79.9311)
+        val vehicle = Vehicle(
+            id = "far",
+            identifier = "hshus",
+            routeId = "route-1",
+            currentLocation = VehicleLocation("far", 40.2732408, 69.6420203, 1L),
+            active = true,
+        )
+
+        val result = NearestVehicleCalculator.findNearest(passenger, listOf(vehicle))
+
+        assertNotNull(result)
+        assertEquals("far", result?.vehicle?.id)
+    }
+
+    @Test
     fun etaMinutes_roundsUpAndHasMinimumOfOne() {
         assertEquals(3, NearestVehicleCalculator.etaMinutes(1_000.0))
         assertEquals(1, NearestVehicleCalculator.etaMinutes(0.0))
