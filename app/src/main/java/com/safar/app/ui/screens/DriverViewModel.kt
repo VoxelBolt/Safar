@@ -67,7 +67,10 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
             }.onSuccess { (driver, routes, session) ->
                 val selected = driver?.routeId?.let { id -> routes.firstOrNull { it.id == id } }
                 _uiState.value = _uiState.value.copy(driver = driver, routes = routes, selectedRoute = selected, workSession = session, loading = false, error = null)
-                selected?.let { switchPassengerRealtime(it.id) }
+                selected?.let {
+                    switchPassengerRealtime(it.id)
+                    startVehiclePolling(it.id)
+                }
                 if (driver?.routeId != null) {
                     // Work Session and GPS tracking are independent systems. Restore
                     // the location foreground service whenever a routed driver is loaded.
