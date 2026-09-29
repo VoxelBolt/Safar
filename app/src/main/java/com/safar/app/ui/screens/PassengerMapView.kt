@@ -263,16 +263,20 @@ internal fun PassengerMapView(
                 vehicleMarkers,
             )
         }
+    }
 
-        if (passengerLocation != null && !centeredOnUser) {
-            map?.animateCamera(
-                CameraUpdateFactory.newLatLngZoom(
-                    LatLng(passengerLocation.latitude, passengerLocation.longitude),
-                    USER_FOCUS_ZOOM,
-                )
+    // Initial centering happens once, when the first usable passenger/driver
+    // location becomes available. Subsequent GPS updates must never move the
+    // camera: the user is free to pan and zoom the map.
+    LaunchedEffect(styleReady, passengerLocation) {
+        if (!styleReady || centeredOnUser || passengerLocation == null) return@LaunchedEffect
+        map?.moveCamera(
+            CameraUpdateFactory.newLatLngZoom(
+                LatLng(passengerLocation.latitude, passengerLocation.longitude),
+                USER_FOCUS_ZOOM,
             )
-            centeredOnUser = true
-        }
+        )
+        centeredOnUser = true
     }
 
     LaunchedEffect(styleReady, route?.id, stabilizedVehicleLocations) {
@@ -330,7 +334,8 @@ internal fun PassengerMapView(
         if (!styleReady || locateRequestId <= 0L) return@LaunchedEffect
 
         val target = passengerLocation ?: return@LaunchedEffect
-        map?.animateCamera(
+        map?.cancelTransitions()
+        map?.moveCamera(
             CameraUpdateFactory.newLatLngZoom(
                 LatLng(target.latitude, target.longitude),
                 USER_FOCUS_ZOOM,
