@@ -6,7 +6,8 @@
     import com.safar.app.ui.SafarApp
     import com.safar.app.ui.theme.SafarTheme
     
-    class MainActivity : ComponentActivity() {
+    // Startup verification: keep MainActivity free of backend initialization.
+class MainActivity : ComponentActivity() {
         override fun onCreate(savedInstanceState: Bundle?) {
             super.onCreate(savedInstanceState)
             setContent {
