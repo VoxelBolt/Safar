@@ -3,6 +3,7 @@ name: Safar Stage 08-09 Build
 on:
   push:
     branches:
+      - main
       - stage-08-09-favorites-profile-statistics-localization-errors
   pull_request:
     branches:
