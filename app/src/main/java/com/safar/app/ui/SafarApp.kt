@@ -13,18 +13,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.safar.app.ui.navigation.SafarNavHost
 import com.safar.app.ui.onboarding.OnboardingViewModel
 import java.util.Locale
-import androidx.activity.compose.LocalActivityResultRegistryOwner
 
 @Composable
 fun SafarApp(viewModel: OnboardingViewModel = viewModel()) {
     val state by viewModel.state.collectAsState()
 
     val baseContext = LocalContext.current
-
-    val activityResultRegistryOwner =
-        LocalActivityResultRegistryOwner.current
-            ?: error("ActivityResultRegistryOwner is unavailable")
-
     val localizedContext = remember(baseContext, state.languageTag) {
         createLocalizedContext(baseContext, state.languageTag)
     }
@@ -32,7 +26,6 @@ fun SafarApp(viewModel: OnboardingViewModel = viewModel()) {
     CompositionLocalProvider(
         LocalContext provides localizedContext,
         LocalConfiguration provides localizedContext.resources.configuration,
-        LocalActivityResultRegistryOwner provides activityResultRegistryOwner,
     ) {
         SafarNavHost(viewModel = viewModel)
     }
