@@ -18,9 +18,9 @@ import kotlinx.coroutines.launch
 
 class OnboardingViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = application.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    private val registrationRepository = AppContainer.registrationRepository
-    private val driverRepository = AppContainer.driverRepository
-    private val routeRepository = AppContainer.routeRepository
+    private val registrationRepository by lazy { AppContainer.registrationRepository }
+    private val driverRepository by lazy { AppContainer.driverRepository }
+    private val routeRepository by lazy { AppContainer.routeRepository }
 
     private val _state = MutableStateFlow(loadState())
     val state: StateFlow<OnboardingState> = _state.asStateFlow()
