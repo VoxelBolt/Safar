@@ -2,7 +2,7 @@
 <resources>
     <style name="Theme.Safar" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:windowSplashScreenBackground">@color/safar_splash_background</item>
-        <item name="android:windowSplashScreenAnimatedIcon">@drawable/safar_logo</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/safar_logo_base</item>
         <item name="android:windowSplashScreenIconBackgroundColor">@color/safar_splash_background</item>
     </style>
 </resources>
