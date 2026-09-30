@@ -382,7 +382,7 @@ fun RegistrationScreen(
 @Composable
 private fun BrandLogo(modifier: Modifier = Modifier) {
     androidx.compose.foundation.Image(
-        painter = painterResource(R.drawable.safar_logo_base),
+        painter = painterResource(R.drawable.safar_logo),
         contentDescription = stringResource(R.string.app_name),
         contentScale = ContentScale.Crop,
         modifier = modifier.clip(RoundedCornerShape(22.dp)),
