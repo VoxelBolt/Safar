@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
-    android:src="@drawable/safar_logo_base"
-    android:gravity="fill" />
+<scale xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/safar_logo"
+    android:scaleGravity="center"
+    android:scaleWidth="135%"
+    android:scaleHeight="135%" />
