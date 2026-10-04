@@ -113,18 +113,30 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             try {
                 val state = _uiState.value
 
-                // Do not wait for a fresh GPS fix here. The button must respond immediately.
-                // Use the latest passenger fix when available; otherwise use the exact map
-                // camera position reported by PassengerMapView.
-                val passenger = state.passengerLocation ?: state.mapCenterLocation
+                if (state.locationPermissionRequired) {
+                    _uiState.value = _uiState.value.copy(
+                        error = "Разрешите геолокацию, чтобы найти ближайшую маршрутку",
+                    )
+                    return@launch
+                }
+
+                // Ask Android for a fresh fix first. If the one-shot request does
+                // not return quickly, fall back to the latest continuous passenger
+                // fix. We never use the map center as the user's location here.
+                val freshPassenger = withTimeoutOrNull(3_000L) {
+                    awaitFreshPassengerLocation()
+                }
+                val passenger = freshPassenger ?: state.passengerLocation
                 android.util.Log.d(
                     "SafarNearest",
-                    "CLICK source=" + if (state.passengerLocation != null) "gps" else "map_center" +
+                    "CLICK source=" + if (freshPassenger != null) "fresh_gps" else "cached_gps" +
                         " passenger=" + passenger?.latitude + "," + passenger?.longitude,
                 )
 
                 if (passenger == null) {
-                    _uiState.value = _uiState.value.copy(error = "Не удалось определить точку карты")
+                    _uiState.value = _uiState.value.copy(
+                        error = "Не удалось получить ваше местоположение",
+                    )
                     return@launch
                 }
 
