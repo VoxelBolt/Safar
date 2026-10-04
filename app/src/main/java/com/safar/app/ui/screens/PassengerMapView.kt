@@ -146,7 +146,19 @@ internal fun PassengerMapView(
         IconFactory.getInstance(context).fromBitmap(scaled)
     }
 
-    rememberMapLibre(context)
+    val mapReady = rememberMapLibre(context)
+    if (!mapReady) {
+        Box(
+            modifier = modifier.background(SafarWhite),
+            contentAlignment = Alignment.Center,
+        ) {
+            androidx.compose.material3.Text(
+                text = "Карта временно недоступна",
+                color = SafarNavy,
+            )
+        }
+        return
+    }
 
     val mapView = remember(context) {
         MapView(context).apply { onCreate(Bundle()) }
@@ -366,10 +378,16 @@ private fun MapControlButton(symbol: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun rememberMapLibre(context: Context) {
-    remember(context.applicationContext) {
-        if (!MapLibre.hasInstance()) MapLibre.getInstance(context.applicationContext)
-        true
+private fun rememberMapLibre(context: Context): Boolean {
+    return remember(context.applicationContext) {
+        runCatching {
+            if (!MapLibre.hasInstance()) {
+                MapLibre.getInstance(context.applicationContext)
+            }
+            true
+        }.onFailure { error ->
+            Log.e("SafarMap", "MapLibre initialization failed", error)
+        }.getOrDefault(false)
     }
 }
 
