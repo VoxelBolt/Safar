@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - feat/nearest-vehicle-eta
+  pull_request:
+    branches:
+      - main
 
 jobs:
   build:
