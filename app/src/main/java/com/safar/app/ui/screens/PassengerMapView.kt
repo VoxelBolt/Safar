@@ -434,7 +434,7 @@ private fun setupMapLayers(style: Style, context: Context) {
     style.addLayer(
         CircleLayer(VEHICLES_LAYER_ID, VEHICLES_SOURCE_ID).withProperties(
             circleColor(SafarBlue.toArgb()),
-            circleRadius(7f),
+            circleRadius(8.5f),
             circleStrokeColor(Color.White.toArgb()),
             circleStrokeWidth(2.5f),
             circleOpacity(1f),
@@ -454,7 +454,7 @@ private fun setupMapLayers(style: Style, context: Context) {
         style.addLayer(
             CircleLayer(USER_LOCATION_CIRCLE_LAYER_ID, USER_LOCATION_SOURCE_ID).withProperties(
                 circleColor(SafarBlue.toArgb()),
-                circleRadius(8.5f),
+                circleRadius(7f),
                 circleStrokeColor(Color.White.toArgb()),
                 circleStrokeWidth(2.5f),
             )
