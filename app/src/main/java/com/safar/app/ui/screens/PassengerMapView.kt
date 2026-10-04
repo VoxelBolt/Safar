@@ -41,8 +41,6 @@ import com.safar.app.ui.theme.SafarNavy
 import com.safar.app.ui.theme.SafarWhite
 import kotlinx.coroutines.delay
 import org.maplibre.android.MapLibre
-import org.maplibre.android.RenderingEngine
-import org.maplibre.android.WellKnownTileServer
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
@@ -387,12 +385,7 @@ private fun rememberMapLibre(context: Context): Boolean {
                 // The combined MapLibre artifact supports both renderers.
                 // Explicit OpenGL selection avoids device-specific Vulkan
                 // driver crashes while keeping the map fully native.
-                MapLibre.getInstance(
-                    context.applicationContext,
-                    null,
-                    WellKnownTileServer.MapLibre,
-                    RenderingEngine.Type.OPENGL,
-                )
+                MapLibre.getInstance(context.applicationContext)
             }
             true
         }.onFailure { error ->
