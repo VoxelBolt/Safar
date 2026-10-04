@@ -243,9 +243,9 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
 
                     if (_uiState.value.nearestVehicleTrackingEnabled) {
                         val passenger = _uiState.value.passengerLocation
-                        val all = vehicleRepository.getAllVehicles()
+                        val all = runCatching { vehicleRepository.getAllVehicles() }.getOrNull().orEmpty()
                         val freshAll = freshVehicles(all).map { it.copy(active = true) }
-                        if (passenger != null) {
+                        if (passenger != null && freshAll.isNotEmpty()) {
                             updateNearestVehicle(passenger, freshAll, forceFocus = false)
                         }
                         android.util.Log.d(
