@@ -2,8 +2,6 @@ package com.safar.app.ui.screens
 
 import com.safar.app.R
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.PointF
 import android.os.Bundle
 import android.util.Log
@@ -49,13 +47,9 @@ import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.Style
-import org.maplibre.android.annotations.IconFactory
-import org.maplibre.android.annotations.Marker
-import org.maplibre.android.annotations.MarkerOptions
 import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.FillLayer
 import org.maplibre.android.style.layers.LineLayer
-import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.layers.PropertyFactory.circleColor
 import org.maplibre.android.style.layers.PropertyFactory.circleRadius
 import org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor
@@ -68,13 +62,6 @@ import org.maplibre.android.style.layers.PropertyFactory.lineColor
 import org.maplibre.android.style.layers.PropertyFactory.lineJoin
 import org.maplibre.android.style.layers.PropertyFactory.lineOpacity
 import org.maplibre.android.style.layers.PropertyFactory.lineWidth
-import org.maplibre.android.style.layers.PropertyFactory.textColor
-import org.maplibre.android.style.layers.PropertyFactory.textField
-import org.maplibre.android.style.layers.PropertyFactory.textHaloColor
-import org.maplibre.android.style.layers.PropertyFactory.textHaloWidth
-import org.maplibre.android.style.layers.PropertyFactory.textSize
-import org.maplibre.android.style.layers.PropertyFactory.textAllowOverlap
-import org.maplibre.android.style.layers.PropertyFactory.textIgnorePlacement
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
@@ -138,16 +125,8 @@ internal fun PassengerMapView(
     var styleReady by remember { mutableStateOf(false) }
     var centeredOnUser by remember { mutableStateOf(false) }
     var lastCameraRouteId by remember { mutableStateOf<String?>(null) }
-    val vehicleMarkers = remember { mutableMapOf<String, Marker>() }
     val vehicleLocationStabilizer = remember(route?.id) { VehicleLocationStabilizer() }
     val stabilizedVehicleLocations = vehicleLocationStabilizer.stabilize(vehicleLocations)
-    val vehicleMarkerIcon = remember(context) {
-        val bitmap = decodeVehicleMarkerBitmap(context)
-        val sizePx = 68
-        val scaled = Bitmap.createScaledBitmap(bitmap, sizePx, sizePx, true)
-        IconFactory.getInstance(context).fromBitmap(scaled)
-    }
-
     val mapReady = rememberMapLibre(context)
     if (!mapReady) {
         Box(
@@ -193,7 +172,6 @@ internal fun PassengerMapView(
                 mapView.apply {
                     getMapAsync { loadedMap ->
                         map = loadedMap
-                        syncVehicleMarkers(loadedMap, displayVehicleLocations(stabilizedVehicleLocations, nearestVehicle), vehicleMarkerIcon, vehicleMarkers)
                         loadedMap.addOnCameraIdleListener {
                             loadedMap.cameraPosition.target?.let { target ->
                                 onMapCenterChanged(GeoPoint(target.latitude, target.longitude))
@@ -228,12 +206,6 @@ internal fun PassengerMapView(
                         loadedMap.style?.let { style ->
                             updateVehicles(style, displayVehicleLocations(stabilizedVehicleLocations, nearestVehicle))
                         }
-                        syncVehicleMarkers(
-                            loadedMap,
-                            displayVehicleLocations(stabilizedVehicleLocations, nearestVehicle),
-                            vehicleMarkerIcon,
-                            vehicleMarkers,
-                        )
                     }
                 }
             },
@@ -270,12 +242,6 @@ internal fun PassengerMapView(
 
         map?.style?.let { updateVehicles(it, displayVehicleLocations(stabilizedVehicleLocations, nearestVehicle)) }
         map?.let {
-            syncVehicleMarkers(
-                it,
-                displayVehicleLocations(stabilizedVehicleLocations, nearestVehicle),
-                vehicleMarkerIcon,
-                vehicleMarkers,
-            )
         }
     }
 
@@ -443,19 +409,6 @@ private fun setupMapLayers(style: Style, context: Context) {
             )
         )
     }
-    if (style.getLayer(ROUTE_STATION_LABEL_LAYER_ID) == null) {
-        style.addLayer(
-            SymbolLayer(ROUTE_STATION_LABEL_LAYER_ID, ROUTE_STATION_SOURCE_ID).withProperties(
-                textField("СТ"),
-                textSize(9f),
-                textColor(Color.White.toArgb()),
-                textHaloColor(SafarNavy.toArgb()),
-                textHaloWidth(0.8f),
-                textAllowOverlap(true),
-                textIgnorePlacement(true),
-            )
-        )
-    }
     if (style.getLayer(USER_HEADING_LAYER_ID) == null) {
         style.addLayer(
             FillLayer(USER_HEADING_LAYER_ID, USER_HEADING_SOURCE_ID).withProperties(
@@ -475,19 +428,6 @@ private fun setupMapLayers(style: Style, context: Context) {
             circleOpacity(1f),
         )
     )
-    if (style.getLayer(VEHICLE_LABEL_LAYER_ID) == null) {
-        style.addLayer(
-            SymbolLayer(VEHICLE_LABEL_LAYER_ID, VEHICLES_SOURCE_ID).withProperties(
-                textField("{identifier}"),
-                textSize(12f),
-                textColor(Color.White.toArgb()),
-                textHaloColor(Color.Black.toArgb()),
-                textHaloWidth(1.2f),
-                textAllowOverlap(true),
-                textIgnorePlacement(true),
-            )
-        )
-    }
 
     if (style.getLayer(USER_LOCATION_PULSE_LAYER_ID) == null) {
         style.addLayer(
@@ -510,13 +450,6 @@ private fun setupMapLayers(style: Style, context: Context) {
     }
 }
 
-
-private fun decodeVehicleMarkerBitmap(context: Context): Bitmap {
-    return BitmapFactory.decodeResource(
-        context.resources,
-        R.drawable.safar_vehicle_marker,
-    )
-}
 
 private fun updateUserLocation(style: Style, point: GeoPoint?) {
     val source = style.getSourceAs<GeoJsonSource>(USER_LOCATION_SOURCE_ID) ?: return
@@ -595,37 +528,6 @@ private fun displayVehicleLocations(
 ): List<Pair<Vehicle, VehicleLocation>> {
     if (nearest == null || locations.any { it.first.id == nearest.first.id }) return locations
     return locations + nearest
-}
-
-private fun syncVehicleMarkers(
-    map: MapLibreMap,
-    locations: List<Pair<Vehicle, VehicleLocation>>,
-    icon: org.maplibre.android.annotations.Icon,
-    markers: MutableMap<String, Marker>,
-) {
-    val activeIds = locations.mapTo(mutableSetOf()) { it.first.id }
-
-    markers.keys.toList()
-        .filter { it !in activeIds }
-        .forEach { vehicleId ->
-            markers.remove(vehicleId)?.remove()
-        }
-
-    locations.forEach { (vehicle, location) ->
-        val position = LatLng(location.latitude, location.longitude)
-        val marker = markers[vehicle.id]
-        if (marker == null) {
-            markers[vehicle.id] = map.addMarker(
-                MarkerOptions()
-                    .position(position)
-                    .icon(icon)
-                    .title(vehicle.identifier)
-            )
-        } else {
-            marker.position = position
-            marker.title = vehicle.identifier
-        }
-    }
 }
 
 private fun updateVehicles(
