@@ -35,6 +35,12 @@ android {
             buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", "\"$supabasePublishableKey\"")
         }
         release {
+            check(supabaseUrl.isNotBlank()) {
+                "Release build requires SUPABASE_URL to be configured."
+            }
+            check(supabasePublishableKey.isNotBlank()) {
+                "Release build requires SUPABASE_PUBLISHABLE_KEY to be configured."
+            }
             buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
             buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", "\"$supabasePublishableKey\"")
         }
@@ -58,7 +64,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
 
     implementation("com.google.android.gms:play-services-location:21.3.0")
-    implementation("org.maplibre.gl:android-sdk:13.6.1")
+    implementation("org.maplibre.gl:android-sdk-opengl:13.6.1")
     implementation("androidx.navigation:navigation-compose:2.10.0")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
