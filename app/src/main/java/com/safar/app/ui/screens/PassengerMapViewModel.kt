@@ -128,17 +128,25 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                     return@launch
                 }
 
-                var vehicles = state.activeVehicles
-                    .filter { it.currentLocation != null }
-                if (vehicles.isEmpty()) {
-                    val routeId = state.selectedRoute?.id
-                    if (routeId != null) {
-                        vehicles = runCatching { vehicleRepository.getVehiclesForRoute(routeId) }
-                            .getOrElse { emptyList() }
-                            .filter { it.currentLocation != null && isFresh(it.currentLocation?.timestampEpochMs) }
-                            .map { it.copy(active = true) }
+                // The nearest action must consider every currently visible
+                // vehicle, not only the passenger's selected route.
+                // getAllVehicles() reads the current-state view, so only vehicles
+                // with a fresh server GPS position are eligible.
+                val vehicles = runCatching { vehicleRepository.getAllVehicles() }
+                    .getOrElse {
+                        // Network/RLS fallback: at least keep the selected route usable.
+                        val routeId = state.selectedRoute?.id
+                        if (routeId == null) emptyList()
+                        else runCatching { vehicleRepository.getVehiclesForRoute(routeId) }.getOrDefault(emptyList())
                     }
-                }
+                    .filter { vehicle ->
+                        val location = vehicle.currentLocation
+                        location != null &&
+                            location.latitude.isFinite() &&
+                            location.longitude.isFinite() &&
+                            isFresh(location.timestampEpochMs)
+                    }
+                    .map { it.copy(active = true) }
 
                 android.util.Log.d(
                     "SafarNearest",
@@ -366,15 +374,27 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     private fun startEtaRefresh() {
         viewModelScope.launch {
             while (isActive) {
-                delay(60_000L)
+                delay(10_000L)
                 val state = _uiState.value
+                if (!state.nearestVehicleTrackingEnabled) continue
                 val passenger = state.passengerLocation ?: state.mapCenterLocation ?: continue
-                val result = NearestVehicleCalculator.findNearest(passenger, state.activeVehicles)
-                _uiState.value = state.copy(
-                    nearestVehicle = result?.vehicle,
-                    nearestVehicleDistanceMeters = result?.distanceMeters,
-                    nearestVehicleEtaMinutes = result?.etaMinutes,
-                )
+
+                // Re-read all current vehicle positions so the selected nearest
+                // vehicle can change as vehicles move. This is intentionally
+                // independent from the selected route.
+                val allVehicles = runCatching { vehicleRepository.getAllVehicles() }
+                    .getOrDefault(emptyList())
+                    .filter { vehicle ->
+                        val location = vehicle.currentLocation
+                        location != null &&
+                            location.latitude.isFinite() &&
+                            location.longitude.isFinite() &&
+                            isFresh(location.timestampEpochMs)
+                    }
+                    .map { it.copy(active = true) }
+
+                if (allVehicles.isEmpty()) continue
+                updateNearestVehicle(passenger, allVehicles)
             }
         }
     }
