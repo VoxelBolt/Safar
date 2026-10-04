@@ -216,6 +216,7 @@ private fun PassengerMapScreen(
                 locationPermissionGranted = !ui.locationPermissionRequired,
                 locateRequestId = ui.locateRequestId,
                 onLocateUser = viewModel::refreshPassengerLocation,
+                onShowNearestVehicle = viewModel::showNearestVehicleOnMap,
                 onMapCenterChanged = viewModel::onMapCenterChanged,
                 nearestVehicle = ui.nearestVehicle?.let { vehicle ->
                     vehicle.currentLocation?.let { location -> vehicle to location }
