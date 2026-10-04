@@ -41,6 +41,8 @@ import com.safar.app.ui.theme.SafarNavy
 import com.safar.app.ui.theme.SafarWhite
 import kotlinx.coroutines.delay
 import org.maplibre.android.MapLibre
+import org.maplibre.android.RenderingEngine
+import org.maplibre.android.WellKnownTileServer
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
@@ -382,10 +384,16 @@ private fun rememberMapLibre(context: Context): Boolean {
     return remember(context.applicationContext) {
         runCatching {
             if (!MapLibre.hasInstance()) {
-                // The combined MapLibre artifact supports both renderers.
-                // Explicit OpenGL selection avoids device-specific Vulkan
-                // driver crashes while keeping the map fully native.
-                MapLibre.getInstance(context.applicationContext)
+                // Force MapLibre to use OpenGL. Some physical Android devices
+                // (especially vendor-specific GPU drivers) can crash in the native
+                // renderer when the library is allowed to select Vulkan automatically.
+                // The emulator may not reproduce that native crash.
+                MapLibre.getInstance(
+                    context.applicationContext,
+                    null,
+                    WellKnownTileServer.MapLibre,
+                    RenderingEngine.Type.OPENGL,
+                )
             }
             true
         }.onFailure { error ->
