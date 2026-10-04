@@ -14,7 +14,10 @@ import com.safar.app.domain.model.UserRole
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 
 class OnboardingViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = application.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -50,7 +53,11 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
         if (_state.value.routesLoading) return
         viewModelScope.launch {
             update { copy(routesLoading = true, routesError = false) }
-            runCatching { routeRepository.getRoutes() }
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    withTimeout(BACKEND_TIMEOUT_MS) { routeRepository.getRoutes() }
+                }
+            }
                 .map { routes ->
                     val preferredNumbers = listOf("3", "8", "15")
                     val preferred = preferredNumbers.mapNotNull { number ->
@@ -104,27 +111,31 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
 
         viewModelScope.launch {
             runCatching {
-                // The repository is the single registration path. It establishes
-                // an authenticated anonymous session before calling the RPC.
-                when (current.role) {
-                    UserRole.PASSENGER -> registrationRepository.registerPassenger(
-                        name = current.name.trim(),
-                        phone = current.phone.trim(),
-                    )
+                // Keep all Supabase/Auth/PostgREST work off the Android main
+                // thread. Physical devices can initialize Ktor/Auth much slower
+                // than an emulator, which can otherwise trigger an ANR.
+                withContext(Dispatchers.IO) {
+                    withTimeout(BACKEND_TIMEOUT_MS) {
+                        when (current.role) {
+                            UserRole.PASSENGER -> registrationRepository.registerPassenger(
+                                name = current.name.trim(),
+                                phone = current.phone.trim(),
+                            )
 
-                    UserRole.DRIVER -> {
-                        val routeId = requireNotNull(current.selectedRouteId) {
-                            "Route must be selected"
+                            UserRole.DRIVER -> {
+                                val routeId = requireNotNull(current.selectedRouteId) {
+                                    "Route must be selected"
+                                }
+                                driverRepository.registerDriver(
+                                    name = current.name.trim(),
+                                    phone = current.phone.trim(),
+                                    vehicleIdentifier = current.vehicleIdentifier.trim(),
+                                )
+                                driverRepository.assignRoute(routeId)
+                            }
                         }
-                        driverRepository.registerDriver(
-                            name = current.name.trim(),
-                            phone = current.phone.trim(),
-                            vehicleIdentifier = current.vehicleIdentifier.trim(),
-                        )
-                        driverRepository.assignRoute(routeId)
                     }
                 }
-
             }.onFailure { error ->
                 val message = registrationErrorMessage(error)
                 update {
@@ -178,7 +189,11 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
 
     fun logout() {
         viewModelScope.launch {
-            runCatching { AppContainer.userRepository.signOut() }
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    withTimeout(BACKEND_TIMEOUT_MS) { AppContainer.userRepository.signOut() }
+                }
+            }
             AppContainer.realtimeTransport.disconnect()
             runCatching { DriverLocationService.stop(getApplication()) }
             preferences.edit().clear().apply()
@@ -234,5 +249,6 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
         const val KEY_VEHICLE = "vehicle_identifier"
         const val KEY_ROUTE_ID = "route_id"
         const val KEY_COMPLETED = "completed"
+        const val BACKEND_TIMEOUT_MS = 20_000L
     }
 }
