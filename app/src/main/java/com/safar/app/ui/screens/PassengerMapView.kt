@@ -100,6 +100,7 @@ internal fun PassengerMapView(
     vehicleLocations: List<Pair<Vehicle, VehicleLocation>>,
     passengerLocations: List<PassengerLocation> = emptyList(),
     onLocateUser: () -> Unit = {},
+    onShowNearestVehicle: () -> Unit = {},
     nearestVehicle: Pair<Vehicle, VehicleLocation>? = null,
     nearestVehicleRequestId: Long = 0L,
     routeOpacity: Float = 0.78f,
@@ -219,6 +220,11 @@ internal fun PassengerMapView(
             MapControlButton("⌖") {
                 onLocateUser()
             }
+            Spacer(Modifier.size(8.dp))
+            MapControlGlyphButton {
+                onShowNearestVehicle()
+            }
+            Spacer(Modifier.size(8.dp))
             MapControlButton("+") {
                 map?.animateCamera(CameraUpdateFactory.zoomIn())
             }
@@ -323,6 +329,19 @@ internal fun PassengerMapView(
             )
         )
         centeredOnUser = true
+    }
+}
+
+@Composable
+private fun MapControlGlyphButton(onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(46.dp)
+            .background(SafarWhite, androidx.compose.foundation.shape.CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        SafarGlyph(Glyph.BUS, SafarBlue, 22.dp)
     }
 }
 
@@ -435,7 +454,7 @@ private fun setupMapLayers(style: Style, context: Context) {
         style.addLayer(
             CircleLayer(USER_LOCATION_CIRCLE_LAYER_ID, USER_LOCATION_SOURCE_ID).withProperties(
                 circleColor(SafarBlue.toArgb()),
-                circleRadius(7f),
+                circleRadius(8.5f),
                 circleStrokeColor(Color.White.toArgb()),
                 circleStrokeWidth(2.5f),
             )
