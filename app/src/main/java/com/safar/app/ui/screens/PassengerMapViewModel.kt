@@ -156,7 +156,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         nearestVehicleEtaRefreshJob?.cancel()
         nearestVehicleEtaRefreshJob = viewModelScope.launch {
             while (isActive && _uiState.value.nearestVehicleTrackingEnabled) {
-                delay(60_000L)
+                delay(10_000L)
 
                 val passenger = _uiState.value.passengerLocation ?: continue
                 val vehicles = loadAllFreshVehicles()
@@ -237,16 +237,21 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         vehicleLocationPollingJob = viewModelScope.launch {
             while (isActive && _uiState.value.selectedRoute?.id == routeId) {
                 runCatching {
+                    val vehicles = vehicleRepository.getVehiclesForRoute(routeId)
+                    val active = freshVehicles(vehicles).map { it.copy(active = true) }
+                    _uiState.value = _uiState.value.copy(activeVehicles = active, error = null)
+
                     if (_uiState.value.nearestVehicleTrackingEnabled) {
+                        val passenger = _uiState.value.passengerLocation
                         val all = vehicleRepository.getAllVehicles()
                         val freshAll = freshVehicles(all).map { it.copy(active = true) }
-                        val routeActive = freshAll.filter { it.routeId == routeId }
-                        _uiState.value = _uiState.value.copy(activeVehicles = routeActive, error = null)
-                        android.util.Log.d("SafarNearestVehicle", "poll all=" + freshAll.size + " selectedRoute=" + routeActive.size)
-                    } else {
-                        val vehicles = vehicleRepository.getVehiclesForRoute(routeId)
-                        val active = freshVehicles(vehicles).map { it.copy(active = true) }
-                        _uiState.value = _uiState.value.copy(activeVehicles = active, error = null)
+                        if (passenger != null) {
+                            updateNearestVehicle(passenger, freshAll, forceFocus = false)
+                        }
+                        android.util.Log.d(
+                            "SafarNearestVehicle",
+                            "poll all=${freshAll.size} selectedRoute=${active.size} nearest=${_uiState.value.nearestVehicle?.identifier}",
+                        )
                     }
                 }
                 delay(10_000L)
@@ -377,6 +382,10 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             try {
                 locationProvider.locations().collectLatest { point ->
                     _uiState.value = _uiState.value.copy(passengerLocation = point)
+                    if (_uiState.value.nearestVehicleTrackingEnabled) {
+                        val candidates = _uiState.value.activeVehicles + listOfNotNull(_uiState.value.nearestVehicle)
+                        updateNearestVehicle(point, candidates, forceFocus = false)
+                    }
                 }
             } catch (error: CancellationException) {
                 throw error
