@@ -21,7 +21,10 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import java.time.Instant
 
 data class DriverUiState(
@@ -60,10 +63,14 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(loading = true, error = null)
             runCatching {
-                val driver = driverRepository.getDriver()
-                val routes = routeRepository.getRoutes().sortedBy { it.number }
-                val session = workSessionRepository.getCurrent()
-                Triple(driver, routes, session)
+                withContext(Dispatchers.IO) {
+                    withTimeout(BACKEND_TIMEOUT_MS) {
+                        val driver = driverRepository.getDriver()
+                        val routes = routeRepository.getRoutes().sortedBy { it.number }
+                        val session = workSessionRepository.getCurrent()
+                        Triple(driver, routes, session)
+                    }
+                }
             }.onSuccess { (driver, routes, session) ->
                 val selected = driver?.routeId?.let { id -> routes.firstOrNull { it.id == id } }
                 _uiState.value = _uiState.value.copy(driver = driver, routes = routes, selectedRoute = selected, workSession = session, loading = false, error = null)
@@ -87,7 +94,11 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
         if (ui.actionInProgress || ui.workSession?.status == WorkSessionStatus.ACTIVE || ui.workSession?.status == WorkSessionStatus.PAUSED) return
         viewModelScope.launch {
             _uiState.value = ui.copy(actionInProgress = true, error = null)
-            runCatching { driverRepository.assignRoute(route.id) }
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    withTimeout(BACKEND_TIMEOUT_MS) { driverRepository.assignRoute(route.id) }
+                }
+            }
                 .onSuccess { driver ->
                     _uiState.value = _uiState.value.copy(driver = driver, selectedRoute = route, passengerLocations = emptyList(), activeVehicles = emptyList(), actionInProgress = false, error = null)
                     startVehiclePolling(route.id)
@@ -104,7 +115,11 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
         vehiclePollingJob?.cancel()
         vehiclePollingJob = viewModelScope.launch {
             while (isActive && _uiState.value.selectedRoute?.id == routeId) {
-                runCatching { vehicleRepository.getVehiclesForRoute(routeId) }
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        withTimeout(BACKEND_TIMEOUT_MS) { vehicleRepository.getVehiclesForRoute(routeId) }
+                    }
+                }
                     .onSuccess { vehicles ->
                         val active = vehicles
                             .filter { it.active && isFresh(it.currentLocation?.timestampEpochMs) && it.currentLocation != null }
@@ -176,11 +191,15 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
         if (ui.driver?.routeId == null) return
         viewModelScope.launch {
             runCatching {
-                AppContainer.driverLocationRepository.submitLocation(
-                    latitude = point.latitude,
-                    longitude = point.longitude,
-                    recordedAtIso = Instant.now().toString(),
-                )
+                withContext(Dispatchers.IO) {
+                    withTimeout(BACKEND_TIMEOUT_MS) {
+                        AppContainer.driverLocationRepository.submitLocation(
+                            latitude = point.latitude,
+                            longitude = point.longitude,
+                            recordedAtIso = Instant.now().toString(),
+                        )
+                    }
+                }
             }.onFailure { error ->
                 android.util.Log.w("SafarDriverGPS", "Foreground screen GPS publish failed", error)
             }
@@ -194,7 +213,11 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
         if (ui.workSession?.status == WorkSessionStatus.ACTIVE || ui.workSession?.status == WorkSessionStatus.PAUSED) { _uiState.value = ui.copy(error = "Текущая рабочая сессия уже существует"); return }
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(actionInProgress = true, error = null)
-            runCatching { workSessionRepository.start() }.onSuccess { session ->
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    withTimeout(BACKEND_TIMEOUT_MS) { workSessionRepository.start() }
+                }
+            }.onSuccess { session ->
                 _uiState.value = _uiState.value.copy(workSession = session, actionInProgress = false, error = null)
                 if (session.status == WorkSessionStatus.ACTIVE) {
                     runCatching { DriverLocationService.start(getApplication()) }
@@ -212,7 +235,11 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
         if (pausedAt != null && System.currentTimeMillis() - pausedAt > SIX_HOURS_MS) {
             viewModelScope.launch {
                 _uiState.value = _uiState.value.copy(actionInProgress = true, error = null)
-                runCatching { workSessionRepository.finish(session.id) }.onSuccess {
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        withTimeout(BACKEND_TIMEOUT_MS) { workSessionRepository.finish(session.id) }
+                    }
+                }.onSuccess {
                     _uiState.value = _uiState.value.copy(workSession = null, actionInProgress = false, error = "Предыдущая сессия завершена после 6 часов паузы. Начните новую сессию.")
                 }.onFailure { error -> _uiState.value = _uiState.value.copy(actionInProgress = false, error = error.userMessage()) }
             }
@@ -227,7 +254,11 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
         if (session == null) { _uiState.value = _uiState.value.copy(error = "Текущей рабочей сессии нет"); return }
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(actionInProgress = true, error = null)
-            runCatching { action(session.id) }.onSuccess { updatedSession ->
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    withTimeout(BACKEND_TIMEOUT_MS) { action(session.id) }
+                }
+            }.onSuccess { updatedSession ->
                 _uiState.value = _uiState.value.copy(workSession = updatedSession, actionInProgress = false, error = null)
                 // Never stop GPS when the Work Session changes. Tracking is owned
                 // by DriverLocationService and continues independently.
@@ -235,7 +266,11 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
                     runCatching { DriverLocationService.start(getApplication()) }
                 }
             }.onFailure { error ->
-                val refreshed = runCatching { workSessionRepository.getCurrent() }.getOrNull()
+                val refreshed = runCatching {
+                    withContext(Dispatchers.IO) {
+                        withTimeout(BACKEND_TIMEOUT_MS) { workSessionRepository.getCurrent() }
+                    }
+                }.getOrNull()
                 _uiState.value = _uiState.value.copy(workSession = refreshed, actionInProgress = false, error = error.userMessage())
                 if (_uiState.value.driver?.routeId != null) {
                     runCatching { DriverLocationService.start(getApplication()) }
@@ -259,5 +294,6 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
         const val LOCATION_FRESHNESS_MS = 60_000L
         const val PASSENGER_STALE_SWEEP_INTERVAL_MS = 5_000L
         const val VEHICLE_POLL_INTERVAL_MS = 10_000L
+        const val BACKEND_TIMEOUT_MS = 20_000L
     }
 }
