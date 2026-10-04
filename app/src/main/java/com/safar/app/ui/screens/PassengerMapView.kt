@@ -230,7 +230,7 @@ internal fun PassengerMapView(
                 onLocateUser()
             }
             Spacer(Modifier.size(8.dp))
-            MapControlButton("🚍") {
+            MapControlGlyphButton {
                 onShowNearestVehicle()
             }
             Spacer(Modifier.size(8.dp))
@@ -321,6 +321,19 @@ internal fun PassengerMapView(
             )
         )
         centeredOnUser = true
+    }
+}
+
+@Composable
+private fun MapControlGlyphButton(onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(46.dp)
+            .background(SafarWhite, androidx.compose.foundation.shape.CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        SafarGlyph(Glyph.BUS, SafarBlue, 22.dp)
     }
 }
 
