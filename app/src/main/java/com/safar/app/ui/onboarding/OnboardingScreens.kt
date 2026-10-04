@@ -41,13 +41,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
-import android.widget.ImageView
 import com.safar.app.R
 import com.safar.app.domain.model.Route
 import com.safar.app.domain.model.UserRole
@@ -382,20 +382,10 @@ fun RegistrationScreen(
 
 @Composable
 private fun BrandLogo(modifier: Modifier = Modifier) {
-    // Use the platform ImageView for bundled raster assets.
-    // This avoids a device-specific Jetpack Compose painterResource crash
-    // that can occur on some physical devices while decoding drawable assets.
-    AndroidView(
-        factory = { context ->
-            ImageView(context).apply {
-                scaleType = ImageView.ScaleType.CENTER_CROP
-                setImageResource(R.drawable.safar_logo_base)
-                contentDescription = context.getString(R.string.app_name)
-            }
-        },
-        update = { imageView ->
-            imageView.setImageResource(R.drawable.safar_logo_base)
-        },
+    Image(
+        painter = painterResource(R.drawable.safar_logo_base),
+        contentDescription = stringResource(R.string.app_name),
+        contentScale = ContentScale.Crop,
         modifier = modifier.clip(RoundedCornerShape(22.dp)),
     )
 }
@@ -480,23 +470,13 @@ private fun RoleCard(
                 .padding(horizontal = 18.dp, vertical = 20.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            AndroidView(
-                factory = { context ->
-                    ImageView(context).apply {
-                        scaleType = ImageView.ScaleType.CENTER_CROP
-                        setImageResource(
-                            if (role == UserRole.PASSENGER) R.drawable.passenger_illustration
-                            else R.drawable.driver_illustration,
-                        )
-                        contentDescription = title
-                    }
-                },
-                update = { imageView ->
-                    imageView.setImageResource(
-                        if (role == UserRole.PASSENGER) R.drawable.passenger_illustration
-                        else R.drawable.driver_illustration,
-                    )
-                },
+            Image(
+                painter = painterResource(
+                    if (role == UserRole.PASSENGER) R.drawable.passenger_illustration
+                    else R.drawable.driver_illustration,
+                ),
+                contentDescription = title,
+                contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .size(58.dp)
                     .clip(CircleShape),
