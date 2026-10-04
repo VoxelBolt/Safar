@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.Safar" parent="android:style/Theme.Material.Light.NoActionBar">
+        <!-- Keep Android 12+ startup completely native and decoder-independent.
+             The Safar logo is rendered by Compose after MainActivity starts. -->
         <item name="android:windowSplashScreenBackground">@color/safar_splash_background</item>
-        <item name="android:windowSplashScreenAnimatedIcon">@drawable/safar_logo_base</item>
-        <item name="android:windowSplashScreenIconBackgroundColor">@color/safar_splash_background</item>
     </style>
 </resources>
