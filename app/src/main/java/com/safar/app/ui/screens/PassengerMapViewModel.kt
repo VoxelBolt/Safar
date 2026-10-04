@@ -216,9 +216,8 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         _uiState.value = state.copy(mapCenterLocation = point)
         // The map center is the fallback passenger reference whenever Android has
         // no usable GPS fix. Recalculate immediately so ETA is always available.
-        if (state.passengerLocation == null && state.nearestVehicleTrackingEnabled) {
-            updateNearestVehicle(point, state.activeVehicles)
-        }
+        // Map panning must not redefine the passenger's GPS position.
+        // Nearest-vehicle calculations use real passengerLocation only.
     }
 
     fun selectRoute(route: Route) {
@@ -262,7 +261,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                         loadingVehicles = false,
                     )
                     if (_uiState.value.nearestVehicleTrackingEnabled) {
-                        (_uiState.value.passengerLocation ?: _uiState.value.mapCenterLocation)?.let { updateNearestVehicle(it, fresh) }
+                        _uiState.value.passengerLocation?.let { updateNearestVehicle(it, fresh) }
                     }
                 }
                 .onFailure { error ->
@@ -283,7 +282,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                         val active = freshVehicles(vehicles).map { it.copy(active = true) }
                         _uiState.value = _uiState.value.copy(activeVehicles = active, error = null)
                         if (_uiState.value.nearestVehicleTrackingEnabled) {
-                            (_uiState.value.passengerLocation ?: _uiState.value.mapCenterLocation)?.let { updateNearestVehicle(it, active) }
+                            _uiState.value.passengerLocation?.let { updateNearestVehicle(it, active) }
                         }
                         android.util.Log.d(
                             "SafarVehicle",
@@ -323,7 +322,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             val active = _uiState.value.activeVehicles.filter { it.id != vehicleId }
             _uiState.value = _uiState.value.copy(activeVehicles = active)
             if (_uiState.value.nearestVehicleTrackingEnabled) {
-                (_uiState.value.passengerLocation ?: _uiState.value.mapCenterLocation)?.let { updateNearestVehicle(it, active) }
+                _uiState.value.passengerLocation?.let { updateNearestVehicle(it, active) }
             }
             return
         }
@@ -389,7 +388,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                 delay(10_000L)
                 val state = _uiState.value
                 if (!state.nearestVehicleTrackingEnabled) continue
-                val passenger = state.passengerLocation ?: state.mapCenterLocation ?: continue
+                val passenger = state.passengerLocation ?: continue
 
                 // Re-read all current vehicle positions so the selected nearest
                 // vehicle can change as vehicles move. This is intentionally
