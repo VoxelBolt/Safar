@@ -44,6 +44,7 @@ import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.maps.MapLibreMapOptions
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.FillLayer
@@ -139,7 +140,15 @@ internal fun PassengerMapView(
         return
     }
 
-    val mapView = remember(context) { MapView(context) }
+    val mapView = remember(context) {
+        // Compose hosts MapView inside an AndroidView. Use MapLibre's TextureView
+        // renderer explicitly here. This avoids the GLSurfaceView render-thread
+        // path that can hard-crash some physical Android/Samsung devices even
+        // though the same APK works on an emulator.
+        val options = MapLibreMapOptions.createFromAttributes(context)
+            .textureMode(true)
+        MapView(context, options)
+    }
 
     DisposableEffect(lifecycleOwner, mapView) {
         var started = false
