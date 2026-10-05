@@ -139,27 +139,85 @@ internal fun PassengerMapView(
         return
     }
 
-    val mapView = remember(context) {
-        MapView(context).apply { onCreate(Bundle()) }
-    }
+    val mapView = remember(context) { MapView(context) }
 
     DisposableEffect(lifecycleOwner, mapView) {
+        var started = false
+        var resumed = false
+
+        fun syncLifecycle() {
+            // MapLibre's native renderer must not be started before the MapView
+            // is attached to a window. Starting it too early can produce a
+            // device-specific native render-thread crash on some physical phones.
+            if (!mapView.isAttachedToWindow) return
+            val state = lifecycleOwner.lifecycle.currentState
+            if (state.isAtLeast(Lifecycle.State.STARTED) && !started) {
+                mapView.onStart()
+                started = true
+            }
+            if (state.isAtLeast(Lifecycle.State.RESUMED) && !resumed) {
+                mapView.onResume()
+                resumed = true
+            }
+        }
+
+        val attachListener = object : android.view.View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: android.view.View) {
+                syncLifecycle()
+            }
+
+            override fun onViewDetachedFromWindow(v: android.view.View) {
+                if (resumed) {
+                    mapView.onPause()
+                    resumed = false
+                }
+                if (started) {
+                    mapView.onStop()
+                    started = false
+                }
+            }
+        }
+
         val observer = LifecycleEventObserver { _, event ->
+            if (!mapView.isAttachedToWindow) return@LifecycleEventObserver
             when (event) {
-                Lifecycle.Event.ON_START -> mapView.onStart()
-                Lifecycle.Event.ON_RESUME -> mapView.onResume()
-                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
-                Lifecycle.Event.ON_STOP -> mapView.onStop()
+                Lifecycle.Event.ON_START -> {
+                    if (!started) {
+                        mapView.onStart()
+                        started = true
+                    }
+                }
+                Lifecycle.Event.ON_RESUME -> {
+                    if (!resumed) {
+                        mapView.onResume()
+                        resumed = true
+                    }
+                }
+                Lifecycle.Event.ON_PAUSE -> {
+                    if (resumed) {
+                        mapView.onPause()
+                        resumed = false
+                    }
+                }
+                Lifecycle.Event.ON_STOP -> {
+                    if (started) {
+                        mapView.onStop()
+                        started = false
+                    }
+                }
                 else -> Unit
             }
         }
+
+        mapView.addOnAttachStateChangeListener(attachListener)
         lifecycleOwner.lifecycle.addObserver(observer)
-        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) mapView.onStart()
-        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) mapView.onResume()
+        syncLifecycle()
+
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            mapView.onPause()
-            mapView.onStop()
+            mapView.removeOnAttachStateChangeListener(attachListener)
+            if (resumed) mapView.onPause()
+            if (started) mapView.onStop()
             mapView.onDestroy()
         }
     }
