@@ -213,6 +213,26 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     private fun loadState(): OnboardingState {
+        // A previous development build could leave completed=true in
+        // SharedPreferences. On a real device that can immediately route into
+        // the map screen during the first launch of a new APK, before the user
+        // can even reach onboarding. Reset the old onboarding state once when
+        // this state format changes. This is intentionally local-only and does
+        // not touch Supabase data.
+        val storedVersion = preferences.getInt(KEY_STATE_VERSION, 0)
+        if (storedVersion < ONBOARDING_STATE_VERSION) {
+            preferences.edit()
+                .remove(KEY_ROLE)
+                .remove(KEY_NAME)
+                .remove(KEY_PHONE)
+                .remove(KEY_VEHICLE)
+                .remove(KEY_ROUTE_ID)
+                .remove(KEY_COMPLETED)
+                .putInt(KEY_STATE_VERSION, ONBOARDING_STATE_VERSION)
+                .apply()
+            return OnboardingState()
+        }
+
         val role = preferences.getString(KEY_ROLE, null)?.let { value ->
             runCatching { UserRole.valueOf(value) }.getOrNull()
         }
@@ -249,6 +269,8 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
         const val KEY_VEHICLE = "vehicle_identifier"
         const val KEY_ROUTE_ID = "route_id"
         const val KEY_COMPLETED = "completed"
+        const val KEY_STATE_VERSION = "onboarding_state_version"
+        const val ONBOARDING_STATE_VERSION = 1
         const val BACKEND_TIMEOUT_MS = 20_000L
     }
 }
