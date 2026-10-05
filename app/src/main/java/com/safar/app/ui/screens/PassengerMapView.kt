@@ -179,8 +179,8 @@ internal fun PassengerMapView(
         }
 
         val observer = LifecycleEventObserver { _, event ->
-            if (!mapView.isAttachedToWindow) return@LifecycleEventObserver
-            when (event) {
+            if (mapView.isAttachedToWindow) {
+                when (event) {
                 Lifecycle.Event.ON_START -> {
                     if (!started) {
                         mapView.onStart()
@@ -205,7 +205,8 @@ internal fun PassengerMapView(
                         started = false
                     }
                 }
-                else -> Unit
+                    else -> Unit
+                }
             }
         }
 
