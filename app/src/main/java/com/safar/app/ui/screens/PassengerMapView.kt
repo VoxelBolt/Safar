@@ -226,6 +226,10 @@ internal fun PassengerMapView(
         AndroidView(
             factory = {
                 mapView.apply {
+                    // Create the MapView lifecycle only after Compose has created
+                    // the view instance. Lifecycle start/resume is handled below
+                    // after the view is actually attached to the window.
+                    onCreate(Bundle())
                     getMapAsync { loadedMap ->
                         map = loadedMap
                         loadedMap.addOnCameraIdleListener {
