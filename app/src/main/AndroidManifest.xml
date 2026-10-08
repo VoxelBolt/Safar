@@ -10,6 +10,7 @@
 
     <application
         android:allowBackup="false"
+        android:pageSizeCompat="enabled"
         android:label="Safar"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
