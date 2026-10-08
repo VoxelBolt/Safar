@@ -20,8 +20,8 @@ android {
         applicationId = "com.safar.app"
         minSdk = 26
         targetSdk = 37
-        versionCode = 6
-        versionName = "0.1.5"
+        versionCode = 7
+        versionName = "0.1.6"
     }
 
     buildFeatures {
@@ -64,7 +64,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
 
     implementation("com.google.android.gms:play-services-location:21.3.0")
-    implementation("org.maplibre.gl:android-sdk-opengl:13.6.1")
+    implementation("org.maplibre.gl:android-sdk-vulkan-opengl:13.6.1")
     implementation("androidx.navigation:navigation-compose:2.10.0")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
