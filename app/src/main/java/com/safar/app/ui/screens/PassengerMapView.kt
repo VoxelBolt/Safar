@@ -141,13 +141,12 @@ internal fun PassengerMapView(
     }
 
     val mapView = remember(context) {
-        // Compose hosts MapView inside an AndroidView. TextureView keeps the
-        // MapView lifecycle isolated from the Compose surface. The MapLibre
-        // dependency is the multi-backend artifact, so the native renderer can
-        // choose Vulkan or OpenGL at runtime instead of forcing one GPU path.
-        val options = MapLibreMapOptions.createFromAttributes(context)
-            .textureMode(true)
-        MapView(context, options)
+        // Use the OpenGL-only MapLibre artifact on physical devices.
+        // The multi-backend artifact defaults to Vulkan in MapLibre 13.x, and
+        // Vulkan has known device-specific native crashes. The OpenGL artifact
+        // keeps the map on the stable renderer path.
+        MapLibre.getInstance(context.applicationContext)
+        MapView(context)
     }
 
     DisposableEffect(lifecycleOwner, mapView) {
@@ -420,9 +419,7 @@ private fun rememberMapLibre(context: Context): Boolean {
     return remember(context.applicationContext) {
         runCatching {
             if (!MapLibre.hasInstance()) {
-                // Use MapLibre's automatic renderer selection. The app packages
-                // both Vulkan and OpenGL backends and MapLibre selects the
-                // compatible renderer for the physical device.
+                MapLibre.getInstance(context.applicationContext)
             }
             true
         }.onFailure { error ->
