@@ -2,6 +2,8 @@ package com.safar.app.ui
 
 import android.content.Context
 import android.content.res.Configuration
+import androidx.activity.compose.LocalActivityResultRegistryOwner
+import androidx.activity.result.ActivityResultRegistryOwner
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -23,9 +25,17 @@ fun SafarApp(viewModel: OnboardingViewModel = viewModel()) {
         createLocalizedContext(baseContext, state.languageTag)
     }
 
+    // The localized Context is not the Activity itself. Activity Compose normally
+    // discovers ActivityResultRegistryOwner through LocalContext, so replacing
+    // LocalContext can break rememberLauncherForActivityResult() on real devices.
+    // Keep the real ActivityResultRegistryOwner explicitly available.
+    val activityResultRegistryOwner = baseContext as? ActivityResultRegistryOwner
+        ?: error("SafarApp must be hosted by an ActivityResultRegistryOwner")
+
     CompositionLocalProvider(
         LocalContext provides localizedContext,
         LocalConfiguration provides localizedContext.resources.configuration,
+        LocalActivityResultRegistryOwner provides activityResultRegistryOwner,
     ) {
         SafarNavHost(viewModel = viewModel)
     }
