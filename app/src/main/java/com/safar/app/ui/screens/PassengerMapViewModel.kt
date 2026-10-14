@@ -84,14 +84,16 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             _uiState.value = _uiState.value.copy(loadingRoutes = true, error = null)
             runCatching { routeRepository.getRoutes().sortedBy { it.number } }
                 .onSuccess { routes ->
+                    // Keep route selection explicit: loading the route list must not
+                    // silently select the first route (previously route 15 could be
+                    // selected automatically when it happened to be first).
                     val selected = _uiState.value.selectedRoute?.let { old -> routes.firstOrNull { it.id == old.id } }
-                    val effective = selected ?: routes.firstOrNull()
                     _uiState.value = _uiState.value.copy(
                         routes = routes,
-                        selectedRoute = effective,
+                        selectedRoute = selected,
                         loadingRoutes = false,
                     )
-                    effective?.let {
+                    selected?.let {
                         loadVehicles(it)
                         startVehicleLocationPolling(it.id)
                         switchRealtime(it.id)
