@@ -13,12 +13,12 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.safar.app.R
 import com.safar.app.di.AppContainer
 import kotlinx.coroutines.delay
-import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.CoroutineScope
@@ -38,7 +38,7 @@ class DriverLocationService : Service() {
     private lateinit var connectivityManager: ConnectivityManager
     private var publishingJob: Job? = null
     private var locationStreamJob: Job? = null
-    private val lastPublishedLocationTimestamp = AtomicLong(0L)
+    private val locationPublishThrottle = LocationPublishThrottle(MIN_PUBLISH_INTERVAL_MS)
     private val driverSnapshot = AtomicReference<com.safar.app.domain.model.Driver?>(null)
     @Volatile private var driverSnapshotLoadedAt = 0L
     @Volatile private var networkAvailable = false
@@ -185,13 +185,9 @@ class DriverLocationService : Service() {
 
     private suspend fun publishLocationSample(sample: LocationSample) {
         val timestampEpochMs = sample.timestampEpochMs
-        if (timestampEpochMs <= 0L) return
-
-        // Never move the server heartbeat backwards if Android gives us a cached
-        // location after a newer sample has already been published.
-        val previous = lastPublishedLocationTimestamp.get()
-        if (timestampEpochMs <= previous) return
-        if (!lastPublishedLocationTimestamp.compareAndSet(previous, timestampEpochMs)) return
+        // GPS, network-provider, and fused fixes can arrive close together.
+        // Limit backend writes to one fresh coordinate every five seconds.
+        if (!locationPublishThrottle.shouldPublish(timestampEpochMs, SystemClock.elapsedRealtime())) return
 
         val recordedAtIso = Instant.ofEpochMilli(timestampEpochMs).toString()
         publishDriverSample(sample.point.latitude, sample.point.longitude, recordedAtIso)
@@ -216,11 +212,7 @@ class DriverLocationService : Service() {
             recordedAtIso = timestamp,
         )
 
-        android.util.Log.d(
-            TAG,
-            "Vehicle location saved: vehicle=${driver.vehicleId} route=$routeId " +
-                "lat=$latitude lon=$longitude recordedAt=$timestamp",
-        )
+        android.util.Log.d(TAG, "Vehicle location saved: vehicle=${driver.vehicleId} route=$routeId")
 
         updateNotification("Геопозиция передаётся пассажирам")
     }
@@ -276,7 +268,8 @@ class DriverLocationService : Service() {
         private const val NOTIFICATION_ID = 1001
         private const val ACTION_STOP = "com.safar.app.STOP_DRIVER_LOCATION"
         private const val DRIVER_REFRESH_MS = 30_000L
-        private const val PUBLISH_INTERVAL_MS = 10_000L
+        private const val PUBLISH_INTERVAL_MS = 15_000L
+        private const val MIN_PUBLISH_INTERVAL_MS = 5_000L
         private const val TAG = "SafarDriverGPS"
         fun start(context: Context) {
             val hasPermission =
