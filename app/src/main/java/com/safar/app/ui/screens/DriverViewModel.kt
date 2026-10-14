@@ -25,7 +25,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import java.time.Instant
 
 data class DriverUiState(
     val driver: Driver? = null,
@@ -177,34 +176,6 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun isFresh(timestampEpochMs: Long?): Boolean = timestampEpochMs != null && timestampEpochMs > 0L && System.currentTimeMillis() - timestampEpochMs <= LOCATION_FRESHNESS_MS
-
-    /**
-     * Foreground-screen fallback for driver GPS.
-     *
-     * The foreground service remains the primary/background publisher. While the
-     * driver screen is visible, publish the same current position directly as a
-     * second path. This makes an active trip resilient if Android has stopped or
-     * delayed the foreground service.
-     */
-    fun publishDriverLocation(point: com.safar.app.domain.model.GeoPoint) {
-        val ui = _uiState.value
-        if (ui.driver?.routeId == null) return
-        viewModelScope.launch {
-            runCatching {
-                withContext(Dispatchers.IO) {
-                    withTimeout(BACKEND_TIMEOUT_MS) {
-                        AppContainer.driverLocationRepository.submitLocation(
-                            latitude = point.latitude,
-                            longitude = point.longitude,
-                            recordedAtIso = Instant.now().toString(),
-                        )
-                    }
-                }
-            }.onFailure { error ->
-                android.util.Log.w("SafarDriverGPS", "Foreground screen GPS publish failed", error)
-            }
-        }
-    }
 
     fun startWork() {
         val ui = _uiState.value
