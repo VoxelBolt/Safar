@@ -6,7 +6,6 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.safar.app.BuildConfig
-import com.safar.app.data.remote.SupabaseClientProvider
 import com.safar.app.data.location.DriverLocationService
 import com.safar.app.di.AppContainer
 import com.safar.app.domain.model.Route
@@ -101,6 +100,37 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
         val current = _state.value
         if (current.role == null || current.registrationInProgress) return
 
+        val validationError = when {
+            current.name.trim().isEmpty() -> "Введите имя."
+            current.phone.trim().isEmpty() -> "Введите номер телефона."
+            current.role == UserRole.DRIVER && current.vehicleIdentifier.trim().isEmpty() ->
+                "Введите номер транспорта."
+            current.role == UserRole.DRIVER && current.selectedRouteId == null ->
+                "Выберите номер маршрута."
+            else -> null
+        }
+        if (validationError != null) {
+            update {
+                copy(
+                    registrationError = true,
+                    registrationErrorMessage = validationError,
+                    registrationInProgress = false,
+                )
+            }
+            return
+        }
+
+        if (!com.safar.app.data.remote.SupabaseClientProvider.isConfigured) {
+            update {
+                copy(
+                    registrationError = true,
+                    registrationErrorMessage = "Сервис регистрации не настроен. Обратитесь к команде Safar.",
+                    registrationInProgress = false,
+                )
+            }
+            return
+        }
+
         update {
             copy(
                 registrationInProgress = true,
@@ -110,10 +140,7 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
         }
 
         viewModelScope.launch {
-            runCatching {
-                // Keep all Supabase/Auth/PostgREST work off the Android main
-                // thread. Physical devices can initialize Ktor/Auth much slower
-                // than an emulator, which can otherwise trigger an ANR.
+            val result = runCatching {
                 withContext(Dispatchers.IO) {
                     withTimeout(BACKEND_TIMEOUT_MS) {
                         when (current.role) {
@@ -121,11 +148,8 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
                                 name = current.name.trim(),
                                 phone = current.phone.trim(),
                             )
-
                             UserRole.DRIVER -> {
-                                val routeId = requireNotNull(current.selectedRouteId) {
-                                    "Route must be selected"
-                                }
+                                val routeId = requireNotNull(current.selectedRouteId)
                                 driverRepository.registerDriver(
                                     name = current.name.trim(),
                                     phone = current.phone.trim(),
@@ -136,17 +160,18 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
                         }
                     }
                 }
-            }.onFailure { error ->
-                val message = registrationErrorMessage(error)
+            }
+
+            result.onFailure { error ->
                 update {
                     copy(
                         registrationInProgress = false,
                         registrationError = true,
-                        registrationErrorMessage = message,
+                        registrationErrorMessage = registrationErrorMessage(error),
                     )
                 }
                 if (BuildConfig.DEBUG) {
-                    Log.e(TAG, "Registration backend operation failed: ${error.message}", error)
+                    Log.e(TAG, "Registration backend operation failed", error)
                 }
             }.onSuccess {
                 update {
@@ -157,33 +182,40 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
                         registrationErrorMessage = null,
                     )
                 }
-                if (BuildConfig.DEBUG) {
-                    Log.d(TAG, "Registration backend operation OK")
-                }
             }
         }
     }
 
     private fun registrationErrorMessage(error: Throwable): String {
-        val details = buildString {
-            append(error.message.orEmpty())
-            error.cause?.message?.let { append(" ").append(it) }
-        }.lowercase()
+        val chain = generateSequence(error) { it.cause }
+            .take(6)
+            .mapNotNull { it.message }
+            .joinToString(" ")
+            .lowercase()
 
         return when {
-            "users_phone_unique" in details ||
-                "duplicate key value violates unique constraint" in details && "phone" in details ->
+            "users_phone_unique" in chain ||
+                ("duplicate key value violates unique constraint" in chain && "phone" in chain) ->
                 "Этот номер телефона уже зарегистрирован. Используйте другой номер."
-            "route must be selected" in details ->
+            "route must be selected" in chain ->
                 "Выберите номер маршрута."
-            "vehicle is already assigned" in details ->
+            "vehicle is already assigned" in chain ->
                 "Этот номер транспорта уже закреплён за другим водителем."
-            "vehicle could not be registered" in details ->
+            "vehicle could not be registered" in chain ->
                 "Не удалось зарегистрировать номер транспорта."
-            "authentication is required" in details ->
-                "Сессия приложения недействительна. Перезапустите приложение и попробуйте снова."
+            "authentication is required" in chain ||
+                "authenticated user does not exist" in chain ||
+                ("session" in chain && ("expired" in chain || "invalid" in chain)) ->
+                "Не удалось подтвердить сессию. Попробуйте ещё раз."
+            "timeout" in chain || "timed out" in chain ->
+                "Сервер отвечает слишком долго. Проверьте интернет и попробуйте ещё раз."
+            "unknownhost" in chain || "unable to resolve host" in chain ||
+                "no address associated with hostname" in chain ->
+                "Нет соединения с сервером. Проверьте интернет."
+            "permission denied" in chain || "row-level security" in chain ->
+                "Сервер отклонил запрос. Проверьте настройки доступа Safar."
             else ->
-                "Не удалось зарегистрироваться. Проверьте подключение к интернету и попробуйте снова."
+                "Не удалось зарегистрироваться. Проверьте интернет и попробуйте ещё раз."
         }
     }
 
