@@ -141,7 +141,6 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
 
         viewModelScope.launch {
             val result = runCatching {
-                // All Supabase/Auth/PostgREST operations run away from the main thread.
                 withContext(Dispatchers.IO) {
                     withTimeout(BACKEND_TIMEOUT_MS) {
                         when (current.role) {
