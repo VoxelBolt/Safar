@@ -814,7 +814,6 @@ fun DriverMainScreen(state: OnboardingState, onLanguageSelected: (String) -> Uni
                 onPauseWork = driverViewModel::pauseWork,
                 onResumeWork = driverViewModel::resumeWork,
                 onFinishWork = driverViewModel::finishWork,
-                onPublishDriverLocation = driverViewModel::publishDriverLocation,
                 foregroundLocationGranted = foregroundLocationGranted,
                 onRequestTrackingPermission = ::requestDriverTrackingPermission,
                 modifier = Modifier.padding(padding),
@@ -839,7 +838,6 @@ private fun DriverHomeScreen(
     onPauseWork: () -> Unit,
     onResumeWork: () -> Unit,
     onFinishWork: () -> Unit,
-    onPublishDriverLocation: (GeoPoint) -> Unit,
     foregroundLocationGranted: Boolean,
     onRequestTrackingPermission: () -> Unit,
     modifier: Modifier = Modifier,
@@ -861,22 +859,6 @@ private fun DriverHomeScreen(
     val driverLocationProvider = remember(context) { AndroidLocationProvider(context.applicationContext) }
     var driverLocation by remember { mutableStateOf<GeoPoint?>(null) }
     var driverLocateRequestId by remember { mutableLongStateOf(0L) }
-
-    // Fail-safe publisher: while the driver screen is visible and the driver has
-    // an assigned route, also send a fresh GPS fix every 5 seconds. The foreground
-    // service remains responsible for background tracking.
-    LaunchedEffect(ui.driver?.routeId, foregroundLocationGranted) {
-        if (ui.driver?.routeId == null || !foregroundLocationGranted) return@LaunchedEffect
-        while (true) {
-            driverLocationProvider.currentLocationSample { sample ->
-                if (sample != null) {
-                    driverLocation = sample.point
-                    onPublishDriverLocation(sample.point)
-                }
-            }
-            delay(5_000L)
-        }
-    }
 
     LaunchedEffect(foregroundLocationGranted) {
         if (!foregroundLocationGranted) {
