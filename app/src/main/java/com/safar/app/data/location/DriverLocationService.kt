@@ -18,8 +18,9 @@ import androidx.core.content.ContextCompat
 import com.safar.app.R
 import com.safar.app.di.AppContainer
 import kotlinx.coroutines.delay
-import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -38,7 +39,8 @@ class DriverLocationService : Service() {
     private lateinit var connectivityManager: ConnectivityManager
     private var publishingJob: Job? = null
     private var locationStreamJob: Job? = null
-    private val lastPublishedLocationTimestamp = AtomicLong(0L)
+    private val locationPublishMutex = Mutex()
+    private var lastPublishedLocationTimestamp = 0L
     private val driverSnapshot = AtomicReference<com.safar.app.domain.model.Driver?>(null)
     @Volatile private var driverSnapshotLoadedAt = 0L
     @Volatile private var networkAvailable = false
@@ -187,14 +189,16 @@ class DriverLocationService : Service() {
         val timestampEpochMs = sample.timestampEpochMs
         if (timestampEpochMs <= 0L) return
 
-        // Never move the server heartbeat backwards if Android gives us a cached
-        // location after a newer sample has already been published.
-        val previous = lastPublishedLocationTimestamp.get()
-        if (timestampEpochMs <= previous) return
-        if (!lastPublishedLocationTimestamp.compareAndSet(previous, timestampEpochMs)) return
-
-        val recordedAtIso = Instant.ofEpochMilli(timestampEpochMs).toString()
-        publishDriverSample(sample.point.latitude, sample.point.longitude, recordedAtIso)
+        // Stream and fallback fixes can arrive concurrently. Serialize them so
+        // the same fix cannot trigger overlapping backend writes.
+        locationPublishMutex.withLock {
+            // Reject cached/out-of-order fixes, but only remember a timestamp
+            // after the backend confirms the write. Failed writes remain retryable.
+            if (timestampEpochMs <= lastPublishedLocationTimestamp) return
+            val recordedAtIso = Instant.ofEpochMilli(timestampEpochMs).toString()
+            publishDriverSample(sample.point.latitude, sample.point.longitude, recordedAtIso)
+            lastPublishedLocationTimestamp = timestampEpochMs
+        }
     }
 
     private suspend fun publishDriverSample(latitude: Double, longitude: Double, recordedAtIso: String?) {
@@ -218,8 +222,7 @@ class DriverLocationService : Service() {
 
         android.util.Log.d(
             TAG,
-            "Vehicle location saved: vehicle=${driver.vehicleId} route=$routeId " +
-                "lat=$latitude lon=$longitude recordedAt=$timestamp",
+            "Vehicle location saved: vehicle=${driver.vehicleId} route=$routeId",
         )
 
         updateNotification("Геопозиция передаётся пассажирам")

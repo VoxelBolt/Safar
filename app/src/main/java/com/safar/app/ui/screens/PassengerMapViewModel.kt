@@ -232,11 +232,6 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             runCatching { vehicleRepository.getVehiclesForRoute(route.id) }
                 .onSuccess { vehicles ->
                     val fresh = freshVehicles(vehicles).map { it.copy(active = true) }
-                    android.util.Log.d(
-                        "SafarVehicle",
-                        "initial route=${route.id} vehicles=${fresh.size} locations=" +
-                            fresh.joinToString { "${it.identifier}:${it.currentLocation?.latitude},${it.currentLocation?.longitude}" },
-                    )
                     _uiState.value = _uiState.value.copy(
                         activeVehicles = fresh,
                         loadingVehicles = false,
@@ -265,11 +260,6 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                         if (_uiState.value.nearestVehicleTrackingEnabled) {
                             (_uiState.value.passengerLocation ?: _uiState.value.mapCenterLocation)?.let { updateNearestVehicle(it, active) }
                         }
-                        android.util.Log.d(
-                            "SafarVehicle",
-                            "poll route=$routeId vehicles=${active.size} locations=" +
-                                active.joinToString { "${it.identifier}:${it.currentLocation?.latitude},${it.currentLocation?.longitude}" },
-                        )
                     }
                     .onFailure { error -> android.util.Log.w("SafarVehicle", "poll failed", error) }
                 delay(10_000L)
@@ -319,7 +309,9 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             return
         }
 
-        vehicleRefreshJob?.cancel()
+        // A burst of location events for a vehicle not in the local snapshot must
+        // not cancel/restart the same backend query repeatedly under load.
+        if (vehicleRefreshJob?.isActive == true) return
         vehicleRefreshJob = viewModelScope.launch {
             runCatching { vehicleRepository.getVehiclesForRoute(selectedRoute.id) }
                 .onSuccess { vehicles ->
