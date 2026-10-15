@@ -158,12 +158,9 @@ class AndroidLocationProvider(private val context: Context) {
         val listener = object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent) {
                 SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
-                val rotation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    context.display?.rotation ?: Surface.ROTATION_0
-                } else {
-                    @Suppress("DEPRECATION")
-                    (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager).defaultDisplay.rotation
-                }
+                @Suppress("DEPRECATION")
+                val rotation = (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager)
+                    .defaultDisplay.rotation
                 when (rotation) {
                     Surface.ROTATION_90 -> SensorManager.remapCoordinateSystem(
                         rotationMatrix, SensorManager.AXIS_Y, SensorManager.AXIS_MINUS_X, remappedMatrix
