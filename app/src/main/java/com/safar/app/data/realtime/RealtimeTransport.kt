@@ -98,11 +98,23 @@ class SupabaseRealtimeTransport(private val client: SupabaseClient = SupabaseCli
         }
     }
 
-    override suspend fun sendDriverLocation(routeId:String,vehicleId:String,latitude:Double,longitude:Double,recordedAtIso:String) {
+    override suspend fun sendDriverLocation(
+        routeId:String,
+        vehicleId:String,
+        latitude:Double,
+        longitude:Double,
+        recordedAtIso:String,
+        headingDegrees:Float?,
+    ) {
         ensureConnected(routeId)
         val realtimeChannel=channel ?: return
         realtimeChannel.broadcast(event="vehicle_location",payload=BroadcastPayload.Json(buildJsonObject {
-            put("vehicle_id",vehicleId); put("route_id",routeId); put("latitude",latitude); put("longitude",longitude); put("recorded_at",recordedAtIso)
+            put("vehicle_id",vehicleId)
+            put("route_id",routeId)
+            put("latitude",latitude)
+            put("longitude",longitude)
+            put("recorded_at",recordedAtIso)
+            headingDegrees?.takeIf { it.isFinite() }?.let { put("heading_degrees",it.toDouble()) }
         }))
     }
     override suspend fun sendPassengerLocation(routeId:String,latitude:Double,longitude:Double,recordedAtIso:String) {
@@ -145,7 +157,7 @@ interface RealtimeTransport {
     val vehicleEvents: Flow<RealtimeVehicleEvent>
     val passengerEvents: Flow<RealtimePassengerEvent>
     suspend fun connect(routeId:String)
-    suspend fun sendDriverLocation(routeId:String,vehicleId:String,latitude:Double,longitude:Double,recordedAtIso:String)
+    suspend fun sendDriverLocation(routeId:String,vehicleId:String,latitude:Double,longitude:Double,recordedAtIso:String,headingDegrees:Float? = null)
     suspend fun sendPassengerLocation(routeId:String,latitude:Double,longitude:Double,recordedAtIso:String)
     suspend fun removePassengerLocation(routeId:String)
     fun disconnect()
