@@ -4,9 +4,7 @@ import com.safar.app.R
 import android.content.Context
 import android.graphics.PointF
 import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Paint
-import android.graphics.RectF
+import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.util.Log
 import androidx.compose.foundation.background
@@ -489,9 +487,11 @@ private fun setupMapLayers(style: Style, context: Context) {
             )
         )
     }
-    // Use a top-down Sprinter-style vehicle icon with transparent background.
+    // Use the Android PNG resource for the vehicle marker instead of drawing a substitute in code.
     if (style.getImage(VEHICLE_MARKER_IMAGE_ID) == null) {
-        style.addImage(VEHICLE_MARKER_IMAGE_ID, createBusMarkerBitmap())
+        val markerBitmap = BitmapFactory.decodeResource(context.resources, R.drawable.safar_vehicle_marker)
+            ?: error("Cannot decode vehicle marker resource: safar_vehicle_marker.png")
+        style.addImage(VEHICLE_MARKER_IMAGE_ID, markerBitmap)
     }
     style.getLayer(VEHICLES_LAYER_ID)?.let { style.removeLayer(VEHICLES_LAYER_ID) }
     style.addLayer(
@@ -523,67 +523,6 @@ private fun setupMapLayers(style: Style, context: Context) {
             )
         )
     }
-}
-
-
-private fun createBusMarkerBitmap(): Bitmap {
-    // Flat, blue, top-down Sprinter icon based on the user's third reference.
-    // Transparent background: no badge, circle, or blue outline.
-    val bitmap = Bitmap.createBitmap(72, 112, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-
-    val blue = SafarBlue.toArgb()
-    val blueDark = android.graphics.Color.rgb(0, 74, 176)
-    val glass = android.graphics.Color.rgb(31, 54, 80)
-    val glassHighlight = android.graphics.Color.rgb(73, 112, 153)
-    val detail = android.graphics.Color.rgb(135, 181, 235)
-    val white = android.graphics.Color.WHITE
-
-    // Mirrors and tires, as seen from directly above.
-    paint.color = blueDark
-    canvas.drawRoundRect(RectF(7f, 24f, 17f, 39f), 3f, 3f, paint)
-    canvas.drawRoundRect(RectF(55f, 24f, 65f, 39f), 3f, 3f, paint)
-    canvas.drawRoundRect(RectF(10f, 15f, 17f, 31f), 2f, 2f, paint)
-    canvas.drawRoundRect(RectF(55f, 15f, 62f, 31f), 2f, 2f, paint)
-    canvas.drawRoundRect(RectF(10f, 81f, 17f, 97f), 2f, 2f, paint)
-    canvas.drawRoundRect(RectF(55f, 81f, 62f, 97f), 2f, 2f, paint)
-
-    // Sprinter's long body: dark blue outer edge and blue body.
-    paint.color = blueDark
-    canvas.drawRoundRect(RectF(15f, 3f, 57f, 109f), 12f, 12f, paint)
-    paint.color = blue
-    canvas.drawRoundRect(RectF(18f, 6f, 54f, 106f), 9f, 9f, paint)
-
-    // Front windshield at the top, with a slim blue frame.
-    paint.color = blueDark
-    canvas.drawRoundRect(RectF(20f, 11f, 52f, 29f), 5f, 5f, paint)
-    paint.color = glass
-    canvas.drawRoundRect(RectF(23f, 14f, 49f, 26f), 3f, 3f, paint)
-    paint.color = glassHighlight
-    paint.strokeWidth = 1.2f
-    canvas.drawLine(26f, 15.5f, 46f, 15.5f, paint)
-
-    // Large roof panel and subtle side seams, matching the reference silhouette.
-    paint.color = detail
-    paint.strokeWidth = 1.2f
-    canvas.drawLine(21f, 33f, 51f, 33f, paint)
-    canvas.drawLine(21f, 79f, 51f, 79f, paint)
-    paint.color = android.graphics.Color.rgb(35, 112, 224)
-    canvas.drawRoundRect(RectF(23f, 37f, 49f, 75f), 4f, 4f, paint)
-    paint.color = android.graphics.Color.rgb(25, 91, 190)
-    canvas.drawRoundRect(RectF(25f, 39f, 47f, 73f), 3f, 3f, paint)
-
-    // Rear window and small red tail lights at the bottom.
-    paint.color = blueDark
-    canvas.drawRoundRect(RectF(22f, 84f, 50f, 98f), 4f, 4f, paint)
-    paint.color = glass
-    canvas.drawRoundRect(RectF(25f, 87f, 47f, 95f), 2f, 2f, paint)
-    paint.color = android.graphics.Color.rgb(255, 75, 75)
-    canvas.drawRoundRect(RectF(18f, 97f, 23f, 103f), 1.5f, 1.5f, paint)
-    canvas.drawRoundRect(RectF(49f, 97f, 54f, 103f), 1.5f, 1.5f, paint)
-
-    return bitmap
 }
 
 
