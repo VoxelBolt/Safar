@@ -212,8 +212,8 @@ class AndroidLocationProvider(private val context: Context) {
             sensorManager.registerListener(listener, rotationSensor, SensorManager.SENSOR_DELAY_GAME)
             Log.d(TAG, "Heading sensor started: rotation vector")
         } else {
-            sensorManager.registerListener(listener, accelerometer, SensorManager.SENSOR_DELAY_GAME)
-            sensorManager.registerListener(listener, magnetometer, SensorManager.SENSOR_DELAY_GAME)
+            sensorManager.registerListener(listener, accelerometer!!, SensorManager.SENSOR_DELAY_GAME)
+            sensorManager.registerListener(listener, magnetometer!!, SensorManager.SENSOR_DELAY_GAME)
             Log.d(TAG, "Heading sensor started: accelerometer + magnetometer fallback")
         }
 
