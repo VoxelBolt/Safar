@@ -53,7 +53,8 @@ data class VehicleLocation(
     val vehicleId: String,
     val latitude: Double,
     val longitude: Double,
-    val timestampEpochMs: Long
+    val timestampEpochMs: Long,
+    val headingDegrees: Float? = null
 )
 
 /** Current passenger location published only while a passenger has a route selected. */

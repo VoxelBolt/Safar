@@ -302,6 +302,7 @@ class SupabaseSafarApi(
         latitude: Double,
         longitude: Double,
         recordedAtIso: String?,
+        headingDegrees: Float?,
     ): VehicleLocation {
         ensureAnonymousSession()
         return client.postgrest.rpc(
@@ -310,6 +311,7 @@ class SupabaseSafarApi(
                 put("p_latitude", latitude)
                 put("p_longitude", longitude)
                 put("p_recorded_at", recordedAtIso ?: Instant.now().toString())
+                headingDegrees?.takeIf { it.isFinite() }?.let { put("p_heading_degrees", it.toDouble()) }
             },
         ).decodeAs<VehicleLocationDto>()
             .toDomain()
@@ -365,6 +367,7 @@ class SupabaseSafarApi(
                 latitude = latitude,
                 longitude = longitude,
                 timestampEpochMs = parseTimestamp(recordedAt),
+                headingDegrees = headingDegrees,
             )
         } else {
             null
@@ -404,5 +407,6 @@ class SupabaseSafarApi(
         latitude = latitude,
         longitude = longitude,
         timestampEpochMs = parseTimestamp(recordedAt),
+        headingDegrees = headingDegrees,
     )
 }

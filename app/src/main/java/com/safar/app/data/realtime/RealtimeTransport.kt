@@ -30,7 +30,7 @@ import java.time.OffsetDateTime
 data class RealtimeVehicleEvent(val vehicleId: String,val routeId: String,val location: VehicleLocation?)
 data class RealtimePassengerEvent(val passengerId: String,val routeId: String,val location: PassengerLocation?)
 
-@Serializable private data class VehicleLocationBroadcast(@SerialName("vehicle_id") val vehicleId:String,@SerialName("route_id") val routeId:String,val latitude:Double,val longitude:Double,@SerialName("recorded_at") val recordedAt:String)
+@Serializable private data class VehicleLocationBroadcast(@SerialName("vehicle_id") val vehicleId:String,@SerialName("route_id") val routeId:String,val latitude:Double,val longitude:Double,@SerialName("recorded_at") val recordedAt:String,@SerialName("heading_degrees") val headingDegrees:Float? = null)
 @Serializable private data class VehicleLocationRemovedBroadcast(@SerialName("vehicle_id") val vehicleId:String,@SerialName("route_id") val routeId:String)
 @Serializable private data class PassengerLocationBroadcast(@SerialName("passenger_id") val passengerId:String,@SerialName("route_id") val routeId:String,val latitude:Double,val longitude:Double,@SerialName("recorded_at") val recordedAt:String)
 @Serializable private data class PassengerLocationRemovedBroadcast(@SerialName("passenger_id") val passengerId:String,@SerialName("route_id") val routeId:String)
@@ -69,7 +69,7 @@ class SupabaseRealtimeTransport(private val client: SupabaseClient = SupabaseCli
         val realtimeChannel=client.channel(topic){ isPrivate=true }
 
         val updates=realtimeChannel.broadcastFlow<VehicleLocationBroadcast>(event="vehicle_location").map { m ->
-            RealtimeVehicleEvent(m.vehicleId,m.routeId,VehicleLocation(m.vehicleId,m.latitude,m.longitude,parseTimestamp(m.recordedAt)))
+            RealtimeVehicleEvent(m.vehicleId,m.routeId,VehicleLocation(m.vehicleId,m.latitude,m.longitude,parseTimestamp(m.recordedAt),m.headingDegrees))
         }
         val removals=realtimeChannel.broadcastFlow<VehicleLocationRemovedBroadcast>(event="vehicle_location_removed").map { m ->
             RealtimeVehicleEvent(m.vehicleId,m.routeId,null)

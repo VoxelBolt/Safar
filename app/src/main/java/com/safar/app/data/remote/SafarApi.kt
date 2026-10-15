@@ -47,5 +47,6 @@ interface SafarApi {
         latitude: Double,
         longitude: Double,
         recordedAtIso: String? = null,
+        headingDegrees: Float? = null,
     ): VehicleLocation
 }

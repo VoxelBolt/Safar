@@ -41,6 +41,7 @@ data class VehicleWithLocationDto(
     val latitude: Double? = null,
     val longitude: Double? = null,
     @SerialName("recorded_at") val recordedAt: String? = null,
+    @SerialName("heading_degrees") val headingDegrees: Float? = null,
 )
 
 @Serializable
@@ -89,6 +90,7 @@ data class VehicleLocationDto(
     val longitude: Double,
     @SerialName("recorded_at") val recordedAt: String,
     @SerialName("updated_at") val updatedAt: String? = null,
+    @SerialName("heading_degrees") val headingDegrees: Float? = null,
 )
 
 @Serializable

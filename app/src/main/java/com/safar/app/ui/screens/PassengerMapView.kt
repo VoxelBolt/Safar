@@ -70,6 +70,8 @@ import org.maplibre.android.style.layers.PropertyFactory.iconImage
 import org.maplibre.android.style.layers.PropertyFactory.iconSize
 import org.maplibre.android.style.layers.PropertyFactory.iconAllowOverlap
 import org.maplibre.android.style.layers.PropertyFactory.iconIgnorePlacement
+import org.maplibre.android.style.layers.PropertyFactory.iconRotate
+import org.maplibre.android.style.expressions.Expression
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
@@ -93,6 +95,7 @@ private const val USER_LOCATION_PULSE_LAYER_ID = "safar-user-location-pulse-laye
 private const val VEHICLES_SOURCE_ID = "safar-vehicles-source"
 private const val VEHICLES_LAYER_ID = "safar-vehicles-layer"
 private const val VEHICLE_MARKER_IMAGE_ID = "safar-bus-marker-image"
+private const val VEHICLE_HEADING_PROPERTY = "heading_degrees"
 private const val VEHICLE_LABEL_LAYER_ID = "safar-vehicle-label-layer"
 
 private const val DEFAULT_LATITUDE = 40.2829
@@ -497,6 +500,7 @@ private fun setupMapLayers(style: Style, context: Context) {
             iconSize(0.9f),
             iconAllowOverlap(true),
             iconIgnorePlacement(true),
+            iconRotate(Expression.get(VEHICLE_HEADING_PROPERTY)),
         )
     )
 
@@ -673,6 +677,7 @@ private fun updateVehicles(
         ).apply {
             addStringProperty("vehicle_id", vehicle.id)
             addStringProperty("identifier", vehicle.identifier)
+            addNumberProperty(VEHICLE_HEADING_PROPERTY, location.headingDegrees?.takeIf { it.isFinite() }?.toDouble() ?: 0.0)
         }
     }
     source.setGeoJson(FeatureCollection.fromFeatures(features.toTypedArray()))

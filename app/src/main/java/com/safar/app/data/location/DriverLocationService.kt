@@ -22,6 +22,7 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -39,6 +40,8 @@ class DriverLocationService : Service() {
     private lateinit var connectivityManager: ConnectivityManager
     private var publishingJob: Job? = null
     private var locationStreamJob: Job? = null
+    private var headingJob: Job? = null
+    @Volatile private var latestHeadingDegrees: Float? = null
     private val locationPublishMutex = Mutex()
     private var lastPublishedLocationTimestamp = 0L
     private val driverSnapshot = AtomicReference<com.safar.app.domain.model.Driver?>(null)
@@ -121,6 +124,21 @@ class DriverLocationService : Service() {
 
     private fun startPublishingIfNeeded() {
         if (publishingJob?.isActive == true) return
+
+        // Collect compass heading independently of GPS so turns are detected while stationary.
+        if (headingJob?.isActive != true) {
+            headingJob = scope.launch {
+                try {
+                    locationProvider.headingDegrees().collectLatest { degrees ->
+                        if (degrees.isFinite()) latestHeadingDegrees = ((degrees % 360f) + 360f) % 360f
+                    }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    android.util.Log.w(TAG, "Device heading sensor unavailable", error)
+                }
+            }
+        }
 
         // Primary channel: continuous Android location updates. This is the same
         // stream that already drives the blue dot on the driver's map.
@@ -218,6 +236,7 @@ class DriverLocationService : Service() {
             latitude = latitude,
             longitude = longitude,
             recordedAtIso = timestamp,
+            headingDegrees = latestHeadingDegrees,
         )
 
         android.util.Log.d(
@@ -263,6 +282,9 @@ class DriverLocationService : Service() {
         publishingJob = null
         locationStreamJob?.cancel()
         locationStreamJob = null
+        headingJob?.cancel()
+        headingJob = null
+        latestHeadingDegrees = null
     }
 
     override fun onDestroy() {

@@ -11,5 +11,6 @@ class DriverLocationRepositoryImpl(
         latitude: Double,
         longitude: Double,
         recordedAtIso: String?,
-    ): VehicleLocation = api.submitVehicleLocation(latitude, longitude, recordedAtIso)
+        headingDegrees: Float?,
+    ): VehicleLocation = api.submitVehicleLocation(latitude, longitude, recordedAtIso, headingDegrees)
 }
