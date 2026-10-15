@@ -523,39 +523,59 @@ private fun setupMapLayers(style: Style, context: Context) {
 
 
 private fun createBusMarkerBitmap(): Bitmap {
-    // Top-down Sprinter-style minibus on a transparent canvas; no circular badge.
+    // Flat, blue, top-down Sprinter icon based on the user's third reference.
+    // Transparent background: no badge, circle, or blue outline.
     val bitmap = Bitmap.createBitmap(72, 112, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
     val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
-    // Mirrors and wheels.
-    paint.color = android.graphics.Color.rgb(45, 55, 70)
-    canvas.drawRoundRect(RectF(7f, 25f, 17f, 38f), 3f, 3f, paint)
-    canvas.drawRoundRect(RectF(55f, 25f, 65f, 38f), 3f, 3f, paint)
-    canvas.drawRoundRect(RectF(10f, 16f, 17f, 31f), 2f, 2f, paint)
-    canvas.drawRoundRect(RectF(55f, 16f, 62f, 31f), 2f, 2f, paint)
-    canvas.drawRoundRect(RectF(10f, 80f, 17f, 96f), 2f, 2f, paint)
-    canvas.drawRoundRect(RectF(55f, 80f, 62f, 96f), 2f, 2f, paint)
+    val blue = SafarBlue.toArgb()
+    val blueDark = android.graphics.Color.rgb(0, 74, 176)
+    val glass = android.graphics.Color.rgb(31, 54, 80)
+    val glassHighlight = android.graphics.Color.rgb(73, 112, 153)
+    val detail = android.graphics.Color.rgb(135, 181, 235)
+    val white = android.graphics.Color.WHITE
 
-    // Light body with a dark, thin contour.
-    paint.color = android.graphics.Color.rgb(75, 86, 101)
-    canvas.drawRoundRect(RectF(15f, 4f, 57f, 108f), 12f, 12f, paint)
-    paint.color = android.graphics.Color.rgb(242, 245, 248)
-    canvas.drawRoundRect(RectF(17f, 5f, 55f, 107f), 10f, 10f, paint)
+    // Mirrors and tires, as seen from directly above.
+    paint.color = blueDark
+    canvas.drawRoundRect(RectF(7f, 24f, 17f, 39f), 3f, 3f, paint)
+    canvas.drawRoundRect(RectF(55f, 24f, 65f, 39f), 3f, 3f, paint)
+    canvas.drawRoundRect(RectF(10f, 15f, 17f, 31f), 2f, 2f, paint)
+    canvas.drawRoundRect(RectF(55f, 15f, 62f, 31f), 2f, 2f, paint)
+    canvas.drawRoundRect(RectF(10f, 81f, 17f, 97f), 2f, 2f, paint)
+    canvas.drawRoundRect(RectF(55f, 81f, 62f, 97f), 2f, 2f, paint)
 
-    // Front windshield (top of the icon) and roof panels.
-    paint.color = android.graphics.Color.rgb(35, 55, 76)
-    canvas.drawRoundRect(RectF(21f, 12f, 51f, 27f), 4f, 4f, paint)
-    paint.color = android.graphics.Color.rgb(210, 218, 227)
-    paint.strokeWidth = 1.4f
-    canvas.drawLine(20f, 31f, 52f, 31f, paint)
-    canvas.drawLine(20f, 79f, 52f, 79f, paint)
-    canvas.drawRoundRect(RectF(23f, 36f, 49f, 72f), 3f, 3f, paint)
+    // Sprinter's long body: dark blue outer edge and blue body.
+    paint.color = blueDark
+    canvas.drawRoundRect(RectF(15f, 3f, 57f, 109f), 12f, 12f, paint)
+    paint.color = blue
+    canvas.drawRoundRect(RectF(18f, 6f, 54f, 106f), 9f, 9f, paint)
 
-    // Rear window and tail lights.
-    paint.color = android.graphics.Color.rgb(55, 69, 85)
-    canvas.drawRoundRect(RectF(23f, 85f, 49f, 97f), 3f, 3f, paint)
-    paint.color = android.graphics.Color.rgb(230, 65, 65)
+    // Front windshield at the top, with a slim blue frame.
+    paint.color = blueDark
+    canvas.drawRoundRect(RectF(20f, 11f, 52f, 29f), 5f, 5f, paint)
+    paint.color = glass
+    canvas.drawRoundRect(RectF(23f, 14f, 49f, 26f), 3f, 3f, paint)
+    paint.color = glassHighlight
+    paint.strokeWidth = 1.2f
+    canvas.drawLine(26f, 15.5f, 46f, 15.5f, paint)
+
+    // Large roof panel and subtle side seams, matching the reference silhouette.
+    paint.color = detail
+    paint.strokeWidth = 1.2f
+    canvas.drawLine(21f, 33f, 51f, 33f, paint)
+    canvas.drawLine(21f, 79f, 51f, 79f, paint)
+    paint.color = android.graphics.Color.rgb(35, 112, 224)
+    canvas.drawRoundRect(RectF(23f, 37f, 49f, 75f), 4f, 4f, paint)
+    paint.color = android.graphics.Color.rgb(25, 91, 190)
+    canvas.drawRoundRect(RectF(25f, 39f, 47f, 73f), 3f, 3f, paint)
+
+    // Rear window and small red tail lights at the bottom.
+    paint.color = blueDark
+    canvas.drawRoundRect(RectF(22f, 84f, 50f, 98f), 4f, 4f, paint)
+    paint.color = glass
+    canvas.drawRoundRect(RectF(25f, 87f, 47f, 95f), 2f, 2f, paint)
+    paint.color = android.graphics.Color.rgb(255, 75, 75)
     canvas.drawRoundRect(RectF(18f, 97f, 23f, 103f), 1.5f, 1.5f, paint)
     canvas.drawRoundRect(RectF(49f, 97f, 54f, 103f), 1.5f, 1.5f, paint)
 
