@@ -104,7 +104,6 @@ class SupabaseRealtimeTransport(private val client: SupabaseClient = SupabaseCli
         latitude:Double,
         longitude:Double,
         recordedAtIso:String,
-        headingDegrees:Float?,
     ) {
         ensureConnected(routeId)
         val realtimeChannel=channel ?: return
@@ -114,7 +113,6 @@ class SupabaseRealtimeTransport(private val client: SupabaseClient = SupabaseCli
             put("latitude",latitude)
             put("longitude",longitude)
             put("recorded_at",recordedAtIso)
-            headingDegrees?.takeIf { it.isFinite() }?.let { put("heading_degrees",it.toDouble()) }
         }))
     }
     override suspend fun sendPassengerLocation(routeId:String,latitude:Double,longitude:Double,recordedAtIso:String) {
