@@ -5,7 +5,6 @@ import android.content.Context
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
-import android.os.Build
 import android.util.Log
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -29,7 +28,6 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.sample
-import kotlinx.coroutines.FlowPreview
 
 class AndroidLocationProvider(private val context: Context) {
     private val fusedClient = LocationServices.getFusedLocationProviderClient(context)
