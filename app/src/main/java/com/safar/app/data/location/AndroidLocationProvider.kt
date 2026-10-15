@@ -139,7 +139,6 @@ class AndroidLocationProvider(private val context: Context) {
     @SuppressLint("MissingPermission")
     fun locations(): Flow<GeoPoint> = locationSamples().map { it.point }
 
-    @SuppressLint("MissingPermission")
     /**
      * Device orientation as a compass azimuth in degrees clockwise from north.
      * Sensor updates are independent of GPS, so heading remains available while stopped.
