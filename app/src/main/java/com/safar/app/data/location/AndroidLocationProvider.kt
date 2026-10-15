@@ -146,41 +146,77 @@ class AndroidLocationProvider(private val context: Context) {
     fun headingDegrees(): Flow<Float> = callbackFlow {
         val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
         val rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
-            ?: run {
-                Log.w(TAG, "Rotation-vector sensor is unavailable; driver heading will remain unknown")
-                close()
-                return@callbackFlow
-            }
+        val accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        val magnetometer = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
+
+        // Prefer the fused rotation-vector sensor. If the phone does not provide it,
+        // derive compass heading from accelerometer + magnetic-field sensors instead
+        // of silently leaving the driver's blue heading sector blank.
+        if (rotationSensor == null && (accelerometer == null || magnetometer == null)) {
+            Log.w(TAG, "No usable orientation sensors; heading cannot be calculated")
+            close()
+            return@callbackFlow
+        }
+
         val rotationMatrix = FloatArray(9)
         val remappedMatrix = FloatArray(9)
         val orientation = FloatArray(3)
+        var gravityValues: FloatArray? = null
+        var magneticValues: FloatArray? = null
+
+        fun emitHeadingFromMatrix() {
+            @Suppress("DEPRECATION")
+            val displayRotation = (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager)
+                .defaultDisplay.rotation
+            when (displayRotation) {
+                Surface.ROTATION_90 -> SensorManager.remapCoordinateSystem(
+                    rotationMatrix, SensorManager.AXIS_Y, SensorManager.AXIS_MINUS_X, remappedMatrix
+                )
+                Surface.ROTATION_180 -> SensorManager.remapCoordinateSystem(
+                    rotationMatrix, SensorManager.AXIS_MINUS_X, SensorManager.AXIS_MINUS_Y, remappedMatrix
+                )
+                Surface.ROTATION_270 -> SensorManager.remapCoordinateSystem(
+                    rotationMatrix, SensorManager.AXIS_MINUS_Y, SensorManager.AXIS_X, remappedMatrix
+                )
+                else -> rotationMatrix.copyInto(remappedMatrix)
+            }
+            SensorManager.getOrientation(remappedMatrix, orientation)
+            val rawDegrees = Math.toDegrees(orientation[0].toDouble()).toFloat()
+            val degrees = ((rawDegrees % 360f) + 360f) % 360f
+            if (degrees.isFinite()) trySend(degrees)
+        }
+
         val listener = object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent) {
-                SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
-                @Suppress("DEPRECATION")
-                val rotation = (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager)
-                    .defaultDisplay.rotation
-                when (rotation) {
-                    Surface.ROTATION_90 -> SensorManager.remapCoordinateSystem(
-                        rotationMatrix, SensorManager.AXIS_Y, SensorManager.AXIS_MINUS_X, remappedMatrix
-                    )
-                    Surface.ROTATION_180 -> SensorManager.remapCoordinateSystem(
-                        rotationMatrix, SensorManager.AXIS_MINUS_X, SensorManager.AXIS_MINUS_Y, remappedMatrix
-                    )
-                    Surface.ROTATION_270 -> SensorManager.remapCoordinateSystem(
-                        rotationMatrix, SensorManager.AXIS_MINUS_Y, SensorManager.AXIS_X, remappedMatrix
-                    )
-                    else -> rotationMatrix.copyInto(remappedMatrix)
+                if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
+                    SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
+                    emitHeadingFromMatrix()
+                    return
                 }
-                SensorManager.getOrientation(remappedMatrix, orientation)
-                var degrees = Math.toDegrees(orientation[0].toDouble()).toFloat()
-                if (degrees < 0f) degrees += 360f
-                if (degrees.isFinite()) trySend(degrees)
+
+                when (event.sensor.type) {
+                    Sensor.TYPE_ACCELEROMETER -> gravityValues = event.values.clone()
+                    Sensor.TYPE_MAGNETIC_FIELD -> magneticValues = event.values.clone()
+                }
+                val gravity = gravityValues ?: return
+                val magnetic = magneticValues ?: return
+                if (SensorManager.getRotationMatrix(rotationMatrix, null, gravity, magnetic)) {
+                    emitHeadingFromMatrix()
+                }
             }
 
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
         }
-        sensorManager.registerListener(listener, rotationSensor, SensorManager.SENSOR_DELAY_GAME)
+
+        if (rotationSensor != null) {
+            sensorManager.registerListener(listener, rotationSensor, SensorManager.SENSOR_DELAY_GAME)
+            Log.d(TAG, "Heading sensor started: rotation vector")
+        } else {
+            sensorManager.registerListener(listener, accelerometer, SensorManager.SENSOR_DELAY_GAME)
+            sensorManager.registerListener(listener, magnetometer, SensorManager.SENSOR_DELAY_GAME)
+            Log.d(TAG, "Heading sensor started: accelerometer + magnetometer fallback")
+        }
+
         awaitClose { sensorManager.unregisterListener(listener) }
     }.distinctUntilChanged().sample(200L)
 
