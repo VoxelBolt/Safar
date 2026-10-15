@@ -169,6 +169,54 @@ class AndroidLocationProvider(private val context: Context) {
         awaitClose { sensorManager.unregisterListener(listener) }
     }.distinctUntilChanged().sample(200L)
 
+    /**
+     * Device orientation as a compass azimuth in degrees clockwise from north.
+     * Sensor updates are independent of GPS, so heading remains available while stopped.
+     */
+    @SuppressLint("MissingPermission")
+    fun headingDegrees(): Flow<Float> = callbackFlow {
+        val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        val rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+            ?: run {
+                close()
+                return@callbackFlow
+            }
+        val rotationMatrix = FloatArray(9)
+        val remappedMatrix = FloatArray(9)
+        val orientation = FloatArray(3)
+        val listener = object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent) {
+                SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
+                val rotation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    context.display?.rotation ?: Surface.ROTATION_0
+                } else {
+                    @Suppress("DEPRECATION")
+                    (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager).defaultDisplay.rotation
+                }
+                when (rotation) {
+                    Surface.ROTATION_90 -> SensorManager.remapCoordinateSystem(
+                        rotationMatrix, SensorManager.AXIS_Y, SensorManager.AXIS_MINUS_X, remappedMatrix
+                    )
+                    Surface.ROTATION_180 -> SensorManager.remapCoordinateSystem(
+                        rotationMatrix, SensorManager.AXIS_MINUS_X, SensorManager.AXIS_MINUS_Y, remappedMatrix
+                    )
+                    Surface.ROTATION_270 -> SensorManager.remapCoordinateSystem(
+                        rotationMatrix, SensorManager.AXIS_MINUS_Y, SensorManager.AXIS_X, remappedMatrix
+                    )
+                    else -> rotationMatrix.copyInto(remappedMatrix)
+                }
+                SensorManager.getOrientation(remappedMatrix, orientation)
+                var degrees = Math.toDegrees(orientation[0].toDouble()).toFloat()
+                if (degrees < 0f) degrees += 360f
+                if (degrees.isFinite()) trySend(degrees)
+            }
+
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+        }
+        sensorManager.registerListener(listener, rotationSensor, SensorManager.SENSOR_DELAY_GAME)
+        awaitClose { sensorManager.unregisterListener(listener) }
+    }.distinctUntilChanged().sample(200L)
+
     @SuppressLint("MissingPermission")
     fun currentLocation(onResult: (GeoPoint?) -> Unit) {
         currentLocationSample { sample -> onResult(sample?.point) }
