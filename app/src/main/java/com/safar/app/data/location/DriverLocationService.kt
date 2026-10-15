@@ -125,12 +125,15 @@ class DriverLocationService : Service() {
     private fun startPublishingIfNeeded() {
         if (publishingJob?.isActive == true) return
 
-        // Collect compass heading independently of GPS so turns are detected while stationary.
+        // Read the physical phone compass independently of GPS. A heading update
+        // is paired with the next normal location publication; GPS cadence is unchanged.
         if (headingJob?.isActive != true) {
             headingJob = scope.launch {
                 try {
                     locationProvider.headingDegrees().collectLatest { degrees ->
-                        if (degrees.isFinite()) latestHeadingDegrees = ((degrees % 360f) + 360f) % 360f
+                        if (degrees.isFinite()) {
+                            latestHeadingDegrees = ((degrees % 360f) + 360f) % 360f
+                        }
                     }
                 } catch (error: CancellationException) {
                     throw error
