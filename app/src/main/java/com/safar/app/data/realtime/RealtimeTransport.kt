@@ -157,7 +157,7 @@ interface RealtimeTransport {
     val vehicleEvents: Flow<RealtimeVehicleEvent>
     val passengerEvents: Flow<RealtimePassengerEvent>
     suspend fun connect(routeId:String)
-    suspend fun sendDriverLocation(routeId:String,vehicleId:String,latitude:Double,longitude:Double,recordedAtIso:String,headingDegrees:Float? = null)
+    suspend fun sendDriverLocation(routeId:String,vehicleId:String,latitude:Double,longitude:Double,recordedAtIso:String)
     suspend fun sendPassengerLocation(routeId:String,latitude:Double,longitude:Double,recordedAtIso:String)
     suspend fun removePassengerLocation(routeId:String)
     fun disconnect()
