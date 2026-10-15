@@ -69,6 +69,7 @@ import org.maplibre.android.style.layers.PropertyFactory.iconSize
 import org.maplibre.android.style.layers.PropertyFactory.iconAllowOverlap
 import org.maplibre.android.style.layers.PropertyFactory.iconIgnorePlacement
 import org.maplibre.android.style.layers.PropertyFactory.iconRotate
+import org.maplibre.android.style.layers.PropertyFactory.iconRotationAlignment
 import org.maplibre.android.style.expressions.Expression
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
@@ -483,7 +484,7 @@ private fun setupMapLayers(style: Style, context: Context) {
     if (style.getLayer(USER_HEADING_LAYER_ID) == null) {
         style.addLayer(
             FillLayer(USER_HEADING_LAYER_ID, USER_HEADING_SOURCE_ID).withProperties(
-                fillColor(SafarBlue.toArgb()), fillOpacity(0.30f)
+                fillColor(SafarBlue.toArgb()), fillOpacity(0.42f)
             )
         )
     }
@@ -498,10 +499,11 @@ private fun setupMapLayers(style: Style, context: Context) {
     style.addLayer(
         SymbolLayer(VEHICLES_LAYER_ID, VEHICLES_SOURCE_ID).withProperties(
             iconImage(VEHICLE_MARKER_IMAGE_ID),
-            iconSize(0.12f),
+            iconSize(0.42f),
             iconAllowOverlap(true),
             iconIgnorePlacement(true),
             iconRotate(Expression.get(VEHICLE_HEADING_PROPERTY)),
+            iconRotationAlignment("map"),
         )
     )
 
@@ -578,12 +580,14 @@ private fun updateRouteStation(style: Style, route: Route?) {
 
 private fun updateHeadingSector(style: Style, center: GeoPoint?, headingDegrees: Float?) {
     val source = style.getSourceAs<GeoJsonSource>(USER_HEADING_SOURCE_ID) ?: return
-    if (center == null || headingDegrees == null) {
+    if (center == null || headingDegrees == null || !headingDegrees.isFinite()) {
+        Log.d("SafarHeadingSector", "Sector hidden: centerAvailable=${center != null}, headingDegrees=$headingDegrees")
         source.setGeoJson(FeatureCollection.fromFeatures(emptyArray<Feature>()))
         return
     }
-    val radius = 0.0012
-    val halfAngle = 32.0
+    Log.d("SafarHeadingSector", "Sector updated at ${center.latitude},${center.longitude}, heading=$headingDegrees")
+    val radius = 0.0025
+    val halfAngle = 38.0
     val points = mutableListOf<Point>()
     points += Point.fromLngLat(center.longitude, center.latitude)
     for (step in 0..12) {
