@@ -146,6 +146,7 @@ class AndroidLocationProvider(private val context: Context) {
         val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
         val rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
             ?: run {
+                Log.w(TAG, "Rotation-vector sensor is unavailable; driver heading will remain unknown")
                 close()
                 return@callbackFlow
             }
