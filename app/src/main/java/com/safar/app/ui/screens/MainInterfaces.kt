@@ -860,6 +860,7 @@ private fun DriverHomeScreen(
     val context = LocalContext.current
     val driverLocationProvider = remember(context) { AndroidLocationProvider(context.applicationContext) }
     var driverLocation by remember { mutableStateOf<GeoPoint?>(null) }
+    var driverHeadingDegrees by remember { mutableStateOf<Float?>(null) }
     var driverLocateRequestId by remember { mutableLongStateOf(0L) }
 
     // Fail-safe publisher: while the driver screen is visible and the driver has
@@ -875,6 +876,25 @@ private fun DriverHomeScreen(
                 }
             }
             delay(5_000L)
+        }
+    }
+
+    // Draw the same blue compass sector on the driver's own map.
+    // This sensor stream is independent of GPS and continues while the vehicle is stationary.
+    LaunchedEffect(foregroundLocationGranted) {
+        if (!foregroundLocationGranted) {
+            driverHeadingDegrees = null
+            return@LaunchedEffect
+        }
+        try {
+            driverLocationProvider.headingDegrees().collect { degrees ->
+                driverHeadingDegrees = degrees
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            android.util.Log.w("SafarDriverHeading", "Unable to read device heading", error)
+            driverHeadingDegrees = null
         }
     }
 
@@ -932,7 +952,7 @@ private fun DriverHomeScreen(
         PassengerMapView(
             route = ui.selectedRoute,
             passengerLocation = driverLocation,
-            headingDegrees = null,
+            headingDegrees = driverHeadingDegrees,
             locationPermissionGranted = foregroundLocationGranted,
             locateRequestId = driverLocateRequestId,
             onLocateUser = {
