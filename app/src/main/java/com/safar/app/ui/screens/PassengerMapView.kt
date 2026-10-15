@@ -483,7 +483,7 @@ private fun setupMapLayers(style: Style, context: Context) {
     if (style.getLayer(USER_HEADING_LAYER_ID) == null) {
         style.addLayer(
             FillLayer(USER_HEADING_LAYER_ID, USER_HEADING_SOURCE_ID).withProperties(
-                fillColor(SafarBlue.toArgb()), fillOpacity(0.20f)
+                fillColor(SafarBlue.toArgb()), fillOpacity(0.30f)
             )
         )
     }
@@ -498,7 +498,7 @@ private fun setupMapLayers(style: Style, context: Context) {
     style.addLayer(
         SymbolLayer(VEHICLES_LAYER_ID, VEHICLES_SOURCE_ID).withProperties(
             iconImage(VEHICLE_MARKER_IMAGE_ID),
-            iconSize(0.07f),
+            iconSize(0.12f),
             iconAllowOverlap(true),
             iconIgnorePlacement(true),
             iconRotate(Expression.get(VEHICLE_HEADING_PROPERTY)),
@@ -582,8 +582,8 @@ private fun updateHeadingSector(style: Style, center: GeoPoint?, headingDegrees:
         source.setGeoJson(FeatureCollection.fromFeatures(emptyArray<Feature>()))
         return
     }
-    val radius = 0.0009
-    val halfAngle = 30.0
+    val radius = 0.0012
+    val halfAngle = 32.0
     val points = mutableListOf<Point>()
     points += Point.fromLngLat(center.longitude, center.latitude)
     for (step in 0..12) {
