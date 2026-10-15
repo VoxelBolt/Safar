@@ -486,8 +486,7 @@ private fun setupMapLayers(style: Style, context: Context) {
             )
         )
     }
-    // Use a bus-shaped marker instead of the small blue location dot.
-    // A white circular badge keeps the blue bus readable on busy map tiles.
+    // Use a top-down Sprinter-style vehicle icon with transparent background.
     if (style.getImage(VEHICLE_MARKER_IMAGE_ID) == null) {
         style.addImage(VEHICLE_MARKER_IMAGE_ID, createBusMarkerBitmap())
     }
@@ -495,7 +494,7 @@ private fun setupMapLayers(style: Style, context: Context) {
     style.addLayer(
         SymbolLayer(VEHICLES_LAYER_ID, VEHICLES_SOURCE_ID).withProperties(
             iconImage(VEHICLE_MARKER_IMAGE_ID),
-            iconSize(0.72f),
+            iconSize(0.9f),
             iconAllowOverlap(true),
             iconIgnorePlacement(true),
         )
@@ -524,37 +523,41 @@ private fun setupMapLayers(style: Style, context: Context) {
 
 
 private fun createBusMarkerBitmap(): Bitmap {
-    val size = 96
-    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    // Top-down Sprinter-style minibus on a transparent canvas; no circular badge.
+    val bitmap = Bitmap.createBitmap(72, 112, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
     val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
-    // White badge with a subtle outline.
-    paint.color = android.graphics.Color.WHITE
-    canvas.drawCircle(48f, 48f, 45f, paint)
-    paint.color = android.graphics.Color.rgb(220, 230, 244)
-    paint.style = Paint.Style.STROKE
-    paint.strokeWidth = 2.5f
-    canvas.drawCircle(48f, 48f, 44f, paint)
-    paint.style = Paint.Style.FILL
+    // Mirrors and wheels.
+    paint.color = android.graphics.Color.rgb(45, 55, 70)
+    canvas.drawRoundRect(RectF(7f, 25f, 17f, 38f), 3f, 3f, paint)
+    canvas.drawRoundRect(RectF(55f, 25f, 65f, 38f), 3f, 3f, paint)
+    canvas.drawRoundRect(RectF(10f, 16f, 17f, 31f), 2f, 2f, paint)
+    canvas.drawRoundRect(RectF(55f, 16f, 62f, 31f), 2f, 2f, paint)
+    canvas.drawRoundRect(RectF(10f, 80f, 17f, 96f), 2f, 2f, paint)
+    canvas.drawRoundRect(RectF(55f, 80f, 62f, 96f), 2f, 2f, paint)
 
-    // Blue minibus body.
-    paint.color = SafarBlue.toArgb()
-    canvas.drawRoundRect(RectF(25f, 19f, 71f, 70f), 9f, 9f, paint)
+    // Light body with a dark, thin contour.
+    paint.color = android.graphics.Color.rgb(75, 86, 101)
+    canvas.drawRoundRect(RectF(15f, 4f, 57f, 108f), 12f, 12f, paint)
+    paint.color = android.graphics.Color.rgb(242, 245, 248)
+    canvas.drawRoundRect(RectF(17f, 5f, 55f, 107f), 10f, 10f, paint)
 
-    // Front windshield and side windows.
-    paint.color = android.graphics.Color.WHITE
-    canvas.drawRoundRect(RectF(31f, 25f, 65f, 39f), 3f, 3f, paint)
-    paint.color = android.graphics.Color.rgb(205, 229, 255)
-    canvas.drawRect(31f, 43f, 65f, 47f, paint)
+    // Front windshield (top of the icon) and roof panels.
+    paint.color = android.graphics.Color.rgb(35, 55, 76)
+    canvas.drawRoundRect(RectF(21f, 12f, 51f, 27f), 4f, 4f, paint)
+    paint.color = android.graphics.Color.rgb(210, 218, 227)
+    paint.strokeWidth = 1.4f
+    canvas.drawLine(20f, 31f, 52f, 31f, paint)
+    canvas.drawLine(20f, 79f, 52f, 79f, paint)
+    canvas.drawRoundRect(RectF(23f, 36f, 49f, 72f), 3f, 3f, paint)
 
-    // Bumper and wheels.
-    paint.color = SafarBlue.toArgb()
-    canvas.drawRoundRect(RectF(31f, 65f, 40f, 77f), 3f, 3f, paint)
-    canvas.drawRoundRect(RectF(56f, 65f, 65f, 77f), 3f, 3f, paint)
-    paint.color = android.graphics.Color.WHITE
-    canvas.drawCircle(35.5f, 70f, 2.2f, paint)
-    canvas.drawCircle(60.5f, 70f, 2.2f, paint)
+    // Rear window and tail lights.
+    paint.color = android.graphics.Color.rgb(55, 69, 85)
+    canvas.drawRoundRect(RectF(23f, 85f, 49f, 97f), 3f, 3f, paint)
+    paint.color = android.graphics.Color.rgb(230, 65, 65)
+    canvas.drawRoundRect(RectF(18f, 97f, 23f, 103f), 1.5f, 1.5f, paint)
+    canvas.drawRoundRect(RectF(49f, 97f, 54f, 103f), 1.5f, 1.5f, paint)
 
     return bitmap
 }
