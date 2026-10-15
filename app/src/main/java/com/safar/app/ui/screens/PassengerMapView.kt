@@ -484,7 +484,7 @@ private fun setupMapLayers(style: Style, context: Context) {
     if (style.getLayer(USER_HEADING_LAYER_ID) == null) {
         style.addLayer(
             FillLayer(USER_HEADING_LAYER_ID, USER_HEADING_SOURCE_ID).withProperties(
-                fillColor(SafarBlue.toArgb()), fillOpacity(0.42f)
+                fillColor(SafarBlue.toArgb()), fillOpacity(0.20f)
             )
         )
     }
@@ -586,8 +586,8 @@ private fun updateHeadingSector(style: Style, center: GeoPoint?, headingDegrees:
         return
     }
     Log.d("SafarHeadingSector", "Sector updated at ${center.latitude},${center.longitude}, heading=$headingDegrees")
-    val radius = 0.0025
-    val halfAngle = 38.0
+    val radius = 0.0009
+    val halfAngle = 30.0
     val points = mutableListOf<Point>()
     points += Point.fromLngLat(center.longitude, center.latitude)
     for (step in 0..12) {
