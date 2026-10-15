@@ -241,6 +241,22 @@ class DriverLocationService : Service() {
             headingDegrees = latestHeadingDegrees,
         )
 
+        // Persist the heading above, then broadcast the same GPS fix and compass
+        // azimuth so passenger maps can rotate the vehicle marker immediately.
+        runCatching {
+            AppContainer.realtimeTransport.connect(routeId)
+            AppContainer.realtimeTransport.sendDriverLocation(
+                routeId = routeId,
+                vehicleId = driver.vehicleId,
+                latitude = latitude,
+                longitude = longitude,
+                recordedAtIso = timestamp,
+                headingDegrees = latestHeadingDegrees,
+            )
+        }.onFailure { error ->
+            android.util.Log.w(TAG, "Realtime vehicle location broadcast failed", error)
+        }
+
         android.util.Log.d(
             TAG,
             "Vehicle location saved: vehicle=${driver.vehicleId} route=$routeId",
