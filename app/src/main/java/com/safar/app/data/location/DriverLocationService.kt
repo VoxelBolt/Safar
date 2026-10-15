@@ -42,6 +42,9 @@ class DriverLocationService : Service() {
     private var locationStreamJob: Job? = null
     private var headingJob: Job? = null
     @Volatile private var latestHeadingDegrees: Float? = null
+    @Volatile private var lastPublishedHeadingDegrees: Float? = null
+    @Volatile private var lastHeadingPublishRequestAtMs = 0L
+    @Volatile private var lastHeadingPublishedAtMs = 0L
     private val locationPublishMutex = Mutex()
     private var lastPublishedLocationTimestamp = 0L
     private val driverSnapshot = AtomicReference<com.safar.app.domain.model.Driver?>(null)
@@ -131,7 +134,21 @@ class DriverLocationService : Service() {
                 try {
                     locationProvider.headingDegrees().collectLatest { degrees ->
                         if (degrees.isFinite()) {
-                            latestHeadingDegrees = ((degrees % 360f) + 360f) % 360f
+                            val normalized = ((degrees % 360f) + 360f) % 360f
+                            latestHeadingDegrees = normalized
+
+                            // GPS timestamps often stop changing while the vehicle is parked.
+                            // Publish meaningful compass turns independently of new GPS fixes.
+                            val lastPublished = lastPublishedHeadingDegrees
+                            val now = System.currentTimeMillis()
+                            val headingChanged = lastPublished == null ||
+                                angularDifferenceDegrees(lastPublished, normalized) >= HEADING_CHANGE_THRESHOLD_DEGREES
+                            if (networkAvailable && headingChanged &&
+                                now - lastHeadingPublishRequestAtMs >= HEADING_PUBLISH_MIN_INTERVAL_MS
+                            ) {
+                                lastHeadingPublishRequestAtMs = now
+                                publishCurrentLocationOnce()
+                            }
                         }
                     }
                 } catch (error: CancellationException) {
@@ -212,13 +229,41 @@ class DriverLocationService : Service() {
         // Stream and fallback fixes can arrive concurrently. Serialize them so
         // the same fix cannot trigger overlapping backend writes.
         locationPublishMutex.withLock {
-            // Reject cached/out-of-order fixes, but only remember a timestamp
-            // after the backend confirms the write. Failed writes remain retryable.
-            if (timestampEpochMs <= lastPublishedLocationTimestamp) return
-            val recordedAtIso = Instant.ofEpochMilli(timestampEpochMs).toString()
+            // GPS may return the same cached timestamp while the phone is rotating.
+            // In that case publish the same coordinate with a fresh server timestamp
+            // when the compass heading has changed enough to matter.
+            val now = System.currentTimeMillis()
+            val isNewGpsFix = timestampEpochMs > lastPublishedLocationTimestamp
+            val heading = latestHeadingDegrees
+            val headingChanged = heading != null && (
+                lastPublishedHeadingDegrees == null ||
+                    angularDifferenceDegrees(lastPublishedHeadingDegrees!!, heading) >= HEADING_CHANGE_THRESHOLD_DEGREES
+                )
+            val canPublishHeading = headingChanged &&
+                now - lastHeadingPublishedAtMs >= HEADING_PUBLISH_MIN_INTERVAL_MS
+
+            if (!isNewGpsFix && !canPublishHeading) return
+
+            val publishTimestamp = if (isNewGpsFix) timestampEpochMs else now
+            val recordedAtIso = Instant.ofEpochMilli(publishTimestamp).toString()
             publishDriverSample(sample.point.latitude, sample.point.longitude, recordedAtIso)
-            lastPublishedLocationTimestamp = timestampEpochMs
+
+            if (isNewGpsFix) lastPublishedLocationTimestamp = timestampEpochMs
+            if (heading != null) {
+                lastPublishedHeadingDegrees = heading
+                lastHeadingPublishedAtMs = now
+            }
+            android.util.Log.d(
+                TAG,
+                "Published driver fix: newGps=" + isNewGpsFix + " heading=" + heading +
+                    " lat=" + sample.point.latitude + " lon=" + sample.point.longitude,
+            )
         }
+    }
+
+    private fun angularDifferenceDegrees(a: Float, b: Float): Float {
+        val difference = kotlin.math.abs(a - b) % 360f
+        return kotlin.math.min(difference, 360f - difference)
     }
 
     private suspend fun publishDriverSample(latitude: Double, longitude: Double, recordedAtIso: String?) {
@@ -320,6 +365,8 @@ class DriverLocationService : Service() {
         private const val ACTION_STOP = "com.safar.app.STOP_DRIVER_LOCATION"
         private const val DRIVER_REFRESH_MS = 30_000L
         private const val PUBLISH_INTERVAL_MS = 10_000L
+        private const val HEADING_CHANGE_THRESHOLD_DEGREES = 4f
+        private const val HEADING_PUBLISH_MIN_INTERVAL_MS = 1_000L
         private const val TAG = "SafarDriverGPS"
         fun start(context: Context) {
             val hasPermission =
