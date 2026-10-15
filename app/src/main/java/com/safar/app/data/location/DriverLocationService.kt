@@ -47,6 +47,7 @@ class DriverLocationService : Service() {
     @Volatile private var lastHeadingPublishedAtMs = 0L
     private val locationPublishMutex = Mutex()
     private var lastPublishedLocationTimestamp = 0L
+    @Volatile private var lastSuccessfulPublishAtMs = 0L
     private val driverSnapshot = AtomicReference<com.safar.app.domain.model.Driver?>(null)
     @Volatile private var driverSnapshotLoadedAt = 0L
     @Volatile private var networkAvailable = false
@@ -226,13 +227,21 @@ class DriverLocationService : Service() {
         val timestampEpochMs = sample.timestampEpochMs
         if (timestampEpochMs <= 0L) return
 
+        // Never refresh a location from an excessively old cached GPS fix.
+        // The database cleanup removes location state after four minutes; allow
+        // a shorter reuse window so stationary devices can heartbeat without
+        // keeping genuinely stale coordinates alive.
+        val now = System.currentTimeMillis()
+        val fixAgeMs = now - timestampEpochMs
+        if (fixAgeMs < -30_000L || fixAgeMs > MAX_REUSABLE_FIX_AGE_MS) {
+            android.util.Log.w(TAG, "Skipping stale GPS fix: ageMs=$fixAgeMs")
+            return
+        }
+
         // Stream and fallback fixes can arrive concurrently. Serialize them so
         // the same fix cannot trigger overlapping backend writes.
         locationPublishMutex.withLock {
-            // GPS may return the same cached timestamp while the phone is rotating.
-            // In that case publish the same coordinate with a fresh server timestamp
-            // when the compass heading has changed enough to matter.
-            val now = System.currentTimeMillis()
+            val publishNow = System.currentTimeMillis()
             val isNewGpsFix = timestampEpochMs > lastPublishedLocationTimestamp
             val heading = latestHeadingDegrees
             val headingChanged = heading != null && (
@@ -240,22 +249,34 @@ class DriverLocationService : Service() {
                     angularDifferenceDegrees(lastPublishedHeadingDegrees!!, heading) >= HEADING_CHANGE_THRESHOLD_DEGREES
                 )
             val canPublishHeading = headingChanged &&
-                now - lastHeadingPublishedAtMs >= HEADING_PUBLISH_MIN_INTERVAL_MS
+                publishNow - lastHeadingPublishedAtMs >= HEADING_PUBLISH_MIN_INTERVAL_MS
 
-            if (!isNewGpsFix && !canPublishHeading) return
+            // Some Android devices repeatedly return the same cached timestamp
+            // while stationary. Refresh that coordinate at the normal GPS
+            // heartbeat interval, otherwise cleanup_expired_location_state()
+            // deletes it after four minutes and passengers see "no active vehicle".
+            val heartbeatDue = !isNewGpsFix &&
+                publishNow - lastSuccessfulPublishAtMs >= PUBLISH_INTERVAL_MS
 
-            val publishTimestamp = if (isNewGpsFix) timestampEpochMs else now
+            if (!isNewGpsFix && !canPublishHeading && !heartbeatDue) return
+
+            // A heartbeat gets a fresh timestamp only when the underlying fix is
+            // still recent. This keeps the server TTL meaningful and allows the
+            // passenger map to continue receiving a stationary driver's marker.
+            val publishTimestamp = if (isNewGpsFix) timestampEpochMs else publishNow
             val recordedAtIso = Instant.ofEpochMilli(publishTimestamp).toString()
             publishDriverSample(sample.point.latitude, sample.point.longitude, recordedAtIso)
 
+            lastSuccessfulPublishAtMs = System.currentTimeMillis()
             if (isNewGpsFix) lastPublishedLocationTimestamp = timestampEpochMs
             if (heading != null) {
                 lastPublishedHeadingDegrees = heading
-                lastHeadingPublishedAtMs = now
+                lastHeadingPublishedAtMs = publishNow
             }
             android.util.Log.d(
                 TAG,
-                "Published driver fix: newGps=" + isNewGpsFix + " heading=" + heading +
+                "Published driver fix: newGps=" + isNewGpsFix +
+                    " heartbeat=" + heartbeatDue + " heading=" + heading +
                     " lat=" + sample.point.latitude + " lon=" + sample.point.longitude,
             )
         }
@@ -367,6 +388,7 @@ class DriverLocationService : Service() {
         private const val PUBLISH_INTERVAL_MS = 10_000L
         private const val HEADING_CHANGE_THRESHOLD_DEGREES = 4f
         private const val HEADING_PUBLISH_MIN_INTERVAL_MS = 1_000L
+        private const val MAX_REUSABLE_FIX_AGE_MS = 3 * 60 * 1_000L
         private const val TAG = "SafarDriverGPS"
         fun start(context: Context) {
             val hasPermission =
