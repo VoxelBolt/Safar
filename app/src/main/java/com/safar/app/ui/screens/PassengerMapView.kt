@@ -3,6 +3,10 @@ package com.safar.app.ui.screens
 import com.safar.app.R
 import android.content.Context
 import android.graphics.PointF
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.RectF
 import android.os.Bundle
 import android.util.Log
 import androidx.compose.foundation.background
@@ -49,6 +53,7 @@ import org.maplibre.android.maps.Style
 import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.FillLayer
 import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.layers.PropertyFactory.circleColor
 import org.maplibre.android.style.layers.PropertyFactory.circleRadius
 import org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor
@@ -61,6 +66,10 @@ import org.maplibre.android.style.layers.PropertyFactory.lineColor
 import org.maplibre.android.style.layers.PropertyFactory.lineJoin
 import org.maplibre.android.style.layers.PropertyFactory.lineOpacity
 import org.maplibre.android.style.layers.PropertyFactory.lineWidth
+import org.maplibre.android.style.layers.PropertyFactory.iconImage
+import org.maplibre.android.style.layers.PropertyFactory.iconSize
+import org.maplibre.android.style.layers.PropertyFactory.iconAllowOverlap
+import org.maplibre.android.style.layers.PropertyFactory.iconIgnorePlacement
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
@@ -83,6 +92,7 @@ private const val USER_LOCATION_CIRCLE_LAYER_ID = "safar-user-location-circle-la
 private const val USER_LOCATION_PULSE_LAYER_ID = "safar-user-location-pulse-layer"
 private const val VEHICLES_SOURCE_ID = "safar-vehicles-source"
 private const val VEHICLES_LAYER_ID = "safar-vehicles-layer"
+private const val VEHICLE_MARKER_IMAGE_ID = "safar-bus-marker-image"
 private const val VEHICLE_LABEL_LAYER_ID = "safar-vehicle-label-layer"
 
 private const val DEFAULT_LATITUDE = 40.2829
@@ -476,16 +486,18 @@ private fun setupMapLayers(style: Style, context: Context) {
             )
         )
     }
-    // Keep the vehicle marker layer above every route/POI/user layer.
-    // The marker must remain visible regardless of which route is selected.
+    // Use a bus-shaped marker instead of the small blue location dot.
+    // A white circular badge keeps the blue bus readable on busy map tiles.
+    if (style.getImage(VEHICLE_MARKER_IMAGE_ID) == null) {
+        style.addImage(VEHICLE_MARKER_IMAGE_ID, createBusMarkerBitmap())
+    }
     style.getLayer(VEHICLES_LAYER_ID)?.let { style.removeLayer(VEHICLES_LAYER_ID) }
     style.addLayer(
-        CircleLayer(VEHICLES_LAYER_ID, VEHICLES_SOURCE_ID).withProperties(
-            circleColor(SafarBlue.toArgb()),
-            circleRadius(7f),
-            circleStrokeColor(Color.White.toArgb()),
-            circleStrokeWidth(2.5f),
-            circleOpacity(1f),
+        SymbolLayer(VEHICLES_LAYER_ID, VEHICLES_SOURCE_ID).withProperties(
+            iconImage(VEHICLE_MARKER_IMAGE_ID),
+            iconSize(0.72f),
+            iconAllowOverlap(true),
+            iconIgnorePlacement(true),
         )
     )
 
@@ -508,6 +520,43 @@ private fun setupMapLayers(style: Style, context: Context) {
             )
         )
     }
+}
+
+
+private fun createBusMarkerBitmap(): Bitmap {
+    val size = 96
+    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    // White badge with a subtle outline.
+    paint.color = android.graphics.Color.WHITE
+    canvas.drawCircle(48f, 48f, 45f, paint)
+    paint.color = android.graphics.Color.rgb(220, 230, 244)
+    paint.style = Paint.Style.STROKE
+    paint.strokeWidth = 2.5f
+    canvas.drawCircle(48f, 48f, 44f, paint)
+    paint.style = Paint.Style.FILL
+
+    // Blue minibus body.
+    paint.color = SafarBlue.toArgb()
+    canvas.drawRoundRect(RectF(25f, 19f, 71f, 70f), 9f, 9f, paint)
+
+    // Front windshield and side windows.
+    paint.color = android.graphics.Color.WHITE
+    canvas.drawRoundRect(RectF(31f, 25f, 65f, 39f), 3f, 3f, paint)
+    paint.color = android.graphics.Color.rgb(205, 229, 255)
+    canvas.drawRect(31f, 43f, 65f, 47f, paint)
+
+    // Bumper and wheels.
+    paint.color = SafarBlue.toArgb()
+    canvas.drawRoundRect(RectF(31f, 65f, 40f, 77f), 3f, 3f, paint)
+    canvas.drawRoundRect(RectF(56f, 65f, 65f, 77f), 3f, 3f, paint)
+    paint.color = android.graphics.Color.WHITE
+    canvas.drawCircle(35.5f, 70f, 2.2f, paint)
+    canvas.drawCircle(60.5f, 70f, 2.2f, paint)
+
+    return bitmap
 }
 
 
