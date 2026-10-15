@@ -491,9 +491,8 @@ private fun setupMapLayers(style: Style, context: Context) {
     if (style.getImage(VEHICLE_MARKER_IMAGE_ID) == null) {
         val markerBitmap = BitmapFactory.decodeResource(context.resources, R.drawable.safar_vehicle_marker)
             ?: error("Cannot decode vehicle marker resource: safar_vehicle_marker.png")
-        // Tell MapLibre the image represents a vehicle facing upward (north).
-        // The per-feature compass azimuth rotates this transparent PNG on the map.
-        style.addImage(VEHICLE_MARKER_IMAGE_ID, markerBitmap, true)
+        // The feature's compass azimuth rotates this transparent PNG on the map.
+        style.addImage(VEHICLE_MARKER_IMAGE_ID, markerBitmap)
     }
     style.getLayer(VEHICLES_LAYER_ID)?.let { style.removeLayer(VEHICLES_LAYER_ID) }
     style.addLayer(
