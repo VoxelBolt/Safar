@@ -498,7 +498,7 @@ private fun setupMapLayers(style: Style, context: Context) {
     style.addLayer(
         SymbolLayer(VEHICLES_LAYER_ID, VEHICLES_SOURCE_ID).withProperties(
             iconImage(VEHICLE_MARKER_IMAGE_ID),
-            iconSize(0.9f),
+            iconSize(0.16f),
             iconAllowOverlap(true),
             iconIgnorePlacement(true),
             iconRotate(Expression.get(VEHICLE_HEADING_PROPERTY)),
