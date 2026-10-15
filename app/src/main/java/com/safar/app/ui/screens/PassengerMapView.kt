@@ -136,6 +136,7 @@ internal fun PassengerMapView(
     var styleReady by remember { mutableStateOf(false) }
     var centeredOnUser by remember { mutableStateOf(false) }
     var lastCameraRouteId by remember { mutableStateOf<String?>(null) }
+    var autoFocusedVehicle by remember(route?.id) { mutableStateOf(false) }
     val vehicleLocationStabilizer = remember(route?.id) { VehicleLocationStabilizer() }
     val stabilizedVehicleLocations = vehicleLocationStabilizer.stabilize(vehicleLocations)
     val mapReady = rememberMapLibre(context)
@@ -341,17 +342,31 @@ internal fun PassengerMapView(
     }
 
     LaunchedEffect(styleReady, route?.id, stabilizedVehicleLocations) {
-        if (!styleReady || route == null || route.id == lastCameraRouteId) return@LaunchedEffect
+        if (!styleReady || route == null) return@LaunchedEffect
 
-        // If a live vehicle exists, the vehicle-camera effect above owns the
-        // camera. Never move the map back to the route midpoint afterwards.
-        // Otherwise the active vehicle can be rendered outside the viewport,
-        // which makes the marker look like it disappeared.
+        // If a live vehicle arrives after the map was centered on the passenger
+        // or route, bring it into view once. This is especially important when
+        // the passenger emulator is using its default location in another country.
+        // Do not keep recentering: the passenger remains free to pan and zoom.
         if (stabilizedVehicleLocations.isNotEmpty()) {
+            if (!autoFocusedVehicle) {
+                val firstLocation = stabilizedVehicleLocations.first().second
+                val vehicleTarget = LatLng(firstLocation.latitude, firstLocation.longitude)
+                val isVisible = runCatching {
+                    map?.projection?.visibleRegion?.latLngBounds?.contains(vehicleTarget) == true
+                }.getOrDefault(false)
+                if (!isVisible) {
+                    map?.animateCamera(
+                        CameraUpdateFactory.newLatLngZoom(vehicleTarget, USER_FOCUS_ZOOM)
+                    )
+                }
+                autoFocusedVehicle = true
+            }
             lastCameraRouteId = route.id
             return@LaunchedEffect
         }
 
+        if (route.id == lastCameraRouteId) return@LaunchedEffect
         if (passengerLocation != null && !centeredOnUser) return@LaunchedEffect
         val path = route.path
         if (path.size >= 2) {
