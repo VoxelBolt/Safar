@@ -104,7 +104,7 @@ class SupabaseRealtimeTransport(private val client: SupabaseClient = SupabaseCli
         latitude:Double,
         longitude:Double,
         recordedAtIso:String,
-        headingDegrees:Float? = null,
+        headingDegrees:Float?,
     ) {
         ensureConnected(routeId)
         val realtimeChannel=channel ?: return
