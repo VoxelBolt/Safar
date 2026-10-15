@@ -125,13 +125,14 @@ class DriverLocationService : Service() {
     private fun startPublishingIfNeeded() {
         if (publishingJob?.isActive == true) return
 
-        // Keep heading capture active as an independent sensor stream. Existing
-        // location publication still controls when the latest heading is transmitted.
+        // Capture phone orientation independently of GPS, including while stationary.
         if (headingJob?.isActive != true) {
             headingJob = scope.launch {
                 try {
                     locationProvider.headingDegrees().collectLatest { degrees ->
-                        if (degrees.isFinite()) latestHeadingDegrees = ((degrees % 360f) + 360f) % 360f
+                        if (degrees.isFinite()) {
+                            latestHeadingDegrees = ((degrees % 360f) + 360f) % 360f
+                        }
                     }
                 } catch (error: CancellationException) {
                     throw error
