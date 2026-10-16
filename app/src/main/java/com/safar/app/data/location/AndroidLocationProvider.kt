@@ -166,8 +166,6 @@ class AndroidLocationProvider(private val context: Context) {
         }
 
         val rotationMatrix = FloatArray(9)
-        val displayAdjustedMatrix = FloatArray(9)
-        val orientation = FloatArray(3)
         var gravityValues: FloatArray? = null
         var magneticValues: FloatArray? = null
         var lastEmittedHeading: Float? = null
@@ -175,42 +173,30 @@ class AndroidLocationProvider(private val context: Context) {
         val displayRotation = (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager)
             .defaultDisplay.rotation
 
-        // The compass direction must follow the phone's top edge, not the raw
-        // sensor's fixed device Y axis. Remap sensor axes for the current display
-        // rotation before extracting azimuth, including landscape/rotated screens.
-        val displayAxes = when (displayRotation) {
-            Surface.ROTATION_90 -> SensorManager.AXIS_Y to SensorManager.AXIS_MINUS_X
-            Surface.ROTATION_180 -> SensorManager.AXIS_MINUS_X to SensorManager.AXIS_MINUS_Y
-            Surface.ROTATION_270 -> SensorManager.AXIS_MINUS_Y to SensorManager.AXIS_X
-            else -> SensorManager.AXIS_X to SensorManager.AXIS_Y
-        }
-
+        // Follow the phone's top edge rather than device Z-axis azimuth. This works
+        // while the phone is held upright as well as when it is flat.
         fun emitHeadingFromMatrix() {
-            if (!SensorManager.remapCoordinateSystem(
-                    rotationMatrix,
-                    displayAxes.first,
-                    displayAxes.second,
-                    displayAdjustedMatrix,
-                )
-            ) return
-            SensorManager.getOrientation(displayAdjustedMatrix, orientation)
-            val rawDegrees = Math.toDegrees(orientation[0].toDouble()).toFloat()
+            val east: Float
+            val north: Float
+            when (displayRotation) {
+                Surface.ROTATION_90 -> { east = rotationMatrix[0]; north = rotationMatrix[3] }
+                Surface.ROTATION_180 -> { east = -rotationMatrix[1]; north = -rotationMatrix[4] }
+                Surface.ROTATION_270 -> { east = -rotationMatrix[0]; north = -rotationMatrix[3] }
+                else -> { east = rotationMatrix[1]; north = rotationMatrix[4] }
+            }
+            val horizontalMagnitude = kotlin.math.sqrt(east * east + north * north)
+            if (horizontalMagnitude < 0.15f) return
+            val rawDegrees = Math.toDegrees(kotlin.math.atan2(east.toDouble(), north.toDouble())).toFloat()
             val degrees = ((rawDegrees % 360f) + 360f) % 360f
             if (!degrees.isFinite()) return
-
-            // Filter only sub-degree sensor noise. A physical turn must update both
-            // the driver's heading sector and the heading sent to passenger maps.
             val previous = lastEmittedHeading
-            val delta = if (previous == null) 360f else kotlin.math.abs(
-                ((degrees - previous + 540f) % 360f) - 180f
-            )
+            val delta = if (previous == null) 360f else kotlin.math.abs(((degrees - previous + 540f) % 360f) - 180f)
             if (delta >= 1.0f) {
                 lastEmittedHeading = degrees
                 trySend(degrees)
-                Log.d(TAG, "Compass azimuth updated: ${degrees.toInt()}°")
+                Log.d(TAG, "Phone top-edge compass heading updated: " + degrees.toInt() + "°")
             }
         }
-
         val listener = object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent) {
                 if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR ||
@@ -221,7 +207,6 @@ class AndroidLocationProvider(private val context: Context) {
                     return
                 }
 
-                // Last-resort compatibility path for older or unusual Android devices.
                 @Suppress("DEPRECATION")
                 if (event.sensor.type == Sensor.TYPE_ORIENTATION) {
                     val degrees = ((event.values[0] % 360f) + 360f) % 360f
@@ -232,7 +217,7 @@ class AndroidLocationProvider(private val context: Context) {
                     if (degrees.isFinite() && delta >= 1f) {
                         lastEmittedHeading = degrees
                         trySend(degrees)
-                        Log.d(TAG, "Legacy compass heading updated: ${degrees.toInt()}°")
+                        Log.d(TAG, "Legacy compass heading updated: " + degrees.toInt() + "°")
                     }
                     return
                 }
@@ -251,40 +236,28 @@ class AndroidLocationProvider(private val context: Context) {
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
         }
 
-        // Register every available absolute-compass source rather than choosing
-        // exactly one. Some OEM rotation-vector implementations stop delivering
-        // useful azimuth changes while the device is upright; the legacy compass
-        // sensor provides a second absolute-north reading on those devices.
+        // Register one source at a time. Mixing the rotation vector and legacy
+        // orientation sensor can overwrite a correct top-edge heading with an
+        // azimuth measured around a different device axis.
         var registered = false
         if (rotationSensor != null) {
-            registered = sensorManager.registerListener(
-                listener, rotationSensor, SensorManager.SENSOR_DELAY_GAME
-            ) || registered
-            Log.d(TAG, "Heading sensor started: rotation vector")
-        }
-        if (legacyOrientationSensor != null) {
-            @Suppress("DEPRECATION")
-            val legacyRegistered = sensorManager.registerListener(
-                listener, legacyOrientationSensor, SensorManager.SENSOR_DELAY_GAME
-            )
-            registered = legacyRegistered || registered
-            Log.d(TAG, "Heading sensor started: legacy orientation, registered=$legacyRegistered")
+            registered = sensorManager.registerListener(listener, rotationSensor, SensorManager.SENSOR_DELAY_GAME)
+            Log.d(TAG, "Heading sensor: rotation vector, registered=" + registered)
         }
         if (!registered && gameRotationSensor != null) {
-            registered = sensorManager.registerListener(
-                listener, gameRotationSensor, SensorManager.SENSOR_DELAY_GAME
-            ) || registered
-            Log.d(TAG, "Heading sensor started: game rotation vector")
+            registered = sensorManager.registerListener(listener, gameRotationSensor, SensorManager.SENSOR_DELAY_GAME)
+            Log.d(TAG, "Heading sensor: game rotation vector, registered=" + registered)
         }
         if (!registered && accelerometer != null && magnetometer != null) {
-            val accelRegistered = sensorManager.registerListener(
-                listener, accelerometer, SensorManager.SENSOR_DELAY_GAME
-            )
-            val magneticRegistered = sensorManager.registerListener(
-                listener, magnetometer, SensorManager.SENSOR_DELAY_GAME
-            )
+            val accelRegistered = sensorManager.registerListener(listener, accelerometer, SensorManager.SENSOR_DELAY_GAME)
+            val magneticRegistered = sensorManager.registerListener(listener, magnetometer, SensorManager.SENSOR_DELAY_GAME)
             registered = accelRegistered && magneticRegistered
-            Log.d(TAG, "Heading sensor started: accelerometer + magnetometer, registered=$registered")
+            Log.d(TAG, "Heading sensor: accelerometer + magnetometer, registered=" + registered)
+        }
+        if (!registered && legacyOrientationSensor != null) {
+            @Suppress("DEPRECATION")
+            registered = sensorManager.registerListener(listener, legacyOrientationSensor, SensorManager.SENSOR_DELAY_GAME)
+            Log.d(TAG, "Heading sensor: legacy orientation fallback, registered=" + registered)
         }
         if (!registered) {
             Log.e(TAG, "Compass sensor registration failed; heading stream cannot update")
