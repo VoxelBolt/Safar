@@ -542,16 +542,33 @@ private fun setupMapLayers(style: Style, context: Context) {
         )
     }
 
-    // Keep the compass sector visible above the basemap and pulse, while the
-    // location dot remains the top-most marker. Explicit placement is important
-    // because MapLibre style versions differ in where new layers are inserted.
+    // Rebuild the user-direction layers in a deterministic order on every
+    // style load: pulse -> compass sector -> location dot. Do not rely on relative
+    // insertion order left over from the initial style setup.
     style.getLayer(USER_HEADING_LAYER_ID)?.let { style.removeLayer(it) }
-    style.addLayerAbove(
+    style.getLayer(USER_LOCATION_CIRCLE_LAYER_ID)?.let { style.removeLayer(it) }
+    style.getLayer(USER_LOCATION_PULSE_LAYER_ID)?.let { style.removeLayer(it) }
+
+    style.addLayer(
+        CircleLayer(USER_LOCATION_PULSE_LAYER_ID, USER_LOCATION_SOURCE_ID).withProperties(
+            circleColor(SafarBlue.toArgb()),
+            circleRadius(16f),
+            circleOpacity(0.16f),
+        )
+    )
+    style.addLayer(
         FillLayer(USER_HEADING_LAYER_ID, USER_HEADING_SOURCE_ID).withProperties(
             fillColor(SafarBlue.toArgb()),
             fillOpacity(0.20f),
-        ),
-        USER_LOCATION_PULSE_LAYER_ID,
+        )
+    )
+    style.addLayer(
+        CircleLayer(USER_LOCATION_CIRCLE_LAYER_ID, USER_LOCATION_SOURCE_ID).withProperties(
+            circleColor(SafarBlue.toArgb()),
+            circleRadius(7f),
+            circleStrokeColor(Color.White.toArgb()),
+            circleStrokeWidth(2.5f),
+        )
     )
 }
 
