@@ -281,6 +281,8 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                     if (_uiState.value.nearestVehicleTrackingEnabled) {
                         (_uiState.value.passengerLocation ?: _uiState.value.mapCenterLocation)?.let { updateNearestVehicle(it, active) }
                     }
+                } catch (timeout: TimeoutCancellationException) {
+                    android.util.Log.w("SafarVehicle", "poll timed out; retrying after the polling interval", timeout)
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
