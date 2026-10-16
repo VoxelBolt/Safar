@@ -289,8 +289,8 @@ internal fun PassengerMapView(
                     map?.let { loadedMap ->
                         loadedMap.style?.let { style ->
                             val visibleVehicles = displayVehicleLocations(stabilizedVehicleLocations, nearestVehicle)
-                        updateVehicles(style, visibleVehicles)
-                        updateVehicleHeadingSectors(style, visibleVehicles)
+                            updateVehicles(style, visibleVehicles)
+                            updateVehicleHeadingSectors(style, visibleVehicles)
                         }
                     }
                 }
