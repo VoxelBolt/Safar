@@ -421,8 +421,8 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                 val current = _uiState.value
                 val active = freshVehicles(current.activeVehicles)
                 // Do not age server-confirmed vehicles using the passenger phone's
-                // clock. The 10-second server poll removes vehicles after the
-                // database's 5-minute freshness window expires.
+                // clock. The 10-second server poll removes vehicles when the
+                // database's one-minute freshness window expires.
                 if (active.size != current.activeVehicles.size) {
                     val activeIds = active.mapTo(mutableSetOf()) { it.id }
                     val nearest = current.nearestVehicle?.takeIf { it.id in activeIds }
