@@ -814,7 +814,7 @@ fun DriverMainScreen(state: OnboardingState, onLanguageSelected: (String) -> Uni
                 onPauseWork = driverViewModel::pauseWork,
                 onResumeWork = driverViewModel::resumeWork,
                 onFinishWork = driverViewModel::finishWork,
-                onPublishDriverLocation = { point, heading -> driverViewModel.publishDriverLocation(point, heading) },
+                onPublishDriverLocation = { point, heading, timestamp -> driverViewModel.publishDriverLocation(point, heading, timestamp) },
                 foregroundLocationGranted = foregroundLocationGranted,
                 onRequestTrackingPermission = ::requestDriverTrackingPermission,
                 modifier = Modifier.padding(padding),
@@ -839,7 +839,7 @@ private fun DriverHomeScreen(
     onPauseWork: () -> Unit,
     onResumeWork: () -> Unit,
     onFinishWork: () -> Unit,
-    onPublishDriverLocation: (GeoPoint, Float?) -> Unit,
+    onPublishDriverLocation: (GeoPoint, Float?, Long) -> Unit,
     foregroundLocationGranted: Boolean,
     onRequestTrackingPermission: () -> Unit,
     modifier: Modifier = Modifier,
@@ -872,7 +872,12 @@ private fun DriverHomeScreen(
             driverLocationProvider.currentLocationSample { sample ->
                 if (sample != null) {
                     driverLocation = sample.point
-                    onPublishDriverLocation(sample.point, driverHeadingDegrees)
+                    val fixAgeMs = System.currentTimeMillis() - sample.timestampEpochMs
+                    if (sample.timestampEpochMs > 0L && fixAgeMs in -30_000L..180_000L) {
+                        onPublishDriverLocation(sample.point, driverHeadingDegrees, sample.timestampEpochMs)
+                    } else {
+                        android.util.Log.w("SafarDriverGPS", "Skipping stale screen GPS fix: ageMs=$fixAgeMs")
+                    }
                 }
             }
             delay(5_000L)
