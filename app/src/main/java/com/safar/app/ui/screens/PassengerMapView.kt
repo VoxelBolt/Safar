@@ -538,10 +538,12 @@ private fun setupMapLayers(style: Style, context: Context) {
             iconSize(0.42f),
             iconAllowOverlap(true),
             iconIgnorePlacement(true),
-            // The asset's nose points north (up), so a compass azimuth in
-            // degrees clockwise from north can be applied directly.
+            // The bus PNG is portrait-shaped and its front points to the top
+            // edge. Compass azimuth is clockwise from north. Rotate the icon in
+            // screen space so the phone's compass bearing remains visually aligned
+            // regardless of the map camera's own rotation.
             iconRotate(Expression.get(VEHICLE_HEADING_PROPERTY)),
-            iconRotationAlignment("map"),
+            iconRotationAlignment("viewport"),
         )
     )
 
