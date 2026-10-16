@@ -10,6 +10,7 @@ import com.safar.app.domain.model.Vehicle
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -68,6 +69,11 @@ class ProfileViewModel : ViewModel() {
                     route = result.route,
                     vehicle = result.vehicle,
                 )
+            } catch (timeout: TimeoutCancellationException) {
+                _uiState.value = _uiState.value.copy(
+                    loading = false,
+                    error = "Сервер отвечает слишком долго. Попробуйте ещё раз.",
+                )
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -122,6 +128,11 @@ class ProfileViewModel : ViewModel() {
                     user = user,
                     saving = false,
                     error = null,
+                )
+            } catch (timeout: TimeoutCancellationException) {
+                _uiState.value = _uiState.value.copy(
+                    saving = false,
+                    error = "Сервер отвечает слишком долго. Попробуйте ещё раз.",
                 )
             } catch (cancelled: CancellationException) {
                 throw cancelled
