@@ -148,12 +148,16 @@ class AndroidLocationProvider(private val context: Context) {
         val rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
         val accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         val magnetometer = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
+        @Suppress("DEPRECATION")
+        val legacyOrientationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ORIENTATION)
 
-        // Prefer the fused rotation-vector sensor. If the phone does not provide it,
-        // derive compass heading from accelerometer + magnetic-field sensors instead
-        // of silently leaving the driver's blue heading sector blank.
-        if (rotationSensor == null && (accelerometer == null || magnetometer == null)) {
-            Log.w(TAG, "No usable orientation sensors; heading cannot be calculated")
+        // Prefer the rotation vector. Fall back to accelerometer + magnetometer,
+        // then the legacy orientation sensor on devices exposing neither pair.
+        if (rotationSensor == null &&
+            (accelerometer == null || magnetometer == null) &&
+            legacyOrientationSensor == null
+        ) {
+            Log.e(TAG, "No usable orientation sensor found; heading stream unavailable")
             close()
             return@callbackFlow
         }
@@ -212,6 +216,22 @@ class AndroidLocationProvider(private val context: Context) {
                     return
                 }
 
+                // Last-resort compatibility path for older or unusual Android devices.
+                @Suppress("DEPRECATION")
+                if (event.sensor.type == Sensor.TYPE_ORIENTATION) {
+                    val degrees = ((event.values[0] % 360f) + 360f) % 360f
+                    val previous = lastEmittedHeading
+                    val delta = if (previous == null) 360f else kotlin.math.abs(
+                        ((degrees - previous + 540f) % 360f) - 180f
+                    )
+                    if (degrees.isFinite() && delta >= 1f) {
+                        lastEmittedHeading = degrees
+                        trySend(degrees)
+                        Log.d(TAG, "Legacy compass heading updated: ${degrees.toInt()}°")
+                    }
+                    return
+                }
+
                 when (event.sensor.type) {
                     Sensor.TYPE_ACCELEROMETER -> gravityValues = event.values.clone()
                     Sensor.TYPE_MAGNETIC_FIELD -> magneticValues = event.values.clone()
@@ -226,19 +246,26 @@ class AndroidLocationProvider(private val context: Context) {
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
         }
 
-        val registered = if (rotationSensor != null) {
-            sensorManager.registerListener(listener, rotationSensor, SensorManager.SENSOR_DELAY_GAME).also {
-                Log.d(TAG, "Heading sensor started: rotation vector, registered=$it")
+        val registered = when {
+            rotationSensor != null -> sensorManager.registerListener(
+                listener, rotationSensor, SensorManager.SENSOR_DELAY_GAME
+            ).also { Log.d(TAG, "Heading sensor started: rotation vector, registered=$it") }
+            accelerometer != null && magnetometer != null -> {
+                val accelRegistered = sensorManager.registerListener(
+                    listener, accelerometer, SensorManager.SENSOR_DELAY_GAME
+                )
+                val magneticRegistered = sensorManager.registerListener(
+                    listener, magnetometer, SensorManager.SENSOR_DELAY_GAME
+                )
+                (accelRegistered && magneticRegistered).also {
+                    Log.d(TAG, "Heading sensor started: accelerometer + magnetometer, registered=$it")
+                }
             }
-        } else {
-            val accelRegistered = sensorManager.registerListener(
-                listener, accelerometer!!, SensorManager.SENSOR_DELAY_GAME
-            )
-            val magneticRegistered = sensorManager.registerListener(
-                listener, magnetometer!!, SensorManager.SENSOR_DELAY_GAME
-            )
-            (accelRegistered && magneticRegistered).also {
-                Log.d(TAG, "Heading sensor started: accelerometer + magnetometer, registered=$it")
+            else -> {
+                @Suppress("DEPRECATION")
+                sensorManager.registerListener(
+                    listener, legacyOrientationSensor!!, SensorManager.SENSOR_DELAY_GAME
+                ).also { Log.d(TAG, "Heading sensor started: legacy orientation, registered=$it") }
             }
         }
         if (!registered) {
