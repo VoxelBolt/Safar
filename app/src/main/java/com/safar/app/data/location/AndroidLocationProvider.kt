@@ -14,8 +14,6 @@ import android.hardware.SensorManager
 import android.os.Looper
 import android.content.Intent
 import android.provider.Settings
-import android.view.Surface
-import android.view.WindowManager
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
