@@ -460,11 +460,6 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             }
     }
 
-    private fun isFresh(timestampEpochMs: Long?): Boolean {
-        if (timestampEpochMs == null || timestampEpochMs <= 0L) return false
-        return System.currentTimeMillis() - timestampEpochMs <= LOCATION_FRESHNESS_MS
-    }
-
     fun onLocationPermissionResult(granted: Boolean) {
         _uiState.value = _uiState.value.copy(locationPermissionRequired = !granted)
         if (granted) {
@@ -472,7 +467,11 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             requestCurrentLocation(centerCamera = false)
         } else {
             stopLocationUpdates()
+            lastPassengerFixAtMs = 0L
             _uiState.value = _uiState.value.copy(passengerLocation = null)
+            _uiState.value.selectedRoute?.id?.let { routeId ->
+                viewModelScope.launch { runCatching { realtimeTransport.removePassengerLocation(routeId) } }
+            }
         }
     }
 
@@ -609,10 +608,6 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             ContextCompat.checkSelfPermission(getApplication(), Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
     private companion object {
-        // GPS records can arrive with small network/realtime delays. Keep a
-        // few minutes of history usable so the nearest vehicle and ETA do not
-        // disappear between two location updates.
-        const val LOCATION_FRESHNESS_MS = 60_000L
         const val STALE_SWEEP_INTERVAL_MS = 5_000L
         const val PASSENGER_BROADCAST_INTERVAL_MS = 5_000L
         const val PASSENGER_FIX_MAX_AGE_MS = 15_000L
