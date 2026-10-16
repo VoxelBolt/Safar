@@ -863,6 +863,10 @@ private fun DriverHomeScreen(
     // Null means the compass has not produced a measured angle yet. Keep this
     // nullable for publishing so a placeholder north angle is never sent to Supabase.
     var driverHeadingDegrees by remember { mutableStateOf<Float?>(null) }
+    // Read the latest sensor value from long-lived GPS publishing coroutines.
+    // Without rememberUpdatedState, the 5-second publisher captures the initial
+    // null heading and keeps sending it even after the compass starts updating.
+    val latestDriverHeadingDegrees by rememberUpdatedState(driverHeadingDegrees)
     var driverLocateRequestId by remember { mutableLongStateOf(0L) }
 
     // Fail-safe publisher: while the driver screen is visible and the driver has
@@ -876,7 +880,7 @@ private fun DriverHomeScreen(
                     driverLocation = sample.point
                     val fixAgeMs = System.currentTimeMillis() - sample.timestampEpochMs
                     if (sample.timestampEpochMs > 0L && fixAgeMs in -30_000L..180_000L) {
-                        onPublishDriverLocation(sample.point, driverHeadingDegrees, sample.timestampEpochMs)
+                        onPublishDriverLocation(sample.point, latestDriverHeadingDegrees, sample.timestampEpochMs)
                     } else {
                         android.util.Log.w("SafarDriverGPS", "Skipping stale screen GPS fix: ageMs=$fixAgeMs")
                     }
