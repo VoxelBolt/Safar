@@ -187,24 +187,12 @@ private fun PassengerMapScreen(
     val ui by viewModel.uiState.collectAsState()
     var pickerOpen by remember { mutableStateOf(false) }
 
-    if (pickerOpen) {
-        RoutePickerScreen(
-            routes = ui.routes,
-            recentRoutes = ui.recentRoutes,
-            loading = ui.loadingRoutes,
-            error = ui.error,
-            onBack = { pickerOpen = false },
-            onRouteSelected = {
-                viewModel.selectRoute(it)
-                pickerOpen = false
-            },
-            onRetry = viewModel::loadRoutes,
-            modifier = modifier,
-        )
-        return
-    }
-
-    Column(modifier = modifier.fillMaxSize()) {
+    // Keep the native MapLibre view composed while route search is open.
+    // Disposing and immediately recreating MapView on every route selection can
+    // race its native renderer/style lifecycle and leave a blank map until the
+    // user triggers another recomposition by changing tabs or selecting again.
+    Box(modifier = modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize()) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -449,6 +437,23 @@ private fun PassengerMapScreen(
                     }
                 }
             }
+        }
+    }
+
+        if (pickerOpen) {
+            RoutePickerScreen(
+                routes = ui.routes,
+                recentRoutes = ui.recentRoutes,
+                loading = ui.loadingRoutes,
+                error = ui.error,
+                onBack = { pickerOpen = false },
+                onRouteSelected = {
+                    viewModel.selectRoute(it)
+                    pickerOpen = false
+                },
+                onRetry = viewModel::loadRoutes,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
     }
 }
