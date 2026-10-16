@@ -186,7 +186,7 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
      * second path. This makes an active trip resilient if Android has stopped or
      * delayed the foreground service.
      */
-    fun publishDriverLocation(point: com.safar.app.domain.model.GeoPoint) {
+    fun publishDriverLocation(point: com.safar.app.domain.model.GeoPoint, headingDegrees: Float? = null) {
         val ui = _uiState.value
         if (ui.driver?.routeId == null) return
         viewModelScope.launch {
@@ -197,11 +197,14 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
                             latitude = point.latitude,
                             longitude = point.longitude,
                             recordedAtIso = Instant.now().toString(),
+                            headingDegrees = headingDegrees,
                         )
                     }
                 }
+            }.onSuccess { location ->
+                android.util.Log.d("SafarDriverGPS", "Foreground GPS saved: vehicle=${location.vehicleId}, heading=${location.headingDegrees}")
             }.onFailure { error ->
-                android.util.Log.w("SafarDriverGPS", "Foreground screen GPS publish failed", error)
+                android.util.Log.e("SafarDriverGPS", "Foreground screen GPS publish failed", error)
             }
         }
     }
