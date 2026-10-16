@@ -146,6 +146,10 @@ class AndroidLocationProvider(private val context: Context) {
     fun headingDegrees(): Flow<Float> = callbackFlow {
         val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
         val rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+        // Some devices expose only the game rotation vector. It still tracks
+        // physical turns smoothly; the compass heading may drift without magnetic
+        // correction, but a stationary phone rotation must never freeze the arrow.
+        val gameRotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
         val accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         val magnetometer = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
         @Suppress("DEPRECATION")
@@ -153,7 +157,7 @@ class AndroidLocationProvider(private val context: Context) {
 
         // Prefer the rotation vector. Fall back to accelerometer + magnetometer,
         // then the legacy orientation sensor on devices exposing neither pair.
-        if (rotationSensor == null &&
+        if (rotationSensor == null && gameRotationSensor == null &&
             (accelerometer == null || magnetometer == null) &&
             legacyOrientationSensor == null
         ) {
@@ -210,7 +214,9 @@ class AndroidLocationProvider(private val context: Context) {
 
         val listener = object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent) {
-                if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
+                if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR ||
+                    event.sensor.type == Sensor.TYPE_GAME_ROTATION_VECTOR
+                ) {
                     SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
                     emitHeadingFromMatrix()
                     return
@@ -250,6 +256,9 @@ class AndroidLocationProvider(private val context: Context) {
             rotationSensor != null -> sensorManager.registerListener(
                 listener, rotationSensor, SensorManager.SENSOR_DELAY_GAME
             ).also { Log.d(TAG, "Heading sensor started: rotation vector, registered=$it") }
+            gameRotationSensor != null -> sensorManager.registerListener(
+                listener, gameRotationSensor, SensorManager.SENSOR_DELAY_GAME
+            ).also { Log.d(TAG, "Heading sensor started: game rotation vector, registered=$it") }
             accelerometer != null && magnetometer != null -> {
                 val accelRegistered = sensorManager.registerListener(
                     listener, accelerometer, SensorManager.SENSOR_DELAY_GAME
