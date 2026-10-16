@@ -19,9 +19,11 @@ import com.safar.app.domain.model.Route
 import com.safar.app.domain.model.Vehicle
 import com.safar.app.domain.model.VehicleLocation
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -82,29 +84,37 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         if (_uiState.value.loadingRoutes) return
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(loadingRoutes = true, error = null)
-            runCatching { routeRepository.getRoutes().sortedBy { it.number } }
-                .onSuccess { routes ->
-                    // Keep route selection explicit: loading the route list must not
-                    // silently select the first route (previously route 15 could be
-                    // selected automatically when it happened to be first).
-                    val selected = _uiState.value.selectedRoute?.let { old -> routes.firstOrNull { it.id == old.id } }
-                    _uiState.value = _uiState.value.copy(
-                        routes = routes,
-                        selectedRoute = selected,
-                        loadingRoutes = false,
-                    )
-                    selected?.let {
-                        loadVehicles(it)
-                        startVehicleLocationPolling(it.id)
-                        switchRealtime(it.id)
-                    }
+            try {
+                val routes = withTimeout(BACKEND_REQUEST_TIMEOUT_MS) {
+                    routeRepository.getRoutes().sortedBy { it.number }
                 }
-                .onFailure { error ->
-                    _uiState.value = _uiState.value.copy(
-                        loadingRoutes = false,
-                        error = error.message ?: "Не удалось загрузить маршруты",
-                    )
+                // Keep route selection explicit: loading the route list must not
+                // silently select the first route (previously route 15 could be
+                // selected automatically when it happened to be first).
+                val selected = _uiState.value.selectedRoute?.let { old -> routes.firstOrNull { it.id == old.id } }
+                _uiState.value = _uiState.value.copy(
+                    routes = routes,
+                    selectedRoute = selected,
+                    loadingRoutes = false,
+                )
+                selected?.let {
+                    loadVehicles(it)
+                    startVehicleLocationPolling(it.id)
+                    switchRealtime(it.id)
                 }
+            } catch (timeout: TimeoutCancellationException) {
+                _uiState.value = _uiState.value.copy(
+                    loadingRoutes = false,
+                    error = "Сервер отвечает слишком долго. Попробуйте загрузить маршруты ещё раз.",
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    loadingRoutes = false,
+                    error = error.message ?: "Не удалось загрузить маршруты",
+                )
+            }
         }
     }
 
@@ -230,23 +240,31 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         vehicleRefreshJob?.cancel()
         vehicleRefreshJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(loadingVehicles = true)
-            runCatching { vehicleRepository.getActiveVehiclesForRoute(route.id) }
-                .onSuccess { vehicles ->
-                    val fresh = freshVehicles(vehicles)
-                    _uiState.value = _uiState.value.copy(
-                        activeVehicles = fresh,
-                        loadingVehicles = false,
-                    )
-                    if (_uiState.value.nearestVehicleTrackingEnabled) {
-                        (_uiState.value.passengerLocation ?: _uiState.value.mapCenterLocation)?.let { updateNearestVehicle(it, fresh) }
-                    }
+            try {
+                val vehicles = withTimeout(BACKEND_REQUEST_TIMEOUT_MS) {
+                    vehicleRepository.getActiveVehiclesForRoute(route.id)
                 }
-                .onFailure { error ->
-                    _uiState.value = _uiState.value.copy(
-                        loadingVehicles = false,
-                        error = error.message ?: "Не удалось получить транспорт",
-                    )
+                val fresh = freshVehicles(vehicles)
+                _uiState.value = _uiState.value.copy(
+                    activeVehicles = fresh,
+                    loadingVehicles = false,
+                )
+                if (_uiState.value.nearestVehicleTrackingEnabled) {
+                    (_uiState.value.passengerLocation ?: _uiState.value.mapCenterLocation)?.let { updateNearestVehicle(it, fresh) }
                 }
+            } catch (timeout: TimeoutCancellationException) {
+                _uiState.value = _uiState.value.copy(
+                    loadingVehicles = false,
+                    error = "Сервер отвечает слишком долго. Не удалось обновить маршрутки.",
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    loadingVehicles = false,
+                    error = error.message ?: "Не удалось получить транспорт",
+                )
+            }
         }
     }
 
@@ -254,16 +272,21 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         vehicleLocationPollingJob?.cancel()
         vehicleLocationPollingJob = viewModelScope.launch {
             while (isActive && _uiState.value.selectedRoute?.id == routeId) {
-                runCatching { vehicleRepository.getActiveVehiclesForRoute(routeId) }
-                    .onSuccess { vehicles ->
-                        val active = freshVehicles(vehicles)
-                        _uiState.value = _uiState.value.copy(activeVehicles = active, error = null)
-                        if (_uiState.value.nearestVehicleTrackingEnabled) {
-                            (_uiState.value.passengerLocation ?: _uiState.value.mapCenterLocation)?.let { updateNearestVehicle(it, active) }
-                        }
+                try {
+                    val vehicles = withTimeout(BACKEND_REQUEST_TIMEOUT_MS) {
+                        vehicleRepository.getActiveVehiclesForRoute(routeId)
                     }
-                    .onFailure { error -> android.util.Log.w("SafarVehicle", "poll failed", error) }
-                delay(10_000L)
+                    val active = freshVehicles(vehicles)
+                    _uiState.value = _uiState.value.copy(activeVehicles = active, error = null)
+                    if (_uiState.value.nearestVehicleTrackingEnabled) {
+                        (_uiState.value.passengerLocation ?: _uiState.value.mapCenterLocation)?.let { updateNearestVehicle(it, active) }
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    android.util.Log.w("SafarVehicle", "poll failed; next retry will run after the polling interval", error)
+                }
+                delay(VEHICLE_POLL_INTERVAL_MS)
             }
         }
     }
@@ -571,6 +594,8 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             ContextCompat.checkSelfPermission(getApplication(), Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
     private companion object {
+        const val BACKEND_REQUEST_TIMEOUT_MS = 15_000L
+        const val VEHICLE_POLL_INTERVAL_MS = 10_000L
         // GPS records can arrive with small network/realtime delays. Keep a
         // few minutes of history usable so the nearest vehicle and ETA do not
         // disappear between two location updates.
