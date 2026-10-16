@@ -135,10 +135,9 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                 if (vehicles.isEmpty()) {
                     val routeId = state.selectedRoute?.id
                     if (routeId != null) {
-                        vehicles = runCatching { vehicleRepository.getVehiclesForRoute(routeId) }
+                        vehicles = runCatching { vehicleRepository.getActiveVehiclesForRoute(routeId) }
                             .getOrElse { emptyList() }
-                            .filter { it.currentLocation != null && isFresh(it.currentLocation?.timestampEpochMs) }
-                            .map { it.copy(active = true) }
+                            .filter { it.active && it.currentLocation != null }
                     }
                 }
 
@@ -231,9 +230,9 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         vehicleRefreshJob?.cancel()
         vehicleRefreshJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(loadingVehicles = true)
-            runCatching { vehicleRepository.getVehiclesForRoute(route.id) }
+            runCatching { vehicleRepository.getActiveVehiclesForRoute(route.id) }
                 .onSuccess { vehicles ->
-                    val fresh = freshVehicles(vehicles).map { it.copy(active = true) }
+                    val fresh = freshVehicles(vehicles)
                     _uiState.value = _uiState.value.copy(
                         activeVehicles = fresh,
                         loadingVehicles = false,
@@ -255,9 +254,9 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         vehicleLocationPollingJob?.cancel()
         vehicleLocationPollingJob = viewModelScope.launch {
             while (isActive && _uiState.value.selectedRoute?.id == routeId) {
-                runCatching { vehicleRepository.getVehiclesForRoute(routeId) }
+                runCatching { vehicleRepository.getActiveVehiclesForRoute(routeId) }
                     .onSuccess { vehicles ->
-                        val active = freshVehicles(vehicles).map { it.copy(active = true) }
+                        val active = freshVehicles(vehicles)
                         _uiState.value = _uiState.value.copy(activeVehicles = active, error = null)
                         if (_uiState.value.nearestVehicleTrackingEnabled) {
                             (_uiState.value.passengerLocation ?: _uiState.value.mapCenterLocation)?.let { updateNearestVehicle(it, active) }
@@ -291,7 +290,9 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         val selectedRoute = _uiState.value.selectedRoute ?: return
         if (selectedRoute.id != routeId) return
 
-        if (location == null || !isFresh(location.timestampEpochMs)) {
+        // A realtime event is emitted by the database after a successful GPS write;
+        // trust the server timestamp rather than comparing clocks on two devices.
+        if (location == null) {
             val active = _uiState.value.activeVehicles.filter { it.id != vehicleId }
             _uiState.value = _uiState.value.copy(activeVehicles = active)
             if (_uiState.value.nearestVehicleTrackingEnabled) {
@@ -315,9 +316,9 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         // not cancel/restart the same backend query repeatedly under load.
         if (vehicleRefreshJob?.isActive == true) return
         vehicleRefreshJob = viewModelScope.launch {
-            runCatching { vehicleRepository.getVehiclesForRoute(selectedRoute.id) }
+            runCatching { vehicleRepository.getActiveVehiclesForRoute(selectedRoute.id) }
                 .onSuccess { vehicles ->
-                    val active = freshVehicles(vehicles).map { it.copy(active = true) }
+                    val active = freshVehicles(vehicles)
                     _uiState.value = _uiState.value.copy(activeVehicles = active, error = null)
                     if (_uiState.value.nearestVehicleTrackingEnabled) {
                         (_uiState.value.passengerLocation ?: _uiState.value.mapCenterLocation)?.let { updateNearestVehicle(it, active) }
@@ -379,23 +380,29 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             while (isActive) {
                 delay(STALE_SWEEP_INTERVAL_MS)
                 val current = _uiState.value
-                val fresh = freshVehicles(current.activeVehicles)
-                val nearestStillFresh = current.nearestVehicle?.currentLocation?.timestampEpochMs
-                    ?.let(::isFresh) == true
-                if (fresh.size != current.activeVehicles.size || !nearestStillFresh && current.nearestVehicle != null) {
+                val active = freshVehicles(current.activeVehicles)
+                // Do not age server-confirmed vehicles using the passenger phone's
+                // clock. The 10-second server poll removes vehicles after the
+                // database's 5-minute freshness window expires.
+                if (active.size != current.activeVehicles.size) {
+                    val activeIds = active.mapTo(mutableSetOf()) { it.id }
+                    val nearest = current.nearestVehicle?.takeIf { it.id in activeIds }
                     _uiState.value = current.copy(
-                        activeVehicles = fresh,
-                        nearestVehicle = if (nearestStillFresh) current.nearestVehicle else null,
-                        nearestVehicleDistanceMeters = if (nearestStillFresh) current.nearestVehicleDistanceMeters else null,
-                        nearestVehicleEtaMinutes = if (nearestStillFresh) current.nearestVehicleEtaMinutes else null,
+                        activeVehicles = active,
+                        nearestVehicle = nearest,
+                        nearestVehicleDistanceMeters = if (nearest != null) current.nearestVehicleDistanceMeters else null,
+                        nearestVehicleEtaMinutes = if (nearest != null) current.nearestVehicleEtaMinutes else null,
                     )
                 }
             }
         }
     }
 
+    // Freshness is calculated by PostgreSQL in vehicle_current_locations using
+    // server time. Filtering these rows again with the phone clock caused valid
+    // drivers to disappear when a device clock was ahead of the server.
     private fun freshVehicles(vehicles: List<Vehicle>): List<Vehicle> =
-        vehicles.filter { isFresh(it.currentLocation?.timestampEpochMs) }
+        vehicles.filter { it.active && it.currentLocation != null }
 
     private fun isFresh(timestampEpochMs: Long?): Boolean {
         if (timestampEpochMs == null || timestampEpochMs <= 0L) return false
