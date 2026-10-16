@@ -541,6 +541,18 @@ private fun setupMapLayers(style: Style, context: Context) {
             )
         )
     }
+
+    // Keep the compass sector above the basemap labels/roads but below the
+    // user's location pulse and dot. Explicitly place it here because some
+    // MapLibre style versions insert newly-created custom layers under labels.
+    style.getLayer(USER_HEADING_LAYER_ID)?.let { style.removeLayer(it) }
+    style.addLayerBelow(
+        FillLayer(USER_HEADING_LAYER_ID, USER_HEADING_SOURCE_ID).withProperties(
+            fillColor(SafarBlue.toArgb()),
+            fillOpacity(0.20f),
+        ),
+        USER_LOCATION_PULSE_LAYER_ID,
+    )
 }
 
 
@@ -636,7 +648,15 @@ private fun updateVehicles(
         ).apply {
             addStringProperty("vehicle_id", vehicle.id)
             addStringProperty("identifier", vehicle.identifier)
-            addNumberProperty(VEHICLE_HEADING_PROPERTY, location.headingDegrees?.takeIf { it.isFinite() }?.toDouble() ?: 0.0)
+            val heading = location.headingDegrees
+                ?.takeIf { it.isFinite() }
+                ?.let { ((it % 360f) + 360f) % 360f }
+                ?.toDouble() ?: 0.0
+            addNumberProperty(VEHICLE_HEADING_PROPERTY, heading)
+            Log.d(
+                "SafarVehicleRotation",
+                "vehicle=${vehicle.id} headingDegrees=$heading timestamp=${location.timestampEpochMs}",
+            )
         }
     }
     source.setGeoJson(FeatureCollection.fromFeatures(features.toTypedArray()))

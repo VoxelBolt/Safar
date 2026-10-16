@@ -163,40 +163,22 @@ class AndroidLocationProvider(private val context: Context) {
         }
 
         val rotationMatrix = FloatArray(9)
-        val displayAdjustedMatrix = FloatArray(9)
         val orientation = FloatArray(3)
         var gravityValues: FloatArray? = null
         var magneticValues: FloatArray? = null
         var lastEmittedHeading: Float? = null
 
         fun emitHeadingFromMatrix() {
-            // Android's sensor axes are tied to the physical device. Remap them to
-            // the current screen axes so the compass points toward the phone's top
-            // edge in portrait and landscape, rather than showing a static/wrong sector.
-            @Suppress("DEPRECATION")
-            val displayRotation = (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager)
-                .defaultDisplay.rotation
-            val remapped = when (displayRotation) {
-                Surface.ROTATION_90 -> SensorManager.remapCoordinateSystem(
-                    rotationMatrix, SensorManager.AXIS_Y, SensorManager.AXIS_MINUS_X, displayAdjustedMatrix
-                )
-                Surface.ROTATION_180 -> SensorManager.remapCoordinateSystem(
-                    rotationMatrix, SensorManager.AXIS_MINUS_X, SensorManager.AXIS_MINUS_Y, displayAdjustedMatrix
-                )
-                Surface.ROTATION_270 -> SensorManager.remapCoordinateSystem(
-                    rotationMatrix, SensorManager.AXIS_MINUS_Y, SensorManager.AXIS_X, displayAdjustedMatrix
-                )
-                else -> rotationMatrix.copyInto(displayAdjustedMatrix).let { true }
-            }
-            if (!remapped) return
-
-            SensorManager.getOrientation(displayAdjustedMatrix, orientation)
+            // The rotation vector already expresses the device orientation in the
+            // world coordinate system. Read its azimuth directly; remapping this
+            // matrix to display coordinates can cancel yaw changes on some devices.
+            SensorManager.getOrientation(rotationMatrix, orientation)
             val rawDegrees = Math.toDegrees(orientation[0].toDouble()).toFloat()
             val degrees = ((rawDegrees % 360f) + 360f) % 360f
             if (!degrees.isFinite()) return
 
-            // Filter only sub-degree sensor noise; real turns, including 359° -> 0°,
-            // must be emitted immediately for the live driver wave and vehicle marker.
+            // Filter only sub-degree sensor noise. A physical turn must update both
+            // the driver's heading sector and the heading sent to passenger maps.
             val previous = lastEmittedHeading
             val delta = if (previous == null) 360f else kotlin.math.abs(
                 ((degrees - previous + 540f) % 360f) - 180f
@@ -204,7 +186,7 @@ class AndroidLocationProvider(private val context: Context) {
             if (delta >= 1.0f) {
                 lastEmittedHeading = degrees
                 trySend(degrees)
-                Log.d(TAG, "Compass azimuth updated: ${degrees.toInt()}° displayRotation=$displayRotation")
+                Log.d(TAG, "Compass azimuth updated: ${degrees.toInt()}°")
             }
         }
 
