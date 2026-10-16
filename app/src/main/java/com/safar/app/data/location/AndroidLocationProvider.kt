@@ -163,16 +163,34 @@ class AndroidLocationProvider(private val context: Context) {
         }
 
         val rotationMatrix = FloatArray(9)
+        val displayAdjustedMatrix = FloatArray(9)
         val orientation = FloatArray(3)
         var gravityValues: FloatArray? = null
         var magneticValues: FloatArray? = null
         var lastEmittedHeading: Float? = null
+        @Suppress("DEPRECATION")
+        val displayRotation = (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager)
+            .defaultDisplay.rotation
+
+        // The compass direction must follow the phone's top edge, not the raw
+        // sensor's fixed device Y axis. Remap sensor axes for the current display
+        // rotation before extracting azimuth, including landscape/rotated screens.
+        val displayAxes = when (displayRotation) {
+            Surface.ROTATION_90 -> SensorManager.AXIS_Y to SensorManager.AXIS_MINUS_X
+            Surface.ROTATION_180 -> SensorManager.AXIS_MINUS_X to SensorManager.AXIS_MINUS_Y
+            Surface.ROTATION_270 -> SensorManager.AXIS_MINUS_Y to SensorManager.AXIS_X
+            else -> SensorManager.AXIS_X to SensorManager.AXIS_Y
+        }
 
         fun emitHeadingFromMatrix() {
-            // The rotation vector already expresses the device orientation in the
-            // world coordinate system. Read its azimuth directly; remapping this
-            // matrix to display coordinates can cancel yaw changes on some devices.
-            SensorManager.getOrientation(rotationMatrix, orientation)
+            if (!SensorManager.remapCoordinateSystem(
+                    rotationMatrix,
+                    displayAxes.first,
+                    displayAxes.second,
+                    displayAdjustedMatrix,
+                )
+            ) return
+            SensorManager.getOrientation(displayAdjustedMatrix, orientation)
             val rawDegrees = Math.toDegrees(orientation[0].toDouble()).toFloat()
             val degrees = ((rawDegrees % 360f) + 360f) % 360f
             if (!degrees.isFinite()) return
