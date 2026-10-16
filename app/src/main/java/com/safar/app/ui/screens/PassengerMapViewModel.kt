@@ -158,7 +158,10 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                             throw cancelled
                         } catch (error: Exception) {
                             android.util.Log.w("SafarNearest", "Could not refresh vehicles for nearest search", error)
-                            emptyList()
+                            _uiState.value = _uiState.value.copy(
+                                error = "Не удалось обновить данные маршруток. Попробуйте ещё раз.",
+                            )
+                            return@launch
                         }
                     }
                 }
