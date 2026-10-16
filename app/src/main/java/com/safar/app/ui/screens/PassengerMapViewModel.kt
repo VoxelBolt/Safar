@@ -145,9 +145,21 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                 if (vehicles.isEmpty()) {
                     val routeId = state.selectedRoute?.id
                     if (routeId != null) {
-                        vehicles = runCatching { vehicleRepository.getActiveVehiclesForRoute(routeId) }
-                            .getOrElse { emptyList() }
-                            .filter { it.active && it.currentLocation != null }
+                        vehicles = try {
+                            withTimeout(BACKEND_REQUEST_TIMEOUT_MS) {
+                                vehicleRepository.getActiveVehiclesForRoute(routeId)
+                            }.filter { it.active && it.currentLocation != null }
+                        } catch (timeout: TimeoutCancellationException) {
+                            _uiState.value = _uiState.value.copy(
+                                error = "Сервер отвечает слишком долго. Не удалось найти ближайшую маршрутку.",
+                            )
+                            return@launch
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (error: Exception) {
+                            android.util.Log.w("SafarNearest", "Could not refresh vehicles for nearest search", error)
+                            emptyList()
+                        }
                     }
                 }
 
