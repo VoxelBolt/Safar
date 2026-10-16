@@ -176,12 +176,12 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private fun isFresh(timestampEpochMs: Long?): Boolean = timestampEpochMs != null && timestampEpochMs > 0L && System.currentTimeMillis() - timestampEpochMs in 0L..LOCATION_FRESHNESS_MS
+    private fun isFresh(timestampEpochMs: Long?): Boolean = timestampEpochMs != null && timestampEpochMs > 0L && System.currentTimeMillis() - timestampEpochMs <= LOCATION_FRESHNESS_MS
 
     // Passenger broadcasts are transient and use local receive time for expiry,
     // so sender clock skew cannot keep an abandoned marker alive or hide a live one.
     private fun isPassengerFresh(receivedAtEpochMs: Long): Boolean =
-        System.currentTimeMillis() - receivedAtEpochMs in 0L..LOCATION_FRESHNESS_MS
+        PassengerLocationVisibility.isFresh(receivedAtEpochMs)
 
     /**
      * Foreground-screen fallback for driver GPS.
