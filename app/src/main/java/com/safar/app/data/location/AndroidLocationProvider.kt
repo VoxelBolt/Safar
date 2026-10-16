@@ -207,6 +207,21 @@ class AndroidLocationProvider(private val context: Context) {
                     return
                 }
 
+                @Suppress("DEPRECATION")
+                if (event.sensor.type == Sensor.TYPE_ORIENTATION) {
+                    val degrees = ((event.values[0] % 360f) + 360f) % 360f
+                    val previous = lastEmittedHeading
+                    val delta = if (previous == null) 360f else kotlin.math.abs(
+                        ((degrees - previous + 540f) % 360f) - 180f
+                    )
+                    if (degrees.isFinite() && delta >= 1f) {
+                        lastEmittedHeading = degrees
+                        trySend(degrees)
+                        Log.d(TAG, "Legacy compass heading updated: " + degrees.toInt() + "°")
+                    }
+                    return
+                }
+
                 when (event.sensor.type) {
                     Sensor.TYPE_ACCELEROMETER -> gravityValues = event.values.clone()
                     Sensor.TYPE_MAGNETIC_FIELD -> magneticValues = event.values.clone()
