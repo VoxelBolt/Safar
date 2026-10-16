@@ -663,12 +663,7 @@ private fun updatePassengerLocations(
     routeId: String?,
 ) {
     val source = style.getSourceAs<GeoJsonSource>(PASSENGERS_SOURCE_ID) ?: return
-    val now = System.currentTimeMillis()
-    val features = locations.asSequence()
-        .filter { routeId != null && it.routeId == routeId }
-        .filter { now - it.receivedAtEpochMs in 0L..60_000L }
-        .filter { it.latitude.isFinite() && it.longitude.isFinite() }
-        .map { passenger ->
+    val features = PassengerLocationVisibility.visibleOnRoute(locations, routeId).map { passenger ->
             Feature.fromGeometry(Point.fromLngLat(passenger.longitude, passenger.latitude)).apply {
                 addStringProperty("passenger_id", passenger.passengerId)
                 addStringProperty("route_id", passenger.routeId)
