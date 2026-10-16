@@ -886,16 +886,10 @@ private fun DriverHomeScreen(
         }
     }
 
-    // Draw the same blue compass sector on the driver's own map.
-    // This sensor stream is independent of GPS and continues while the vehicle is stationary.
-    LaunchedEffect(foregroundLocationGranted) {
-        if (!foregroundLocationGranted) {
-            driverHeadingDegrees = null
-            return@LaunchedEffect
-        }
-        // Retry if Android temporarily closes or fails to register a compass sensor.
-        // Do not clear the last angle on a transient failure, so the map sector does
-        // not disappear while the sensor stream reconnects.
+    // Compass sensors do not require location permission. Keep the driver's
+    // direction sector alive independently from GPS permission/state so it cannot
+    // silently disappear when Android refreshes the permission state.
+    LaunchedEffect(driverLocationProvider) {
         while (true) {
             try {
                 driverLocationProvider.headingDegrees().collect { degrees ->

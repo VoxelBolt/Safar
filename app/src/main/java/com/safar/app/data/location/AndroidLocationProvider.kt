@@ -251,31 +251,18 @@ class AndroidLocationProvider(private val context: Context) {
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
         }
 
-        // Register every available absolute-compass source rather than choosing
-        // exactly one. Some OEM rotation-vector implementations stop delivering
-        // useful azimuth changes while the device is upright; the legacy compass
-        // sensor provides a second absolute-north reading on those devices.
+        // Register exactly one heading source. Registering ROTATION_VECTOR and the
+        // legacy ORIENTATION sensor together lets their different coordinate conventions
+        // overwrite each other, which can make the heading appear frozen on some devices.
+        // Prefer an absolute compass source; use one fallback only if registration fails.
         var registered = false
         if (rotationSensor != null) {
             registered = sensorManager.registerListener(
                 listener, rotationSensor, SensorManager.SENSOR_DELAY_GAME
-            ) || registered
-            Log.d(TAG, "Heading sensor started: rotation vector")
-        }
-        if (legacyOrientationSensor != null) {
-            @Suppress("DEPRECATION")
-            val legacyRegistered = sensorManager.registerListener(
-                listener, legacyOrientationSensor, SensorManager.SENSOR_DELAY_GAME
             )
-            registered = legacyRegistered || registered
-            Log.d(TAG, "Heading sensor started: legacy orientation, registered=$legacyRegistered")
+            Log.d(TAG, "Heading sensor started: rotation vector, registered=$registered")
         }
-        if (!registered && gameRotationSensor != null) {
-            registered = sensorManager.registerListener(
-                listener, gameRotationSensor, SensorManager.SENSOR_DELAY_GAME
-            ) || registered
-            Log.d(TAG, "Heading sensor started: game rotation vector")
-        }
+
         if (!registered && accelerometer != null && magnetometer != null) {
             val accelRegistered = sensorManager.registerListener(
                 listener, accelerometer, SensorManager.SENSOR_DELAY_GAME
@@ -284,8 +271,25 @@ class AndroidLocationProvider(private val context: Context) {
                 listener, magnetometer, SensorManager.SENSOR_DELAY_GAME
             )
             registered = accelRegistered && magneticRegistered
+            if (!registered) sensorManager.unregisterListener(listener)
             Log.d(TAG, "Heading sensor started: accelerometer + magnetometer, registered=$registered")
         }
+
+        if (!registered && legacyOrientationSensor != null) {
+            @Suppress("DEPRECATION")
+            registered = sensorManager.registerListener(
+                listener, legacyOrientationSensor, SensorManager.SENSOR_DELAY_GAME
+            )
+            Log.d(TAG, "Heading sensor started: legacy orientation, registered=$registered")
+        }
+
+        if (!registered && gameRotationSensor != null) {
+            registered = sensorManager.registerListener(
+                listener, gameRotationSensor, SensorManager.SENSOR_DELAY_GAME
+            )
+            Log.d(TAG, "Heading sensor started: game rotation vector, registered=$registered")
+        }
+
         if (!registered) {
             Log.e(TAG, "Compass sensor registration failed; heading stream cannot update")
             close()
