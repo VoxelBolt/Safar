@@ -18,35 +18,14 @@ import kotlinx.serialization.json.put
 import java.time.Instant
 import java.time.OffsetDateTime
 import io.github.jan.supabase.SupabaseClient
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 
 class SupabaseSafarApi(
     private val client: SupabaseClient = SupabaseClientProvider.client,
 ) : SafarApi {
 
-    // Multiple screens/services can call the API concurrently during startup.
-    // Serialize anonymous-session creation so simultaneous requests cannot race
-    // and create/switch between different anonymous users.
-    private val sessionInitializationMutex = Mutex()
 
     override suspend fun ensureAnonymousSession() {
-        sessionInitializationMutex.withLock {
-            // Auth session loading is asynchronous in supabase-kt. Wait for it
-            // before deciding whether a new anonymous user is required.
-            client.auth.awaitInitialization()
-
-            if (client.auth.currentSessionOrNull() == null) {
-                client.auth.signInAnonymously()
-            }
-
-            check(client.auth.currentSessionOrNull() != null) {
-                "Supabase authentication did not produce an active session."
-            }
-            check(client.auth.currentUserOrNull() != null) {
-                "Supabase authentication did not produce an authenticated user."
-            }
-        }
+        SupabaseClientProvider.ensureAnonymousSession(client)
     }
 
     override suspend fun getCurrentUser(): User? {
