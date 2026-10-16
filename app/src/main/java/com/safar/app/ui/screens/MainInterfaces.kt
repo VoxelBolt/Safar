@@ -860,7 +860,9 @@ private fun DriverHomeScreen(
     val context = LocalContext.current
     val driverLocationProvider = remember(context) { AndroidLocationProvider(context.applicationContext) }
     var driverLocation by remember { mutableStateOf<GeoPoint?>(null) }
-    var driverHeadingDegrees by remember { mutableStateOf<Float?>(0f) }
+    // Null until the compass sensor reports a real heading; don't show a fake
+    // north-facing sector if the device sensor has not started or is unavailable.
+    var driverHeadingDegrees by remember { mutableStateOf<Float?>(null) }
     var driverLocateRequestId by remember { mutableLongStateOf(0L) }
 
     // Fail-safe publisher: while the driver screen is visible and the driver has
@@ -891,11 +893,12 @@ private fun DriverHomeScreen(
             driverHeadingDegrees = null
             return@LaunchedEffect
         }
-        // Show the sector immediately while the compass sensor initializes.
-        driverHeadingDegrees = 0f
+        // The sector must follow measured sensor values, not a hard-coded north heading.
+        driverHeadingDegrees = null
         try {
             driverLocationProvider.headingDegrees().collect { degrees ->
                 driverHeadingDegrees = degrees
+                android.util.Log.d("SafarDriverHeading", "Driver map heading updated: ${degrees.toInt()}°")
             }
         } catch (error: CancellationException) {
             throw error
