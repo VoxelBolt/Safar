@@ -132,30 +132,36 @@ class DriverLocationService : Service() {
         // Capture phone orientation independently of GPS, including while stationary.
         if (headingJob?.isActive != true) {
             headingJob = scope.launch {
-                try {
-                    locationProvider.headingDegrees().collectLatest { degrees ->
-                        if (degrees.isFinite()) {
-                            val normalized = ((degrees % 360f) + 360f) % 360f
-                            latestHeadingDegrees = normalized
+                // A sensor stream can end normally if Android temporarily unregisters
+                // it. Recreate it instead of permanently freezing the vehicle rotation.
+                while (currentCoroutineContext().isActive) {
+                    try {
+                        locationProvider.headingDegrees().collectLatest { degrees ->
+                            if (degrees.isFinite()) {
+                                val normalized = ((degrees % 360f) + 360f) % 360f
+                                latestHeadingDegrees = normalized
 
-                            // GPS timestamps often stop changing while the vehicle is parked.
-                            // Publish meaningful compass turns independently of new GPS fixes.
-                            val lastPublished = lastPublishedHeadingDegrees
-                            val now = System.currentTimeMillis()
-                            val headingChanged = lastPublished == null ||
-                                angularDifferenceDegrees(lastPublished, normalized) >= HEADING_CHANGE_THRESHOLD_DEGREES
-                            if (networkAvailable && headingChanged &&
-                                now - lastHeadingPublishRequestAtMs >= HEADING_PUBLISH_MIN_INTERVAL_MS
-                            ) {
-                                lastHeadingPublishRequestAtMs = now
-                                publishCurrentLocationOnce()
+                                // GPS timestamps often stop changing while the vehicle is parked.
+                                // Publish meaningful compass turns independently of new GPS fixes.
+                                val lastPublished = lastPublishedHeadingDegrees
+                                val now = System.currentTimeMillis()
+                                val headingChanged = lastPublished == null ||
+                                    angularDifferenceDegrees(lastPublished, normalized) >= HEADING_CHANGE_THRESHOLD_DEGREES
+                                if (networkAvailable && headingChanged &&
+                                    now - lastHeadingPublishRequestAtMs >= HEADING_PUBLISH_MIN_INTERVAL_MS
+                                ) {
+                                    lastHeadingPublishRequestAtMs = now
+                                    publishCurrentLocationOnce()
+                                }
                             }
                         }
+                        android.util.Log.w(TAG, "Compass stream ended; retrying")
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        android.util.Log.w(TAG, "Compass stream failed; retrying", error)
                     }
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (error: Exception) {
-                    android.util.Log.w(TAG, "Device heading sensor unavailable", error)
+                    delay(1_000L)
                 }
             }
         }
