@@ -159,31 +159,29 @@ class AndroidLocationProvider(private val context: Context) {
         }
 
         val rotationMatrix = FloatArray(9)
-        val remappedMatrix = FloatArray(9)
         val orientation = FloatArray(3)
         var gravityValues: FloatArray? = null
         var magneticValues: FloatArray? = null
+        var lastEmittedHeading: Float? = null
 
         fun emitHeadingFromMatrix() {
-            @Suppress("DEPRECATION")
-            val displayRotation = (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager)
-                .defaultDisplay.rotation
-            when (displayRotation) {
-                Surface.ROTATION_90 -> SensorManager.remapCoordinateSystem(
-                    rotationMatrix, SensorManager.AXIS_Y, SensorManager.AXIS_MINUS_X, remappedMatrix
-                )
-                Surface.ROTATION_180 -> SensorManager.remapCoordinateSystem(
-                    rotationMatrix, SensorManager.AXIS_MINUS_X, SensorManager.AXIS_MINUS_Y, remappedMatrix
-                )
-                Surface.ROTATION_270 -> SensorManager.remapCoordinateSystem(
-                    rotationMatrix, SensorManager.AXIS_MINUS_Y, SensorManager.AXIS_X, remappedMatrix
-                )
-                else -> rotationMatrix.copyInto(remappedMatrix)
-            }
-            SensorManager.getOrientation(remappedMatrix, orientation)
+            // Read the compass azimuth directly from the device rotation matrix.
+            // Display-axis remapping here can cancel or offset turns on some phones.
+            SensorManager.getOrientation(rotationMatrix, orientation)
             val rawDegrees = Math.toDegrees(orientation[0].toDouble()).toFloat()
             val degrees = ((rawDegrees % 360f) + 360f) % 360f
-            if (degrees.isFinite()) trySend(degrees)
+            if (!degrees.isFinite()) return
+
+            // Filter tiny sensor noise but keep real turns, including 359° -> 0°.
+            val previous = lastEmittedHeading
+            val delta = if (previous == null) 360f else kotlin.math.abs(
+                ((degrees - previous + 540f) % 360f) - 180f
+            )
+            if (delta >= 1.0f) {
+                lastEmittedHeading = degrees
+                trySend(degrees)
+                Log.d(TAG, "Compass azimuth updated: ${degrees.toInt()}°")
+            }
         }
 
         val listener = object : SensorEventListener {
@@ -208,13 +206,25 @@ class AndroidLocationProvider(private val context: Context) {
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
         }
 
-        if (rotationSensor != null) {
-            sensorManager.registerListener(listener, rotationSensor, SensorManager.SENSOR_DELAY_GAME)
-            Log.d(TAG, "Heading sensor started: rotation vector")
+        val registered = if (rotationSensor != null) {
+            sensorManager.registerListener(listener, rotationSensor, SensorManager.SENSOR_DELAY_GAME).also {
+                Log.d(TAG, "Heading sensor started: rotation vector, registered=$it")
+            }
         } else {
-            sensorManager.registerListener(listener, accelerometer!!, SensorManager.SENSOR_DELAY_GAME)
-            sensorManager.registerListener(listener, magnetometer!!, SensorManager.SENSOR_DELAY_GAME)
-            Log.d(TAG, "Heading sensor started: accelerometer + magnetometer fallback")
+            val accelRegistered = sensorManager.registerListener(
+                listener, accelerometer!!, SensorManager.SENSOR_DELAY_GAME
+            )
+            val magneticRegistered = sensorManager.registerListener(
+                listener, magnetometer!!, SensorManager.SENSOR_DELAY_GAME
+            )
+            (accelRegistered && magneticRegistered).also {
+                Log.d(TAG, "Heading sensor started: accelerometer + magnetometer, registered=$it")
+            }
+        }
+        if (!registered) {
+            Log.e(TAG, "Compass sensor registration failed; heading stream cannot update")
+            close()
+            return@callbackFlow
         }
 
         awaitClose { sensorManager.unregisterListener(listener) }
