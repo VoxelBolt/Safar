@@ -967,8 +967,8 @@ private fun DriverHomeScreen(
         PassengerMapView(
             route = ui.selectedRoute,
             passengerLocation = driverLocation,
-            // Show a temporary north-facing sector until the sensor produces its
-            // first real reading; publish only the measured nullable heading above.
+            // Keep the direction sector visible while the compass initializes.
+            // Actual measured readings replace this temporary north fallback.
             headingDegrees = driverHeadingDegrees ?: 0f,
             locationPermissionGranted = foregroundLocationGranted,
             locateRequestId = driverLocateRequestId,
