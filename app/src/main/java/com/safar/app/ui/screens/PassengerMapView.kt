@@ -89,6 +89,8 @@ private const val ROUTE_STATION_LABEL_LAYER_ID = "safar-route-station-label-laye
 private const val USER_HEADING_SOURCE_ID = "safar-user-heading-source"
 private const val USER_HEADING_LAYER_ID = "safar-user-heading-layer"
 private const val USER_LOCATION_SOURCE_ID = "safar-user-location-source"
+private const val VEHICLE_HEADING_SOURCE_ID = "safar-vehicle-heading-source"
+private const val VEHICLE_HEADING_LAYER_ID = "safar-vehicle-heading-layer"
 private const val USER_LOCATION_CIRCLE_LAYER_ID = "safar-user-location-circle-layer"
 private const val USER_LOCATION_PULSE_LAYER_ID = "safar-user-location-pulse-layer"
 private const val VEHICLES_SOURCE_ID = "safar-vehicles-source"
@@ -286,7 +288,9 @@ internal fun PassengerMapView(
                     }
                     map?.let { loadedMap ->
                         loadedMap.style?.let { style ->
-                            updateVehicles(style, displayVehicleLocations(stabilizedVehicleLocations, nearestVehicle))
+                            val visibleVehicles = displayVehicleLocations(stabilizedVehicleLocations, nearestVehicle)
+                        updateVehicles(style, visibleVehicles)
+                        updateVehicleHeadingSectors(style, visibleVehicles)
                         }
                     }
                 }
@@ -322,7 +326,11 @@ internal fun PassengerMapView(
             updateUserLocation(style, passengerLocation)
         }
 
-        map?.style?.let { updateVehicles(it, displayVehicleLocations(stabilizedVehicleLocations, nearestVehicle)) }
+        map?.style?.let {
+            val visibleVehicles = displayVehicleLocations(stabilizedVehicleLocations, nearestVehicle)
+            updateVehicles(it, visibleVehicles)
+            updateVehicleHeadingSectors(it, visibleVehicles)
+        }
         map?.let {
         }
     }
@@ -468,6 +476,9 @@ private fun setupMapLayers(style: Style, context: Context) {
     if (style.getSource(VEHICLES_SOURCE_ID) == null) {
         style.addSource(GeoJsonSource(VEHICLES_SOURCE_ID, FeatureCollection.fromFeatures(emptyArray<Feature>())))
     }
+    if (style.getSource(VEHICLE_HEADING_SOURCE_ID) == null) {
+        style.addSource(GeoJsonSource(VEHICLE_HEADING_SOURCE_ID, FeatureCollection.fromFeatures(emptyArray<Feature>())))
+    }
     if (style.getSource(ROUTE_STATION_SOURCE_ID) == null) {
         style.addSource(GeoJsonSource(ROUTE_STATION_SOURCE_ID, FeatureCollection.fromFeatures(emptyArray<Feature>())))
     }
@@ -503,6 +514,16 @@ private fun setupMapLayers(style: Style, context: Context) {
             )
         )
     }
+    // Separate live heading sectors for route vehicles. These polygons use the
+    // same compass heading as the driver's phone, not the direction of travel.
+    if (style.getLayer(VEHICLE_HEADING_LAYER_ID) == null) {
+        style.addLayer(
+            FillLayer(VEHICLE_HEADING_LAYER_ID, VEHICLE_HEADING_SOURCE_ID).withProperties(
+                fillColor(SafarBlue.toArgb()),
+                fillOpacity(0.24f),
+            )
+        )
+    }
     // Use the Android PNG resource for the vehicle marker instead of drawing a substitute in code.
     if (style.getImage(VEHICLE_MARKER_IMAGE_ID) == null) {
         val markerBitmap = BitmapFactory.decodeResource(context.resources, R.drawable.safar_vehicle_marker)
@@ -517,6 +538,8 @@ private fun setupMapLayers(style: Style, context: Context) {
             iconSize(0.42f),
             iconAllowOverlap(true),
             iconIgnorePlacement(true),
+            // The asset's nose points north (up), so a compass azimuth in
+            // degrees clockwise from north can be applied directly.
             iconRotate(Expression.get(VEHICLE_HEADING_PROPERTY)),
             iconRotationAlignment("map"),
         )
@@ -652,6 +675,40 @@ private fun displayVehicleLocations(
 ): List<Pair<Vehicle, VehicleLocation>> {
     if (nearest == null || locations.any { it.first.id == nearest.first.id }) return locations
     return locations + nearest
+}
+
+private fun updateVehicleHeadingSectors(
+    style: Style,
+    locations: List<Pair<Vehicle, VehicleLocation>>,
+) {
+    val source = style.getSourceAs<GeoJsonSource>(VEHICLE_HEADING_SOURCE_ID) ?: return
+    val features = locations.mapNotNull { (vehicle, location) ->
+        val heading = location.headingDegrees?.takeIf { it.isFinite() } ?: return@mapNotNull null
+        val normalized = ((heading % 360f) + 360f) % 360f
+        val center = GeoPoint(location.latitude, location.longitude)
+        val radiusMeters = 42.0
+        val halfAngleDegrees = 28.0
+        val points = mutableListOf<Point>()
+        points += Point.fromLngLat(center.longitude, center.latitude)
+        for (step in 0..16) {
+            val angle = Math.toRadians(
+                normalized.toDouble() - halfAngleDegrees +
+                    (2.0 * halfAngleDegrees * step / 16.0)
+            )
+            val northMeters = radiusMeters * kotlin.math.cos(angle)
+            val eastMeters = radiusMeters * kotlin.math.sin(angle)
+            val latitude = center.latitude + northMeters / 111_320.0
+            val longitude = center.longitude +
+                eastMeters / (111_320.0 * kotlin.math.cos(Math.toRadians(center.latitude)).coerceAtLeast(0.01))
+            points += Point.fromLngLat(longitude, latitude)
+        }
+        points += Point.fromLngLat(center.longitude, center.latitude)
+        Feature.fromGeometry(Polygon.fromLngLats(listOf(points))).apply {
+            addStringProperty("vehicle_id", vehicle.id)
+            addNumberProperty(VEHICLE_HEADING_PROPERTY, normalized.toDouble())
+        }
+    }
+    source.setGeoJson(FeatureCollection.fromFeatures(features.toTypedArray()))
 }
 
 private fun updateVehicles(
