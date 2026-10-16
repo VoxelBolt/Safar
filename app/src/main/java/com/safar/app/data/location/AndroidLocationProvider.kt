@@ -381,7 +381,7 @@ class AndroidLocationProvider(private val context: Context) {
         ).addOnSuccessListener { location ->
             Log.d(TAG, "Fused getCurrentLocation result: ${location?.latitude},${location?.longitude}")
             if (location != null && location.latitude.isFinite() && location.longitude.isFinite()) {
-                onResult(location.toLocationSample())
+                locationStabilizer.filter(location.toLocationSample())?.let(onResult)
             }
         }.addOnFailureListener { error ->
             Log.w(TAG, "Fused getCurrentLocation failed", error)
