@@ -303,7 +303,14 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
 
         val currentVehicle = _uiState.value.activeVehicles.firstOrNull { it.id == vehicleId }
         if (currentVehicle != null) {
-            val updated = currentVehicle.copy(currentLocation = location, active = true)
+            // Some GPS-only broadcasts or cached database rows may omit heading.
+            // Do not let such a packet reset a previously measured live rotation to north.
+            val effectiveLocation = if (location.headingDegrees == null) {
+                location.copy(headingDegrees = currentVehicle.currentLocation?.headingDegrees)
+            } else {
+                location
+            }
+            val updated = currentVehicle.copy(currentLocation = effectiveLocation, active = true)
             val active = _uiState.value.activeVehicles.map { if (it.id == vehicleId) updated else it }
             _uiState.value = _uiState.value.copy(activeVehicles = active, error = null)
             if (_uiState.value.nearestVehicleTrackingEnabled) {

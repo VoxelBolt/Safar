@@ -127,7 +127,8 @@ class DriverLocationService : Service() {
     }
 
     private fun startPublishingIfNeeded() {
-        if (publishingJob?.isActive == true) return
+        // Always restore the compass collector first. The GPS publisher may already
+        // be running after Android restarts the service or the sensor collector ends.
 
         // Capture phone orientation independently of GPS, including while stationary.
         if (headingJob?.isActive != true) {
@@ -165,6 +166,10 @@ class DriverLocationService : Service() {
                 }
             }
         }
+
+        // Do not duplicate GPS loops, but never let this guard prevent the
+        // heading collector above from being restored.
+        if (publishingJob?.isActive == true) return
 
         // Primary channel: continuous Android location updates. This is the same
         // stream that already drives the blue dot on the driver's map.
