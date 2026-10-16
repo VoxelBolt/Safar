@@ -202,7 +202,30 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
             }.onSuccess { location ->
-                android.util.Log.d("SafarDriverGPS", "Foreground GPS saved: vehicle=${location.vehicleId}, heading=${location.headingDegrees}")
+                android.util.Log.d(
+                    "SafarDriverGPS",
+                    "Foreground GPS saved: vehicle=${location.vehicleId}, heading=${location.headingDegrees}",
+                )
+                // This foreground fallback used to write to the database only.
+                // Broadcast the same measured heading too, so passengers can rotate
+                // the vehicle marker immediately even if the foreground service is delayed.
+                viewModelScope.launch {
+                    runCatching {
+                        val routeId = ui.driver?.routeId ?: return@launch
+                        val vehicleId = ui.driver.vehicleId
+                        realtimeTransport.connect(routeId)
+                        realtimeTransport.sendDriverLocation(
+                            routeId = routeId,
+                            vehicleId = vehicleId,
+                            latitude = point.latitude,
+                            longitude = point.longitude,
+                            recordedAtIso = Instant.ofEpochMilli(timestampEpochMs).toString(),
+                            headingDegrees = location.headingDegrees ?: headingDegrees,
+                        )
+                    }.onFailure { error ->
+                        android.util.Log.w("SafarDriverGPS", "Foreground realtime heading broadcast failed", error)
+                    }
+                }
             }.onFailure { error ->
                 android.util.Log.e("SafarDriverGPS", "Foreground screen GPS publish failed", error)
             }
