@@ -542,11 +542,11 @@ private fun setupMapLayers(style: Style, context: Context) {
         )
     }
 
-    // Keep the compass sector above the basemap labels/roads but below the
-    // user's location pulse and dot. Explicitly place it here because some
-    // MapLibre style versions insert newly-created custom layers under labels.
+    // Keep the compass sector visible above the basemap and pulse, while the
+    // location dot remains the top-most marker. Explicit placement is important
+    // because MapLibre style versions differ in where new layers are inserted.
     style.getLayer(USER_HEADING_LAYER_ID)?.let { style.removeLayer(it) }
-    style.addLayerBelow(
+    style.addLayerAbove(
         FillLayer(USER_HEADING_LAYER_ID, USER_HEADING_SOURCE_ID).withProperties(
             fillColor(SafarBlue.toArgb()),
             fillOpacity(0.20f),

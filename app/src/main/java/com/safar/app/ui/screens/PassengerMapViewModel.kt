@@ -401,8 +401,25 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     // Freshness is calculated by PostgreSQL in vehicle_current_locations using
     // server time. Filtering these rows again with the phone clock caused valid
     // drivers to disappear when a device clock was ahead of the server.
-    private fun freshVehicles(vehicles: List<Vehicle>): List<Vehicle> =
-        vehicles.filter { it.active && it.currentLocation != null }
+    //
+    // Realtime heading events can arrive between polling snapshots. If a backend
+    // response omits heading_degrees (for example during a schema/cache transition),
+    // do not let that null erase the last measured compass angle and freeze the
+    // passenger's vehicle marker at north.
+    private fun freshVehicles(vehicles: List<Vehicle>): List<Vehicle> {
+        val previousById = _uiState.value.activeVehicles.associateBy { it.id }
+        return vehicles
+            .filter { it.active && it.currentLocation != null }
+            .map { vehicle ->
+                val location = vehicle.currentLocation ?: return@map vehicle
+                val previousHeading = previousById[vehicle.id]?.currentLocation?.headingDegrees
+                if (location.headingDegrees == null && previousHeading != null) {
+                    vehicle.copy(currentLocation = location.copy(headingDegrees = previousHeading))
+                } else {
+                    vehicle
+                }
+            }
+    }
 
     private fun isFresh(timestampEpochMs: Long?): Boolean {
         if (timestampEpochMs == null || timestampEpochMs <= 0L) return false
