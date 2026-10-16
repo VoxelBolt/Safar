@@ -860,9 +860,9 @@ private fun DriverHomeScreen(
     val context = LocalContext.current
     val driverLocationProvider = remember(context) { AndroidLocationProvider(context.applicationContext) }
     var driverLocation by remember { mutableStateOf<GeoPoint?>(null) }
-    // Keep the heading sector visible while sensors initialize; replace the
-    // temporary north angle immediately when the device reports its real azimuth.
-    var driverHeadingDegrees by remember { mutableStateOf<Float?>(0f) }
+    // Null means the compass has not produced a measured angle yet. Keep this
+    // nullable for publishing so a placeholder north angle is never sent to Supabase.
+    var driverHeadingDegrees by remember { mutableStateOf<Float?>(null) }
     var driverLocateRequestId by remember { mutableLongStateOf(0L) }
 
     // Fail-safe publisher: while the driver screen is visible and the driver has
@@ -969,7 +969,9 @@ private fun DriverHomeScreen(
         PassengerMapView(
             route = ui.selectedRoute,
             passengerLocation = driverLocation,
-            headingDegrees = driverHeadingDegrees,
+            // Show a temporary north-facing sector until the sensor produces its
+            // first real reading; publish only the measured nullable heading above.
+            headingDegrees = driverHeadingDegrees ?: 0f,
             locationPermissionGranted = foregroundLocationGranted,
             locateRequestId = driverLocateRequestId,
             onLocateUser = {
