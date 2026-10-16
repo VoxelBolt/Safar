@@ -860,9 +860,9 @@ private fun DriverHomeScreen(
     val context = LocalContext.current
     val driverLocationProvider = remember(context) { AndroidLocationProvider(context.applicationContext) }
     var driverLocation by remember { mutableStateOf<GeoPoint?>(null) }
-    // Null until the compass sensor reports a real heading; don't show a fake
-    // north-facing sector if the device sensor has not started or is unavailable.
-    var driverHeadingDegrees by remember { mutableStateOf<Float?>(null) }
+    // Keep the heading sector visible while sensors initialize; replace the
+    // temporary north angle immediately when the device reports its real azimuth.
+    var driverHeadingDegrees by remember { mutableStateOf<Float?>(0f) }
     var driverLocateRequestId by remember { mutableLongStateOf(0L) }
 
     // Fail-safe publisher: while the driver screen is visible and the driver has
@@ -893,18 +893,25 @@ private fun DriverHomeScreen(
             driverHeadingDegrees = null
             return@LaunchedEffect
         }
-        // The sector must follow measured sensor values, not a hard-coded north heading.
-        driverHeadingDegrees = null
-        try {
-            driverLocationProvider.headingDegrees().collect { degrees ->
-                driverHeadingDegrees = degrees
-                android.util.Log.d("SafarDriverHeading", "Driver map heading updated: ${degrees.toInt()}°")
+        // Retry if Android temporarily closes or fails to register a compass sensor.
+        // Do not clear the last angle on a transient failure, so the map sector does
+        // not disappear while the sensor stream reconnects.
+        while (true) {
+            try {
+                driverLocationProvider.headingDegrees().collect { degrees ->
+                    driverHeadingDegrees = degrees
+                    android.util.Log.d(
+                        "SafarDriverHeading",
+                        "Driver map heading updated: ${degrees.toInt()}°"
+                    )
+                }
+                android.util.Log.w("SafarDriverHeading", "Compass stream ended; retrying")
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                android.util.Log.w("SafarDriverHeading", "Compass stream failed; retrying", error)
             }
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            android.util.Log.w("SafarDriverHeading", "Unable to read device heading", error)
-            driverHeadingDegrees = null
+            delay(1_000L)
         }
     }
 
