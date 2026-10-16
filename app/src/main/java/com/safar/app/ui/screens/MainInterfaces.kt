@@ -814,7 +814,7 @@ fun DriverMainScreen(state: OnboardingState, onLanguageSelected: (String) -> Uni
                 onPauseWork = driverViewModel::pauseWork,
                 onResumeWork = driverViewModel::resumeWork,
                 onFinishWork = driverViewModel::finishWork,
-                onPublishDriverLocation = driverViewModel::publishDriverLocation,
+                onPublishDriverLocation = { point, heading -> driverViewModel.publishDriverLocation(point, heading) },
                 foregroundLocationGranted = foregroundLocationGranted,
                 onRequestTrackingPermission = ::requestDriverTrackingPermission,
                 modifier = Modifier.padding(padding),
@@ -839,7 +839,7 @@ private fun DriverHomeScreen(
     onPauseWork: () -> Unit,
     onResumeWork: () -> Unit,
     onFinishWork: () -> Unit,
-    onPublishDriverLocation: (GeoPoint) -> Unit,
+    onPublishDriverLocation: (GeoPoint, Float?) -> Unit,
     foregroundLocationGranted: Boolean,
     onRequestTrackingPermission: () -> Unit,
     modifier: Modifier = Modifier,
@@ -872,7 +872,7 @@ private fun DriverHomeScreen(
             driverLocationProvider.currentLocationSample { sample ->
                 if (sample != null) {
                     driverLocation = sample.point
-                    onPublishDriverLocation(sample.point)
+                    onPublishDriverLocation(sample.point, driverHeadingDegrees)
                 }
             }
             delay(5_000L)
@@ -886,6 +886,8 @@ private fun DriverHomeScreen(
             driverHeadingDegrees = null
             return@LaunchedEffect
         }
+        // Show the sector immediately while the compass sensor initializes.
+        driverHeadingDegrees = 0f
         try {
             driverLocationProvider.headingDegrees().collect { degrees ->
                 driverHeadingDegrees = degrees
