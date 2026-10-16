@@ -14,8 +14,6 @@ import android.hardware.SensorManager
 import android.os.Looper
 import android.content.Intent
 import android.provider.Settings
-import android.view.Surface
-import android.view.WindowManager
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
@@ -166,34 +164,17 @@ class AndroidLocationProvider(private val context: Context) {
         }
 
         val rotationMatrix = FloatArray(9)
-        val displayAdjustedMatrix = FloatArray(9)
         val orientation = FloatArray(3)
         var gravityValues: FloatArray? = null
         var magneticValues: FloatArray? = null
         var lastEmittedHeading: Float? = null
-        @Suppress("DEPRECATION")
-        val displayRotation = (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager)
-            .defaultDisplay.rotation
-
-        // The compass direction must follow the phone's top edge, not the raw
-        // sensor's fixed device Y axis. Remap sensor axes for the current display
-        // rotation before extracting azimuth, including landscape/rotated screens.
-        val displayAxes = when (displayRotation) {
-            Surface.ROTATION_90 -> SensorManager.AXIS_Y to SensorManager.AXIS_MINUS_X
-            Surface.ROTATION_180 -> SensorManager.AXIS_MINUS_X to SensorManager.AXIS_MINUS_Y
-            Surface.ROTATION_270 -> SensorManager.AXIS_MINUS_Y to SensorManager.AXIS_X
-            else -> SensorManager.AXIS_X to SensorManager.AXIS_Y
-        }
-
+        // Android's azimuth is measured clockwise from magnetic north using the
+        // device's natural Y axis (the top edge in portrait). Read that value
+        // directly from the sensor matrix. The previous display-axis remapping
+        // used the current UI rotation as a second coordinate transform and could
+        // cancel/offset the physical yaw on some handsets, leaving the sector static.
         fun emitHeadingFromMatrix() {
-            if (!SensorManager.remapCoordinateSystem(
-                    rotationMatrix,
-                    displayAxes.first,
-                    displayAxes.second,
-                    displayAdjustedMatrix,
-                )
-            ) return
-            SensorManager.getOrientation(displayAdjustedMatrix, orientation)
+            SensorManager.getOrientation(rotationMatrix, orientation)
             val rawDegrees = Math.toDegrees(orientation[0].toDouble()).toFloat()
             val degrees = ((rawDegrees % 360f) + 360f) % 360f
             if (!degrees.isFinite()) return
