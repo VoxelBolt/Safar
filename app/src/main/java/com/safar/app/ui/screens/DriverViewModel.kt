@@ -211,8 +211,9 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
                 // the vehicle marker immediately even if the foreground service is delayed.
                 viewModelScope.launch {
                     runCatching {
-                        val routeId = ui.driver?.routeId ?: return@launch
-                        val vehicleId = ui.driver.vehicleId
+                        val driver = ui.driver ?: return@launch
+                        val routeId = driver.routeId ?: return@launch
+                        val vehicleId = driver.vehicleId
                         realtimeTransport.connect(routeId)
                         realtimeTransport.sendDriverLocation(
                             routeId = routeId,
