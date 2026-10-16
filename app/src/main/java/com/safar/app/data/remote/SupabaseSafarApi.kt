@@ -23,7 +23,6 @@ class SupabaseSafarApi(
     private val client: SupabaseClient = SupabaseClientProvider.client,
 ) : SafarApi {
 
-
     override suspend fun ensureAnonymousSession() {
         SupabaseClientProvider.ensureAnonymousSession(client)
     }
