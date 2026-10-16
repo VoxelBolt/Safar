@@ -24,7 +24,7 @@ data class LocationSample(
  * and agree across at least two fixes before the accepted position moves.
  */
 internal class LocationStabilizer(
-    private val stationaryDeadbandMeters: Double = 4.0,
+    private val stationaryDeadbandMeters: Double = 5.0,
     private val maxTrustedAccuracyMeters: Double = 45.0,
     private val jumpThresholdMeters: Double = 14.0,
     private val jumpConfirmationMs: Long = 2_500L,
@@ -96,7 +96,7 @@ internal class LocationStabilizer(
             }
             val active = candidate!!
             if (active.count < 2 || now - active.startedAtMs < jumpConfirmationMs) return previous
-            val confirmed = sample.copy(point = active.point)
+            val confirmed = sample.copy(point = blend(previous.point, active.point, 0.8))
             accepted = confirmed
             candidate = null
             return confirmed
