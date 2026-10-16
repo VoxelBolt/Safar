@@ -311,15 +311,16 @@ class DriverLocationService : Service() {
 
         // The database write is authoritative. Do not broadcast a location to
         // passengers if saving the current state failed.
-        AppContainer.driverLocationRepository.submitLocation(
+        val savedLocation = AppContainer.driverLocationRepository.submitLocation(
             latitude = latitude,
             longitude = longitude,
             recordedAtIso = timestamp,
             headingDegrees = latestHeadingDegrees,
         )
+        // Use the exact heading accepted by the database response. This avoids
+        // broadcasting a local compass value that the backend has not persisted.
+        val publishedHeading = savedLocation.headingDegrees ?: latestHeadingDegrees
 
-        // Persist the heading above, then broadcast the same GPS fix and compass
-        // azimuth so passenger maps can rotate the vehicle marker immediately.
         runCatching {
             AppContainer.realtimeTransport.connect(routeId)
             AppContainer.realtimeTransport.sendDriverLocation(
@@ -328,7 +329,7 @@ class DriverLocationService : Service() {
                 latitude = latitude,
                 longitude = longitude,
                 recordedAtIso = timestamp,
-                headingDegrees = latestHeadingDegrees,
+                headingDegrees = publishedHeading,
             )
         }.onFailure { error ->
             android.util.Log.w(TAG, "Realtime vehicle location broadcast failed", error)
