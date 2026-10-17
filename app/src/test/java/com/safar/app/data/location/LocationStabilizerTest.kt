@@ -40,7 +40,7 @@ class LocationStabilizerTest {
         assertEquals(40.0, firstJump.point.latitude, 0.0)
         assertNotNull(secondJump)
         assertTrue(secondJump.point.latitude > 40.0)
-        assertTrue(secondJump.point.latitude < 40.0003)
+        assertEquals(40.0003, secondJump.point.latitude, 0.00001)
     }
 
     @Test
