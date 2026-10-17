@@ -49,7 +49,7 @@ internal class LocationStabilizer(
         val previous = accepted
         if (previous == null) {
             // Avoid starting the map at an obviously coarse network/cached fix.
-            if (accuracy != null && accuracy > 50.0) return null
+            if (accuracy != null && accuracy > maxTrustedAccuracyMeters) return null
             accepted = sample
             return sample
         }
@@ -101,7 +101,7 @@ internal class LocationStabilizer(
 
             // Once movement is confirmed, move toward it gradually rather than
             // teleporting the marker directly to the newest noisy sample.
-            val confirmed = sample.copy(point = blend(previous.point, active.point, 0.65))
+            val confirmed = sample.copy(point = active.point)
             accepted = confirmed
             candidate = null
             return confirmed
@@ -110,14 +110,12 @@ internal class LocationStabilizer(
         candidate = null
         // Smooth plausible movement; relax the filter over longer sample intervals
         // so a moving driver does not trail too far behind.
-        val alpha = when {
-            elapsedMs <= 1_500L -> 0.25
-            elapsedMs <= 4_000L -> 0.45
-            else -> 0.70
-        }
-        val smoothed = sample.copy(point = blend(previous.point, sample.point, alpha))
-        accepted = smoothed
-        return smoothed
+        // Do not average the current fix with the previous position here: that
+        // creates a persistent positional lag and can leave the marker 20–30 m
+        // behind/aside even when the incoming fix is better. Only outlier jumps
+        // are delayed above; plausible movement uses the measured coordinate.
+        accepted = sample
+        return sample
     }
 
     private fun blend(from: GeoPoint, to: GeoPoint, alpha: Double) = GeoPoint(
