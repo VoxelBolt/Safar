@@ -72,4 +72,14 @@ class LocationStabilizerTest {
         assertEquals(first.point.latitude, poor.point.latitude, 0.0)
         assertEquals(first.point.longitude, poor.point.longitude, 0.0)
     }
+
+    @Test
+    fun betterAccurateFixCorrectsSmallStationaryOffset() {
+        val filter = LocationStabilizer()
+        val first = filter.filter(sample(40.0, time = 1_000L, accuracy = 12.0))!!
+        val improved = filter.filter(sample(40.00003, time = 2_000L, accuracy = 5.0))!!
+
+        assertTrue(improved.point.latitude > first.point.latitude)
+        assertTrue(improved.point.latitude < 40.00003)
+    }
 }
