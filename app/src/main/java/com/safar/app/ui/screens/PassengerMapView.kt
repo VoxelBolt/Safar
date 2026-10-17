@@ -547,7 +547,7 @@ private fun setupMapLayers(style: Style, context: Context) {
         style.addLayer(
             FillLayer(VEHICLE_HEADING_LAYER_ID, VEHICLE_HEADING_SOURCE_ID).withProperties(
                 fillColor(SafarBlue.toArgb()),
-                fillOpacity(0.24f),
+                fillOpacity(0f), // Heading is conveyed by vehicle icon rotation, not a visible blue sector.
             )
         )
     }
