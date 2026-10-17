@@ -136,7 +136,10 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun switchPassengerRealtime(routeId: String) {
         realtimeJob?.cancel()
-        realtimeTransport.disconnect()
+        // RealtimeTransport is a shared singleton also used by DriverLocationService
+        // to publish vehicle locations. Do not disconnect it here: doing so tears down
+        // the service's live channel and races with its next GPS broadcast. connect()
+        // switches route channels itself when the route actually changes.
         _uiState.value = _uiState.value.copy(passengerLocations = emptyList())
         realtimeJob = viewModelScope.launch {
             try {
@@ -155,7 +158,7 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
     private fun applyPassengerEvent(passengerId: String, routeId: String, location: PassengerLocation?) {
         if (_uiState.value.selectedRoute?.id != routeId) return
         val current = _uiState.value.passengerLocations
-        if (location == null || !isFresh(location.timestampEpochMs)) {
+        if (location == null || !isPassengerFresh(location.receivedAtEpochMs)) {
             _uiState.value = _uiState.value.copy(passengerLocations = current.filter { it.passengerId != passengerId })
             return
         }
@@ -170,13 +173,18 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
         staleSweepJob = viewModelScope.launch {
             while (isActive) {
                 delay(PASSENGER_STALE_SWEEP_INTERVAL_MS)
-                val fresh = _uiState.value.passengerLocations.filter { isFresh(it.timestampEpochMs) }
+                val fresh = _uiState.value.passengerLocations.filter { isPassengerFresh(it.receivedAtEpochMs) }
                 if (fresh.size != _uiState.value.passengerLocations.size) _uiState.value = _uiState.value.copy(passengerLocations = fresh)
             }
         }
     }
 
     private fun isFresh(timestampEpochMs: Long?): Boolean = timestampEpochMs != null && timestampEpochMs > 0L && System.currentTimeMillis() - timestampEpochMs <= LOCATION_FRESHNESS_MS
+
+    // Passenger broadcasts are transient and use local receive time for expiry,
+    // so sender clock skew cannot keep an abandoned marker alive or hide a live one.
+    private fun isPassengerFresh(receivedAtEpochMs: Long): Boolean =
+        PassengerLocationVisibility.isFresh(receivedAtEpochMs)
 
     /**
      * Foreground-screen fallback for driver GPS.
@@ -312,7 +320,8 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
         realtimeJob?.cancel()
         staleSweepJob?.cancel()
         vehiclePollingJob?.cancel()
-        realtimeTransport.disconnect()
+        // Do not disconnect the shared transport here; DriverLocationService may
+        // still be publishing driver coordinates through the same channel.
         super.onCleared()
     }
 

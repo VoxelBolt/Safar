@@ -73,7 +73,18 @@ class SupabaseRealtimeTransport(private val client: SupabaseClient = SupabaseCli
             RealtimeVehicleEvent(m.vehicleId,m.routeId,null)
         }
         val passengerUpdates=realtimeChannel.broadcastFlow<PassengerLocationBroadcast>(event="passenger_location").map { m ->
-            RealtimePassengerEvent(m.passengerId,m.routeId,PassengerLocation(m.passengerId,m.routeId,m.latitude,m.longitude,parseTimestamp(m.recordedAt)))
+            RealtimePassengerEvent(
+                m.passengerId,
+                m.routeId,
+                PassengerLocation(
+                    m.passengerId,
+                    m.routeId,
+                    m.latitude,
+                    m.longitude,
+                    parseTimestamp(m.recordedAt),
+                    receivedAtEpochMs = System.currentTimeMillis(),
+                ),
+            )
         }
         val passengerRemovals=realtimeChannel.broadcastFlow<PassengerLocationRemovedBroadcast>(event="passenger_location_removed").map { m ->
             RealtimePassengerEvent(m.passengerId,m.routeId,null)

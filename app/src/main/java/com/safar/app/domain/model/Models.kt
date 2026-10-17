@@ -63,7 +63,10 @@ data class PassengerLocation(
     val routeId: String,
     val latitude: Double,
     val longitude: Double,
+    /** Sender timestamp from the realtime message; not used as the stale timer. */
     val timestampEpochMs: Long,
+    /** Local arrival time, used to expire transient passenger markers after no updates. */
+    val receivedAtEpochMs: Long = timestampEpochMs,
 )
 
 data class WorkSession(

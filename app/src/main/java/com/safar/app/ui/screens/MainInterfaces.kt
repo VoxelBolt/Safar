@@ -187,24 +187,12 @@ private fun PassengerMapScreen(
     val ui by viewModel.uiState.collectAsState()
     var pickerOpen by remember { mutableStateOf(false) }
 
-    if (pickerOpen) {
-        RoutePickerScreen(
-            routes = ui.routes,
-            recentRoutes = ui.recentRoutes,
-            loading = ui.loadingRoutes,
-            error = ui.error,
-            onBack = { pickerOpen = false },
-            onRouteSelected = {
-                viewModel.selectRoute(it)
-                pickerOpen = false
-            },
-            onRetry = viewModel::loadRoutes,
-            modifier = modifier,
-        )
-        return
-    }
-
-    Column(modifier = modifier.fillMaxSize()) {
+    // Keep the native MapLibre view composed while route search is open.
+    // Disposing and immediately recreating MapView on every route selection can
+    // race its native renderer/style lifecycle and leave a blank map until the
+    // user triggers another recomposition by changing tabs or selecting again.
+    Box(modifier = modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize()) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -449,6 +437,23 @@ private fun PassengerMapScreen(
                     }
                 }
             }
+        }
+    }
+
+        if (pickerOpen) {
+            RoutePickerScreen(
+                routes = ui.routes,
+                recentRoutes = ui.recentRoutes,
+                loading = ui.loadingRoutes,
+                error = ui.error,
+                onBack = { pickerOpen = false },
+                onRouteSelected = {
+                    viewModel.selectRoute(it)
+                    pickerOpen = false
+                },
+                onRetry = viewModel::loadRoutes,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
     }
 }
@@ -831,6 +836,30 @@ fun DriverMainScreen(state: OnboardingState, onLanguageSelected: (String) -> Uni
     }
 }
 
+
+private fun russianPeopleWord(count: Int): String {
+    val lastTwo = count % 100
+    val last = count % 10
+    return when {
+        lastTwo in 11..14 -> "человек"
+        last == 1 -> "человек"
+        last in 2..4 -> "человека"
+        else -> "человек"
+    }
+}
+
+private fun distanceBetweenMeters(a: GeoPoint, b: GeoPoint): Double {
+    val earthRadius = 6_371_000.0
+    val dLat = Math.toRadians(b.latitude - a.latitude)
+    val dLon = Math.toRadians(b.longitude - a.longitude)
+    val lat1 = Math.toRadians(a.latitude)
+    val lat2 = Math.toRadians(b.latitude)
+    val h = kotlin.math.sin(dLat / 2) * kotlin.math.sin(dLat / 2) +
+        kotlin.math.cos(lat1) * kotlin.math.cos(lat2) *
+        kotlin.math.sin(dLon / 2) * kotlin.math.sin(dLon / 2)
+    return 2.0 * earthRadius * kotlin.math.asin(kotlin.math.sqrt(h.coerceIn(0.0, 1.0)))
+}
+
 private enum class DriverTab { HOME, STATS, PROFILE }
 
 @Composable
@@ -856,6 +885,7 @@ private fun DriverHomeScreen(
 
     val session = ui.workSession
     val status = session?.status ?: WorkSessionStatus.NOT_STARTED
+    val routeNumber = ui.selectedRoute?.number ?: stringResource(R.string.route_not_selected)
     val elapsed = session?.let { WorkSessionTimer.elapsedWorkSeconds(it, now) } ?: 0L
 
     val context = LocalContext.current
@@ -868,6 +898,8 @@ private fun DriverHomeScreen(
     // from its callback instead of retaining the null value from the first composition.
     val latestDriverHeadingDegrees by rememberUpdatedState(driverHeadingDegrees)
     var driverLocateRequestId by remember { mutableLongStateOf(0L) }
+    var passengerFocusPoint by remember { mutableStateOf<GeoPoint?>(null) }
+    var passengerFocusRequestId by remember { mutableLongStateOf(0L) }
 
     // Fail-safe publisher: while the driver screen is visible and the driver has
     // an assigned route, also send a fresh GPS fix every 5 seconds. The foreground
@@ -954,7 +986,6 @@ private fun DriverHomeScreen(
     }
     val statusColor = if (status == WorkSessionStatus.ACTIVE) Success else Muted
     val distanceKm = stringResource(R.string.distance_km_format, (session?.distanceMeters ?: 0.0) / 1000.0)
-    val routeNumber = ui.selectedRoute?.number ?: stringResource(R.string.route_not_selected)
 
     Box(
         modifier = modifier
@@ -984,25 +1015,45 @@ private fun DriverHomeScreen(
                 .filter { it.id != ui.driver?.vehicleId }
                 .mapNotNull { vehicle -> vehicle.currentLocation?.let { vehicle to it } },
             passengerLocations = ui.passengerLocations,
+            focusPoint = passengerFocusPoint,
+            focusPointRequestId = passengerFocusRequestId,
             routeOpacity = 0.78f,
             modifier = Modifier.fillMaxSize(),
         )
 
         if (ui.passengerLocations.isNotEmpty()) {
             Surface(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 82.dp),
-                shape = RoundedCornerShape(14.dp),
+                onClick = {
+                    val origin = driverLocation
+                    val nearestPassenger = origin?.let { driverPoint ->
+                        ui.passengerLocations.minByOrNull { passenger ->
+                            distanceBetweenMeters(driverPoint, GeoPoint(passenger.latitude, passenger.longitude))
+                        }
+                    }
+                    if (nearestPassenger != null) {
+                        passengerFocusPoint = GeoPoint(nearestPassenger.latitude, nearestPassenger.longitude)
+                        passengerFocusRequestId += 1L
+                    }
+                },
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 82.dp),
+                shape = CircleShape,
                 color = SafarWhite,
                 shadowElevation = 4.dp,
             ) {
-                Text(
-                    text = stringResource(R.string.passengers_waiting, routeNumber, ui.passengerLocations.size),
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    color = SafarNavy,
-                    style = MaterialTheme.typography.labelLarge,
-                )
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Ожидают вас: ${ui.passengerLocations.size} ${russianPeopleWord(ui.passengerLocations.size)}",
+                        color = SafarNavy,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    SafarGlyph(Glyph.LOCATE, SafarBlue, 18.dp)
+                }
             }
         }
 

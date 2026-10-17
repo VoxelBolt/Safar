@@ -94,6 +94,9 @@ private const val VEHICLE_HEADING_LAYER_ID = "safar-vehicle-heading-layer"
 private const val USER_LOCATION_CIRCLE_LAYER_ID = "safar-user-location-circle-layer"
 private const val USER_LOCATION_PULSE_LAYER_ID = "safar-user-location-pulse-layer"
 private const val VEHICLES_SOURCE_ID = "safar-vehicles-source"
+private const val PASSENGERS_SOURCE_ID = "safar-passengers-source"
+private const val PASSENGERS_LAYER_ID = "safar-passengers-layer"
+private const val PASSENGER_MARKER_IMAGE_ID = "safar-passenger-marker-image"
 private const val VEHICLES_LAYER_ID = "safar-vehicles-layer"
 private const val VEHICLE_MARKER_IMAGE_ID = "safar-bus-marker-image"
 private const val VEHICLE_HEADING_PROPERTY = "heading_degrees"
@@ -117,6 +120,8 @@ internal fun PassengerMapView(
     onLocateUser: () -> Unit = {},
     nearestVehicle: Pair<Vehicle, VehicleLocation>? = null,
     nearestVehicleRequestId: Long = 0L,
+    focusPoint: GeoPoint? = null,
+    focusPointRequestId: Long = 0L,
     routeOpacity: Float = 0.78f,
     modifier: Modifier = Modifier,
 ) {
@@ -285,12 +290,14 @@ internal fun PassengerMapView(
                         updateRoute(style, route, routeOpacity)
                         updateRouteStation(style, route)
                         updateHeadingSector(style, passengerLocation, headingDegrees)
+                        updatePassengerLocations(style, passengerLocations, route?.id)
                     }
                     map?.let { loadedMap ->
                         loadedMap.style?.let { style ->
                             val visibleVehicles = displayVehicleLocations(stabilizedVehicleLocations, nearestVehicle)
                             updateVehicles(style, visibleVehicles)
                             updateVehicleHeadingSectors(style, visibleVehicles)
+                            updatePassengerLocations(style, passengerLocations, route?.id)
                         }
                     }
                 }
@@ -317,13 +324,14 @@ internal fun PassengerMapView(
         }
     }
 
-    LaunchedEffect(styleReady, route, passengerLocation, headingDegrees, stabilizedVehicleLocations) {
+    LaunchedEffect(styleReady, route, passengerLocation, headingDegrees, stabilizedVehicleLocations, passengerLocations) {
         if (!styleReady) return@LaunchedEffect
         map?.style?.let { style ->
             updateRoute(style, route, routeOpacity)
             updateRouteStation(style, route)
             updateHeadingSector(style, passengerLocation, headingDegrees)
             updateUserLocation(style, passengerLocation)
+            updatePassengerLocations(style, passengerLocations, route?.id)
         }
 
         map?.style?.let {
@@ -417,6 +425,22 @@ internal fun PassengerMapView(
         centeredOnUser = true
     }
 
+    LaunchedEffect(styleReady, focusPointRequestId) {
+        if (!styleReady || focusPointRequestId <= 0L) return@LaunchedEffect
+        val target = focusPoint ?: return@LaunchedEffect
+        map?.cancelTransitions()
+        map?.animateCamera(
+            CameraUpdateFactory.newLatLngZoom(
+                LatLng(target.latitude, target.longitude),
+                USER_FOCUS_ZOOM,
+            )
+        )
+        // Keep the map in user-controlled mode after focusing a passenger.
+        // Otherwise the initial-location effect can run again on the next GPS
+        // update and pull the camera back to the driver's own position.
+        centeredOnUser = true
+    }
+
     LaunchedEffect(locateRequestId) {
         if (!styleReady || locateRequestId <= 0L) return@LaunchedEffect
 
@@ -479,6 +503,9 @@ private fun setupMapLayers(style: Style, context: Context) {
     if (style.getSource(VEHICLE_HEADING_SOURCE_ID) == null) {
         style.addSource(GeoJsonSource(VEHICLE_HEADING_SOURCE_ID, FeatureCollection.fromFeatures(emptyArray<Feature>())))
     }
+    if (style.getSource(PASSENGERS_SOURCE_ID) == null) {
+        style.addSource(GeoJsonSource(PASSENGERS_SOURCE_ID, FeatureCollection.fromFeatures(emptyArray<Feature>())))
+    }
     if (style.getSource(ROUTE_STATION_SOURCE_ID) == null) {
         style.addSource(GeoJsonSource(ROUTE_STATION_SOURCE_ID, FeatureCollection.fromFeatures(emptyArray<Feature>())))
     }
@@ -531,6 +558,10 @@ private fun setupMapLayers(style: Style, context: Context) {
         // The feature's compass azimuth rotates this transparent PNG on the map.
         style.addImage(VEHICLE_MARKER_IMAGE_ID, markerBitmap)
     }
+    // Passenger marker inspired by the generated Safar-style blue pin and white person glyph.
+    if (style.getImage(PASSENGER_MARKER_IMAGE_ID) == null) {
+        style.addImage(PASSENGER_MARKER_IMAGE_ID, createPassengerMarkerBitmap())
+    }
     style.getLayer(VEHICLES_LAYER_ID)?.let { style.removeLayer(VEHICLES_LAYER_ID) }
     style.addLayer(
         SymbolLayer(VEHICLES_LAYER_ID, VEHICLES_SOURCE_ID).withProperties(
@@ -546,6 +577,18 @@ private fun setupMapLayers(style: Style, context: Context) {
             iconRotationAlignment("viewport"),
         )
     )
+
+    if (style.getLayer(PASSENGERS_LAYER_ID) == null) {
+        style.addLayer(
+            SymbolLayer(PASSENGERS_LAYER_ID, PASSENGERS_SOURCE_ID).withProperties(
+                iconImage(PASSENGER_MARKER_IMAGE_ID),
+                iconSize(0.42f),
+                iconAllowOverlap(true),
+                iconIgnorePlacement(true),
+                iconRotationAlignment("viewport"),
+            )
+        )
+    }
 
     if (style.getLayer(USER_LOCATION_PULSE_LAYER_ID) == null) {
         style.addLayer(
@@ -597,6 +640,56 @@ private fun setupMapLayers(style: Style, context: Context) {
     )
 }
 
+
+private fun createPassengerMarkerBitmap(): Bitmap {
+    val bitmap = Bitmap.createBitmap(96, 120, Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bitmap)
+    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+
+    val pin = android.graphics.Path().apply {
+        moveTo(48f, 116f)
+        cubicTo(40f, 103f, 8f, 70f, 8f, 44f)
+        cubicTo(8f, 21f, 26f, 4f, 48f, 4f)
+        cubicTo(70f, 4f, 88f, 21f, 88f, 44f)
+        cubicTo(88f, 70f, 56f, 103f, 48f, 116f)
+        close()
+    }
+    paint.color = SafarBlue.toArgb()
+    canvas.drawPath(pin, paint)
+
+    // White ring and person silhouette echo the generated marker design.
+    paint.style = android.graphics.Paint.Style.STROKE
+    paint.strokeWidth = 3.5f
+    paint.color = android.graphics.Color.WHITE
+    canvas.drawCircle(48f, 42f, 29f, paint)
+    paint.style = android.graphics.Paint.Style.FILL
+    canvas.drawCircle(48f, 33f, 9.5f, paint)
+    val shoulders = android.graphics.Path().apply {
+        moveTo(28f, 63f)
+        cubicTo(30f, 51f, 38f, 47f, 48f, 47f)
+        cubicTo(58f, 47f, 66f, 51f, 68f, 63f)
+        cubicTo(61f, 70f, 35f, 70f, 28f, 63f)
+        close()
+    }
+    canvas.drawPath(shoulders, paint)
+    return bitmap
+}
+
+private fun updatePassengerLocations(
+    style: Style,
+    locations: List<PassengerLocation>,
+    routeId: String?,
+) {
+    val source = style.getSourceAs<GeoJsonSource>(PASSENGERS_SOURCE_ID) ?: return
+    val features = PassengerLocationVisibility.visibleOnRoute(locations, routeId).map { passenger ->
+            Feature.fromGeometry(Point.fromLngLat(passenger.longitude, passenger.latitude)).apply {
+                addStringProperty("passenger_id", passenger.passengerId)
+                addStringProperty("route_id", passenger.routeId)
+            }
+        }
+        .toList()
+    source.setGeoJson(FeatureCollection.fromFeatures(features.toTypedArray()))
+}
 
 private fun updateUserLocation(style: Style, point: GeoPoint?) {
     val source = style.getSourceAs<GeoJsonSource>(USER_LOCATION_SOURCE_ID) ?: return
