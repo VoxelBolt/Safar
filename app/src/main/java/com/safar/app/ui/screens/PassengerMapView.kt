@@ -120,6 +120,8 @@ internal fun PassengerMapView(
     onLocateUser: () -> Unit = {},
     nearestVehicle: Pair<Vehicle, VehicleLocation>? = null,
     nearestVehicleRequestId: Long = 0L,
+    focusPoint: GeoPoint? = null,
+    focusPointRequestId: Long = 0L,
     routeOpacity: Float = 0.78f,
     modifier: Modifier = Modifier,
 ) {
@@ -421,6 +423,19 @@ internal fun PassengerMapView(
             )
         }
         centeredOnUser = true
+    }
+
+    LaunchedEffect(styleReady, focusPointRequestId) {
+        if (!styleReady || focusPointRequestId <= 0L) return@LaunchedEffect
+        val target = focusPoint ?: return@LaunchedEffect
+        map?.cancelTransitions()
+        map?.animateCamera(
+            CameraUpdateFactory.newLatLngZoom(
+                LatLng(target.latitude, target.longitude),
+                USER_FOCUS_ZOOM,
+            )
+        )
+        centeredOnUser = false
     }
 
     LaunchedEffect(locateRequestId) {
