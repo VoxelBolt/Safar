@@ -280,7 +280,7 @@ private fun PassengerMapScreen(
                             .padding(horizontal = 12.dp, vertical = 9.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        SafarGlyph(Glyph.PIN, Muted, 20.dp)
+                        SafarGlyph(Glyph.PIN, MaterialTheme.colorScheme.onSurfaceVariant, 20.dp)
                         Spacer(Modifier.width(7.dp))
                         Text(
                             stringResource(R.string.location_permission_needed),
@@ -425,13 +425,13 @@ private fun PassengerMapScreen(
                                 Text(
                                     stringResource(R.string.active_vehicles_count, ui.activeVehicles.size),
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = Muted,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             } else {
                                 Text(
                                     stringResource(R.string.no_active_transport_detail),
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = Muted,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                         }
@@ -505,7 +505,7 @@ private fun RoutePickerScreen(
 
         Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface, border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
             Row(Modifier.padding(horizontal = 14.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-                SafarGlyph(Glyph.SEARCH, Muted, 22.dp)
+                SafarGlyph(Glyph.SEARCH, MaterialTheme.colorScheme.onSurfaceVariant, 22.dp)
                 BasicTextField(
                     value = query,
                     onValueChange = { query = it },
@@ -514,7 +514,7 @@ private fun RoutePickerScreen(
                     textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     decorationBox = { inner ->
-                        if (query.isEmpty()) Text(stringResource(R.string.route_search_hint), color = Muted)
+                        if (query.isEmpty()) Text(stringResource(R.string.route_search_hint), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         inner()
                     },
                 )
@@ -522,7 +522,7 @@ private fun RoutePickerScreen(
         }
 
         if (loading) {
-            Text(stringResource(R.string.routes_loading), modifier = Modifier.padding(top = 20.dp), color = Muted)
+            Text(stringResource(R.string.routes_loading), modifier = Modifier.padding(top = 20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         error?.let {
             Text(stringResource(R.string.routes_load_error), modifier = Modifier.padding(top = 20.dp), color = Danger)
@@ -567,7 +567,7 @@ private fun RouteRow(route: Route, onClick: () -> Unit) {
         shadowElevation = 1.dp,
     ) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Surface(shape = RoundedCornerShape(13.dp), color = SoftBlue) {
+            Surface(shape = RoundedCornerShape(13.dp), color = if (LocalSafarDarkMode.current) Color(0xFF25354B) else SoftBlue) {
                 Text(route.number, modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp), color = SafarBlue, fontWeight = FontWeight.Bold)
             }
             Spacer(Modifier.width(14.dp))
@@ -576,11 +576,11 @@ private fun RouteRow(route: Route, onClick: () -> Unit) {
                 Text(
                     if (route.path.size >= 2) stringResource(R.string.route_ready)
                     else stringResource(R.string.route_path_unavailable),
-                    color = Muted,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
-            SafarGlyph(Glyph.CHEVRON, Muted, 21.dp)
+            SafarGlyph(Glyph.CHEVRON, MaterialTheme.colorScheme.onSurfaceVariant, 21.dp)
         }
     }
 }
