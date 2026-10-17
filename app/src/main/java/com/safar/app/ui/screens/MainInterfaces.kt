@@ -1013,7 +1013,20 @@ private fun DriverHomeScreen(
                 }
             },
             vehicleLocations = ui.activeVehicles
-                .filter { it.id != ui.driver?.vehicleId }
+                .filter { vehicle ->
+                    vehicle.id != ui.driver?.vehicleId &&
+                        // A driver's own database vehicle can also appear in the
+                        // shared active-vehicle snapshot (especially with two devices).
+                        // Never draw a bus icon over this phone's blue user marker.
+                        (driverLocation?.let { userPoint ->
+                            vehicle.currentLocation?.let { vehiclePoint ->
+                                distanceBetweenMeters(
+                                    userPoint,
+                                    GeoPoint(vehiclePoint.latitude, vehiclePoint.longitude),
+                                ) > 12.0
+                            }
+                        } ?: true)
+                }
                 .mapNotNull { vehicle -> vehicle.currentLocation?.let { vehicle to it } },
             passengerLocations = ui.passengerLocations,
             focusPoint = passengerFocusPoint,
