@@ -1433,7 +1433,7 @@ internal fun SegmentedControl(labels: List<String>, selected: Int, onSelected: (
 
 @Composable
 private fun DriverProfileScreen(state: OnboardingState, route: Route?, modifier: Modifier = Modifier) {
-    Column(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(horizontal = 16.dp).verticalScroll(rememberScrollState())) {
+    Column(modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).background(MaterialTheme.colorScheme.background).padding(horizontal = 16.dp)) {
         Spacer(Modifier.height(18.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -1686,18 +1686,20 @@ private fun SafarGlyph(glyph: Glyph, tint: Color, size: androidx.compose.ui.unit
                 drawPath(p,tint,style=stroke)
             }
             Glyph.MOON -> {
-                // Draw a clean crescent with the same stroked, custom icon style as the sun.
-                val crescent = Path().apply {
-                    // Smooth, balanced crescent: one convex outer edge and one
-                    // concave inner edge, centered with even visual margins.
-                    moveTo(w * .68f, h * .12f)
-                    cubicTo(w * .29f, h * .12f, w * .12f, h * .43f, w * .23f, h * .68f)
-                    cubicTo(w * .34f, h * .91f, w * .59f, h * .91f, w * .78f, h * .72f)
-                    cubicTo(w * .55f, h * .78f, w * .39f, h * .60f, w * .39f, h * .41f)
-                    cubicTo(w * .39f, h * .27f, w * .51f, h * .15f, w * .68f, h * .12f)
-                    close()
+                // Draw a clean crescent using two smooth stroked curves.
+                val outer = Path().apply {
+                    moveTo(w * .72f, h * .16f)
+                    cubicTo(w * .43f, h * .02f, w * .15f, h * .24f, w * .15f, h * .50f)
+                    cubicTo(w * .15f, h * .77f, w * .43f, h * .98f, w * .72f, h * .84f)
                 }
-                drawPath(crescent, tint, style = stroke)
+                val inner = Path().apply {
+                    moveTo(w * .53f, h * .25f)
+                    cubicTo(w * .39f, h * .34f, w * .39f, h * .64f, w * .59f, h * .75f)
+                    cubicTo(w * .48f, h * .75f, w * .34f, h * .66f, w * .32f, h * .51f)
+                    cubicTo(w * .30f, h * .38f, w * .39f, h * .27f, w * .53f, h * .25f)
+                }
+                drawPath(outer, tint, style = stroke)
+                drawPath(inner, tint, style = stroke)
             }
             Glyph.SETTINGS -> {
                 drawCircle(tint,w*.27f,Offset(cx,cy),style=stroke)
