@@ -51,4 +51,25 @@ class LocationStabilizerTest {
 
         assertEquals(first.point.latitude, inaccurate.point.latitude, 0.0)
     }
+
+    @Test
+    fun holdsPositionWhenGpsAlternatesByMoreThanTenMeters() {
+        val filter = LocationStabilizer()
+        val first = filter.filter(sample(40.0, time = 1_000L, accuracy = 6.0))!!
+        val east = filter.filter(sample(40.00012, time = 2_000L, accuracy = 6.0))!!
+        val west = filter.filter(sample(39.99988, time = 3_000L, accuracy = 6.0))!!
+
+        assertEquals(first.point.latitude, east.point.latitude, 0.0)
+        assertEquals(first.point.latitude, west.point.latitude, 0.0)
+    }
+
+    @Test
+    fun rejectsModeratelyPoorFixesAfterInitialPosition() {
+        val filter = LocationStabilizer()
+        val first = filter.filter(sample(40.0, time = 1_000L, accuracy = 5.0))!!
+        val poor = filter.filter(sample(40.0003, time = 2_000L, accuracy = 30.0))!!
+
+        assertEquals(first.point.latitude, poor.point.latitude, 0.0)
+        assertEquals(first.point.longitude, poor.point.longitude, 0.0)
+    }
 }

@@ -57,10 +57,18 @@ class AndroidLocationProvider(private val context: Context) {
                 runCatching { locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) }
                     .getOrNull()?.let(::add)
             }
-            candidates.maxByOrNull { it.elapsedRealtimeNanos }?.let {
-                emitted = true
-                trySend(it.toLocationSample())
-            }
+            // Prefer the freshest reasonably accurate cached fix. The newest
+            // fix can be a coarse network estimate that jumps away from GPS.
+            val nowNanos = android.os.SystemClock.elapsedRealtimeNanos()
+            candidates
+                .filter { nowNanos - it.elapsedRealtimeNanos <= 120_000_000_000L }
+                .minWithOrNull(
+                    compareBy<Location> { if (it.hasAccuracy()) it.accuracy else Float.MAX_VALUE }
+                        .thenByDescending { it.elapsedRealtimeNanos }
+                )?.let {
+                    emitted = true
+                    trySend(it.toLocationSample())
+                }
         }
 
         val gpsEnabled = runCatching {
@@ -90,7 +98,10 @@ class AndroidLocationProvider(private val context: Context) {
             }.onFailure { Log.w(TAG, "GPS requestLocationUpdates failed", it) }
         }
 
-        if (networkEnabled) {
+        // When fine location is available, don't mix raw network-provider fixes
+        // into the GPS stream: the lower-accuracy source can pull the marker back
+        // and create visible jumps. Fused high-accuracy updates still combine sources.
+        if (networkEnabled && !hasFineLocationPermission()) {
             runCatching {
                 locationManager.requestLocationUpdates(
                     LocationManager.NETWORK_PROVIDER,
