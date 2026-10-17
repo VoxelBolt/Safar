@@ -435,7 +435,10 @@ internal fun PassengerMapView(
                 USER_FOCUS_ZOOM,
             )
         )
-        centeredOnUser = false
+        // Keep the map in user-controlled mode after focusing a passenger.
+        // Otherwise the initial-location effect can run again on the next GPS
+        // update and pull the camera back to the driver's own position.
+        centeredOnUser = true
     }
 
     LaunchedEffect(locateRequestId) {
