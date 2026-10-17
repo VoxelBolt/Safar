@@ -54,9 +54,7 @@ class SupabaseRealtimeTransport(private val client: SupabaseClient = SupabaseCli
         channelJob?.cancel(); channelJob=null
         channel?.let { runCatching { client.realtime.removeChannel(it) } }
         channel=null; connectedRouteId=null
-        client.auth.awaitInitialization()
-        if (client.auth.currentSessionOrNull()==null) client.auth.signInAnonymously()
-        check(client.auth.currentSessionOrNull()!=null) { "Supabase authentication is required for realtime." }
+        SupabaseClientProvider.ensureAnonymousSession(client)
         val accessToken = client.auth.currentAccessTokenOrNull()
             ?: error("Supabase access token is missing for realtime authorization.")
         // Explicitly provide the current JWT to Realtime. Private Broadcast channels

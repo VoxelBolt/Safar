@@ -24,20 +24,7 @@ class SupabaseSafarApi(
 ) : SafarApi {
 
     override suspend fun ensureAnonymousSession() {
-        // Auth session loading is asynchronous in supabase-kt. Wait for it before
-        // deciding whether a new anonymous user is required.
-        client.auth.awaitInitialization()
-
-        if (client.auth.currentSessionOrNull() == null) {
-            client.auth.signInAnonymously()
-        }
-
-        check(client.auth.currentSessionOrNull() != null) {
-            "Supabase authentication did not produce an active session."
-        }
-        check(client.auth.currentUserOrNull() != null) {
-            "Supabase authentication did not produce an authenticated user."
-        }
+        SupabaseClientProvider.ensureAnonymousSession(client)
     }
 
     override suspend fun getCurrentUser(): User? {
