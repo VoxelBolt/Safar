@@ -31,6 +31,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
+import java.time.Instant
 
 data class PassengerMapUiState(
     val routes: List<Route> = emptyList(),
@@ -67,6 +68,8 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     private var vehicleRefreshJob: Job? = null
     private var vehicleLocationPollingJob: Job? = null
     private var realtimeJob: Job? = null
+    private var passengerPublishJob: Job? = null
+    @Volatile private var lastPassengerFixAtMs: Long = 0L
     private var staleSweepJob: Job? = null
     private var headingJob: Job? = null
     private var locateRequestJob: Job? = null
@@ -220,9 +223,14 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         )
         loadVehicles(route)
         startVehicleLocationPolling(route.id)
-        switchRealtime(route.id)
         if (oldRouteId != null && oldRouteId != route.id) {
-            viewModelScope.launch { runCatching { realtimeTransport.removePassengerLocation(oldRouteId) } }
+            // Remove the old route-scoped marker before switching the single realtime channel.
+            viewModelScope.launch {
+                runCatching { realtimeTransport.removePassengerLocation(oldRouteId) }
+                switchRealtime(route.id)
+            }
+        } else {
+            switchRealtime(route.id)
         }
     }
 
@@ -269,10 +277,34 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     }
     private fun switchRealtime(routeId: String) {
         realtimeJob?.cancel()
+        passengerPublishJob?.cancel()
         realtimeTransport.disconnect()
         realtimeJob = viewModelScope.launch {
             try {
                 realtimeTransport.connect(routeId)
+                // Passenger position is transient route-scoped Broadcast data, never persisted.
+                passengerPublishJob?.cancel()
+                passengerPublishJob = viewModelScope.launch {
+                    while (isActive && _uiState.value.selectedRoute?.id == routeId) {
+                        val now = System.currentTimeMillis()
+                        val state = _uiState.value
+                        val point = state.passengerLocation
+                        if (!state.locationPermissionRequired && point != null && lastPassengerFixAtMs > 0L &&
+                            now - lastPassengerFixAtMs in 0L..PASSENGER_FIX_MAX_AGE_MS) {
+                            runCatching {
+                                realtimeTransport.sendPassengerLocation(
+                                    routeId = routeId,
+                                    latitude = point.latitude,
+                                    longitude = point.longitude,
+                                    recordedAtIso = Instant.ofEpochMilli(now).toString(),
+                                )
+                            }.onFailure { error ->
+                                android.util.Log.w("SafarPassenger", "Location broadcast failed", error)
+                            }
+                        }
+                        delay(PASSENGER_BROADCAST_INTERVAL_MS)
+                    }
+                }
                 realtimeTransport.vehicleEvents.collectLatest { event ->
                     applyRealtimeEvent(event.vehicleId, event.routeId, event.location)
                 }
@@ -389,8 +421,8 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                 val current = _uiState.value
                 val active = freshVehicles(current.activeVehicles)
                 // Do not age server-confirmed vehicles using the passenger phone's
-                // clock. The 10-second server poll removes vehicles after the
-                // database's 5-minute freshness window expires.
+                // clock. The 10-second server poll removes vehicles when the
+                // database's one-minute freshness window expires.
                 if (active.size != current.activeVehicles.size) {
                     val activeIds = active.mapTo(mutableSetOf()) { it.id }
                     val nearest = current.nearestVehicle?.takeIf { it.id in activeIds }
@@ -428,11 +460,6 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             }
     }
 
-    private fun isFresh(timestampEpochMs: Long?): Boolean {
-        if (timestampEpochMs == null || timestampEpochMs <= 0L) return false
-        return System.currentTimeMillis() - timestampEpochMs <= LOCATION_FRESHNESS_MS
-    }
-
     fun onLocationPermissionResult(granted: Boolean) {
         _uiState.value = _uiState.value.copy(locationPermissionRequired = !granted)
         if (granted) {
@@ -440,7 +467,11 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             requestCurrentLocation(centerCamera = false)
         } else {
             stopLocationUpdates()
+            lastPassengerFixAtMs = 0L
             _uiState.value = _uiState.value.copy(passengerLocation = null)
+            _uiState.value.selectedRoute?.id?.let { routeId ->
+                viewModelScope.launch { runCatching { realtimeTransport.removePassengerLocation(routeId) } }
+            }
         }
     }
 
@@ -454,6 +485,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         if (locationJob?.isActive == true) return
         locationProvider.lastKnownLocation { point ->
             if (point != null) {
+                lastPassengerFixAtMs = System.currentTimeMillis()
                 _uiState.value = _uiState.value.copy(passengerLocation = point)
                 if (_uiState.value.nearestVehicleTrackingEnabled) updateNearestVehicle(point, _uiState.value.activeVehicles)
             }
@@ -462,6 +494,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         locationJob = viewModelScope.launch {
             try {
                 locationProvider.locations().collectLatest { point ->
+                    lastPassengerFixAtMs = System.currentTimeMillis()
                     _uiState.value = _uiState.value.copy(passengerLocation = point)
                     if (_uiState.value.nearestVehicleTrackingEnabled) updateNearestVehicle(point, _uiState.value.activeVehicles)
                 }
@@ -498,6 +531,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         if (!hasLocationPermission()) return
         locationProvider.currentLocationSample { sample ->
             if (sample != null) {
+                lastPassengerFixAtMs = System.currentTimeMillis()
                 _uiState.value = _uiState.value.copy(
                     passengerLocation = sample.point,
                     locateRequestId = if (centerCamera) _uiState.value.locateRequestId + 1L else _uiState.value.locateRequestId,
@@ -507,6 +541,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                     .lastLocation
                     .addOnSuccessListener { location ->
                         if (location != null) {
+                            lastPassengerFixAtMs = System.currentTimeMillis()
                             _uiState.value = _uiState.value.copy(
                                 passengerLocation = GeoPoint(location.latitude, location.longitude),
                                 locateRequestId = if (centerCamera) _uiState.value.locateRequestId + 1L else _uiState.value.locateRequestId,
@@ -542,6 +577,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         locateRequestJob = viewModelScope.launch {
             locationProvider.lastKnownLocation { point ->
                 if (point != null) {
+                    lastPassengerFixAtMs = System.currentTimeMillis()
                     _uiState.value = _uiState.value.copy(
                         passengerLocation = point,
                         locateRequestId = _uiState.value.locateRequestId + 1L,
@@ -555,6 +591,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     }
 
     override fun onCleared() {
+        passengerPublishJob?.cancel()
         nearestVehicleRequestJob?.cancel()
         stopLocationUpdates()
         vehicleLocationPollingJob?.cancel()
@@ -571,10 +608,8 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             ContextCompat.checkSelfPermission(getApplication(), Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
     private companion object {
-        // GPS records can arrive with small network/realtime delays. Keep a
-        // few minutes of history usable so the nearest vehicle and ETA do not
-        // disappear between two location updates.
-        const val LOCATION_FRESHNESS_MS = 5 * 60_000L
-        const val STALE_SWEEP_INTERVAL_MS = 15_000L
+        const val STALE_SWEEP_INTERVAL_MS = 5_000L
+        const val PASSENGER_BROADCAST_INTERVAL_MS = 5_000L
+        const val PASSENGER_FIX_MAX_AGE_MS = 15_000L
     }
 }
