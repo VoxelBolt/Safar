@@ -837,6 +837,17 @@ fun DriverMainScreen(state: OnboardingState, onLanguageSelected: (String) -> Uni
 }
 
 
+private fun russianPeopleWord(count: Int): String {
+    val lastTwo = count % 100
+    val last = count % 10
+    return when {
+        lastTwo in 11..14 -> "человек"
+        last == 1 -> "человек"
+        last in 2..4 -> "человека"
+        else -> "человек"
+    }
+}
+
 private fun distanceBetweenMeters(a: GeoPoint, b: GeoPoint): Double {
     val earthRadius = 6_371_000.0
     val dLat = Math.toRadians(b.latitude - a.latitude)
@@ -1034,7 +1045,7 @@ private fun DriverHomeScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = "Ожидают вас: ${ui.passengerLocations.size}",
+                        text = "Ожидают вас: ${ui.passengerLocations.size} ${russianPeopleWord(ui.passengerLocations.size)}",
                         color = SafarNavy,
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.SemiBold,
