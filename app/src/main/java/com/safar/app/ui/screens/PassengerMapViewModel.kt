@@ -646,12 +646,12 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     private fun hasLocationPermission(): Boolean =
         ContextCompat.checkSelfPermission(getApplication(), Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
             ContextCompat.checkSelfPermission(getApplication(), Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-
-  private companion object {
-    const val BACKEND_REQUEST_TIMEOUT_MS = 15_000L
-    const val VEHICLE_POLL_INTERVAL_MS = 10_000L
-    const val LOCATION_FRESHNESS_MS = 5 * 60_000L
-    const val STALE_SWEEP_INTERVAL_MS = 5_000L
-    const val PASSENGER_BROADCAST_INTERVAL_MS = 5_000L
-    const val PASSENGER_FIX_MAX_AGE_MS = 15_000L
+    private companion object {
+        const val BACKEND_REQUEST_TIMEOUT_MS = 15_000L
+        const val VEHICLE_POLL_INTERVAL_MS = 10_000L
+        const val LOCATION_FRESHNESS_MS = 5 * 60_000L
+        const val STALE_SWEEP_INTERVAL_MS = 5_000L
+        const val PASSENGER_BROADCAST_INTERVAL_MS = 5_000L
+        const val PASSENGER_FIX_MAX_AGE_MS = 15_000L
+    }
 }
