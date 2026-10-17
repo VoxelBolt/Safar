@@ -136,7 +136,10 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun switchPassengerRealtime(routeId: String) {
         realtimeJob?.cancel()
-        realtimeTransport.disconnect()
+        // RealtimeTransport is a shared singleton also used by DriverLocationService
+        // to publish vehicle locations. Do not disconnect it here: doing so tears down
+        // the service's live channel and races with its next GPS broadcast. connect()
+        // switches route channels itself when the route actually changes.
         _uiState.value = _uiState.value.copy(passengerLocations = emptyList())
         realtimeJob = viewModelScope.launch {
             try {
@@ -317,7 +320,8 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
         realtimeJob?.cancel()
         staleSweepJob?.cancel()
         vehiclePollingJob?.cancel()
-        realtimeTransport.disconnect()
+        // Do not disconnect the shared transport here; DriverLocationService may
+        // still be publishing driver coordinates through the same channel.
         super.onCleared()
     }
 
