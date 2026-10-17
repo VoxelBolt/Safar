@@ -99,8 +99,6 @@ import com.safar.app.ui.onboarding.OnboardingState
 import com.safar.app.ui.theme.LocalSafarDarkMode
 import com.safar.app.ui.theme.LocalSetSafarDarkMode
 import com.safar.app.ui.theme.SafarBlue
-import com.safar.app.ui.theme.MaterialTheme.colorScheme.onSurface
-import com.safar.app.ui.theme.MaterialTheme.colorScheme.surface
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collect
