@@ -26,11 +26,15 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.sample
 
 class AndroidLocationProvider(private val context: Context) {
     private val fusedClient = LocationServices.getFusedLocationProviderClient(context)
     private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    // Shared by streaming and one-shot fixes so cached/current callbacks cannot
+    // overwrite a stable map point with an unfiltered GPS wobble.
+    private val locationStabilizer = LocationStabilizer()
 
     @SuppressLint("MissingPermission")
     fun locationSamples(): Flow<LocationSample> = callbackFlow {
@@ -131,7 +135,9 @@ class AndroidLocationProvider(private val context: Context) {
             locationManager.removeUpdates(listener)
             fusedClient.removeLocationUpdates(fusedCallback)
         }
-    }.distinctUntilChanged()
+    }
+        .mapNotNull { sample -> locationStabilizer.filter(sample) }
+        .distinctUntilChanged()
 
     @SuppressLint("MissingPermission")
     fun locations(): Flow<GeoPoint> = locationSamples().map { it.point }
@@ -314,7 +320,7 @@ class AndroidLocationProvider(private val context: Context) {
 
         if (cached != null && cached.latitude.isFinite() && cached.longitude.isFinite()) {
             Log.d(TAG, "LocationManager cached fix: ${cached.latitude},${cached.longitude} accuracy=${cached.accuracy}")
-            onResult(cached.toLocationSample())
+            locationStabilizer.filter(cached.toLocationSample())?.let(onResult)
         }
 
         // If the phone-wide Location switch is off, no provider can produce
@@ -355,7 +361,7 @@ class AndroidLocationProvider(private val context: Context) {
                             "LocationManager current fix provider=$provider result=${location?.latitude},${location?.longitude}"
                         )
                         if (location != null && location.latitude.isFinite() && location.longitude.isFinite()) {
-                            onResult(location.toLocationSample())
+                            locationStabilizer.filter(location.toLocationSample())?.let(onResult)
                         }
                     }
                 }.onFailure {
@@ -375,7 +381,7 @@ class AndroidLocationProvider(private val context: Context) {
         ).addOnSuccessListener { location ->
             Log.d(TAG, "Fused getCurrentLocation result: ${location?.latitude},${location?.longitude}")
             if (location != null && location.latitude.isFinite() && location.longitude.isFinite()) {
-                onResult(location.toLocationSample())
+                locationStabilizer.filter(location.toLocationSample())?.let(onResult)
             }
         }.addOnFailureListener { error ->
             Log.w(TAG, "Fused getCurrentLocation failed", error)
@@ -389,12 +395,16 @@ class AndroidLocationProvider(private val context: Context) {
         )
         val best = candidates.maxByOrNull { it.elapsedRealtimeNanos }
         if (best != null) {
-            onResult(best.toGeoPoint())
+            val stable = locationStabilizer.filter(best.toLocationSample())
+            if (stable != null) onResult(stable.point)
             return
         }
 
         fusedClient.lastLocation
-            .addOnSuccessListener { location -> onResult(location?.toGeoPoint()) }
+            .addOnSuccessListener { location ->
+                val stable = location?.toLocationSample()?.let(locationStabilizer::filter)
+                onResult(stable?.point)
+            }
             .addOnFailureListener { onResult(null) }
     }
 
@@ -416,5 +426,6 @@ class AndroidLocationProvider(private val context: Context) {
     private fun Location.toLocationSample() = LocationSample(
         point = toGeoPoint(),
         timestampEpochMs = time,
+        accuracyMeters = if (hasAccuracy()) accuracy.toDouble() else null,
     )
 }
