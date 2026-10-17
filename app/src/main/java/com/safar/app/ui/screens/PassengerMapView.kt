@@ -37,6 +37,7 @@ import com.safar.app.domain.model.Route
 import com.safar.app.domain.model.Vehicle
 import com.safar.app.domain.model.VehicleLocation
 import com.safar.app.ui.theme.LocalSafarDarkMode
+import androidx.compose.foundation.BorderStroke
 import com.safar.app.ui.theme.SafarBlue
 import com.safar.app.ui.theme.SafarNavy
 import com.safar.app.ui.theme.SafarWhite
@@ -472,18 +473,24 @@ internal fun PassengerMapView(
 
 @Composable
 private fun MapControlButton(symbol: String, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .size(46.dp)
-            .background(SafarWhite, androidx.compose.foundation.shape.CircleShape)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
+    val darkMode = LocalSafarDarkMode.current
+    androidx.compose.material3.Surface(
+        modifier = Modifier.size(46.dp).clickable(onClick = onClick),
+        shape = androidx.compose.foundation.shape.CircleShape,
+        color = androidx.compose.material3.MaterialTheme.colorScheme.surface,
+        border = BorderStroke(
+            1.dp,
+            if (darkMode) Color(0xFF343B48) else Color(0xFFE3E9F2),
+        ),
+        shadowElevation = 1.dp,
     ) {
-        androidx.compose.material3.Text(
-            text = symbol,
-            color = SafarBlue,
-            style = androidx.compose.material3.MaterialTheme.typography.titleLarge,
-        )
+        Box(contentAlignment = Alignment.Center) {
+            androidx.compose.material3.Text(
+                text = symbol,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
+                style = androidx.compose.material3.MaterialTheme.typography.titleLarge,
+            )
+        }
     }
 }
 
