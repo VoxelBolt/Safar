@@ -96,15 +96,16 @@ import com.safar.app.domain.model.VehicleLocation
 import com.safar.app.domain.model.WorkSessionStatus
 import com.safar.app.domain.model.WorkSessionTimer
 import com.safar.app.ui.onboarding.OnboardingState
+import com.safar.app.ui.theme.LocalSafarDarkMode
+import com.safar.app.ui.theme.LocalSetSafarDarkMode
 import com.safar.app.ui.theme.SafarBlue
-import com.safar.app.ui.theme.SafarNavy
-import com.safar.app.ui.theme.SafarWhite
+import com.safar.app.ui.theme.MaterialTheme.colorScheme.onSurface
+import com.safar.app.ui.theme.MaterialTheme.colorScheme.surface
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collect
 
 private val SoftBlue = Color(0xFFEAF2FF)
-private val PageBackground = Color(0xFFF7F9FD)
 private val Border = Color(0xFFE3E9F2)
 private val Muted = Color(0xFF71809A)
 private val Success = Color(0xFF22A447)
@@ -133,7 +134,7 @@ fun PassengerMainScreen(state: OnboardingState, onLanguageSelected: (String) -> 
     }
 
     Scaffold(
-        containerColor = PageBackground,
+        containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
             SafarBottomBar(
                 selected = tab.ordinal,
@@ -225,19 +226,19 @@ private fun PassengerMapScreen(
                     .padding(horizontal = 16.dp, vertical = 12.dp)
                     .clickable { pickerOpen = true },
                 shape = RoundedCornerShape(18.dp),
-                color = SafarWhite,
+                color = MaterialTheme.colorScheme.surface,
                 shadowElevation = 5.dp,
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 13.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    SafarGlyph(Glyph.SEARCH, SafarNavy, 22.dp)
+                    SafarGlyph(Glyph.SEARCH, MaterialTheme.colorScheme.onSurface, 22.dp)
                     Spacer(Modifier.width(10.dp))
                     Text(
                         text = ui.selectedRoute?.let { stringResource(R.string.selected_route_label, it.number) }
                             ?: stringResource(R.string.route_search_hint),
-                        color = if (ui.selectedRoute == null) Muted else SafarNavy,
+                        color = if (ui.selectedRoute == null) Muted else MaterialTheme.colorScheme.onSurface,
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.weight(1f),
                     )
@@ -255,7 +256,7 @@ private fun PassengerMapScreen(
                         .align(Alignment.TopStart)
                         .padding(start = 16.dp, top = 76.dp),
                     shape = RoundedCornerShape(14.dp),
-                    color = SafarWhite,
+                    color = MaterialTheme.colorScheme.surface,
                     shadowElevation = 3.dp,
                 ) {
                     Row(
@@ -269,7 +270,7 @@ private fun PassengerMapScreen(
                         Text(
                             stringResource(R.string.location_permission_needed),
                             style = MaterialTheme.typography.labelLarge,
-                            color = SafarNavy,
+                            color = MaterialTheme.colorScheme.onSurface,
                         )
                     }
                 }
@@ -281,7 +282,7 @@ private fun PassengerMapScreen(
                     .fillMaxWidth()
                     .padding(12.dp),
                 shape = RoundedCornerShape(24.dp),
-                color = SafarWhite,
+                color = MaterialTheme.colorScheme.surface,
                 shadowElevation = 9.dp,
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
@@ -298,7 +299,7 @@ private fun PassengerMapScreen(
                                     ?: stringResource(R.string.no_route_selected),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = SafarNavy,
+                                color = MaterialTheme.colorScheme.onSurface,
                             )
                             Text(
                                 text = ui.selectedRoute?.let { it.number } ?: stringResource(R.string.route_search_hint),
@@ -369,7 +370,7 @@ private fun PassengerMapScreen(
                         text = stringResource(R.string.nearest_transport),
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.SemiBold,
-                        color = SafarNavy,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                     Spacer(Modifier.height(8.dp))
 
@@ -403,7 +404,7 @@ private fun PassengerMapScreen(
                                 text = activeVehicle?.identifier ?: stringResource(R.string.no_active_transport),
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Medium,
-                                color = SafarNavy,
+                                color = MaterialTheme.colorScheme.onSurface,
                             )
                             if (activeVehicle != null) {
                                 Text(
@@ -477,17 +478,17 @@ private fun RoutePickerScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(PageBackground)
+            .background(MaterialTheme.colorScheme.background)
             .imePadding()
             .padding(horizontal = 16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp, bottom = 14.dp)) {
             RoundIconButton(Glyph.BACK, onBack)
             Spacer(Modifier.width(10.dp))
-            Text(stringResource(R.string.route_picker_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = SafarNavy)
+            Text(stringResource(R.string.route_picker_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
         }
 
-        Surface(shape = RoundedCornerShape(16.dp), color = SafarWhite, border = androidx.compose.foundation.BorderStroke(1.dp, Border)) {
+        Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface, border = androidx.compose.foundation.BorderStroke(1.dp, Border)) {
             Row(Modifier.padding(horizontal = 14.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
                 SafarGlyph(Glyph.SEARCH, Muted, 22.dp)
                 BasicTextField(
@@ -495,7 +496,7 @@ private fun RoutePickerScreen(
                     onValueChange = { query = it },
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 13.dp),
                     singleLine = true,
-                    textStyle = TextStyle(color = SafarNavy, fontSize = 15.sp),
+                    textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     decorationBox = { inner ->
                         if (query.isEmpty()) Text(stringResource(R.string.route_search_hint), color = Muted)
@@ -516,7 +517,7 @@ private fun RoutePickerScreen(
 
         if (!loading && recentRoutes.isNotEmpty()) {
             Spacer(Modifier.height(20.dp))
-            Text(stringResource(R.string.recent_routes), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = SafarNavy)
+            Text(stringResource(R.string.recent_routes), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 recentRoutes.take(3).forEach { route ->
@@ -532,7 +533,7 @@ private fun RoutePickerScreen(
         }
 
         Spacer(Modifier.height(22.dp))
-        Text(stringResource(R.string.all_routes), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = SafarNavy)
+        Text(stringResource(R.string.all_routes), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
         Spacer(Modifier.height(8.dp))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(filtered, key = { it.id }) { route ->
@@ -547,7 +548,7 @@ private fun RouteRow(route: Route, onClick: () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         shape = RoundedCornerShape(18.dp),
-        color = SafarWhite,
+        color = MaterialTheme.colorScheme.surface,
         shadowElevation = 1.dp,
     ) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -556,7 +557,7 @@ private fun RouteRow(route: Route, onClick: () -> Unit) {
             }
             Spacer(Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(route.number, color = SafarNavy, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                Text(route.number, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                 Text(
                     if (route.path.size >= 2) stringResource(R.string.route_ready)
                     else stringResource(R.string.route_path_unavailable),
@@ -574,7 +575,7 @@ private fun OutlinedRetryButton(onClick: () -> Unit) {
     Surface(
         modifier = Modifier.clickable(onClick = onClick),
         shape = RoundedCornerShape(12.dp),
-        color = SafarWhite,
+        color = MaterialTheme.colorScheme.surface,
         border = androidx.compose.foundation.BorderStroke(1.dp, Border),
     ) {
         Text(stringResource(R.string.retry), modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), color = SafarBlue, fontWeight = FontWeight.SemiBold)
@@ -590,10 +591,10 @@ private data class VehicleMock(val identifier: String, val route: String, val di
 private fun PassengerFavoritesScreen(modifier: Modifier = Modifier) {
     var favorites by remember { mutableStateOf(emptyList<VehicleMock>()) }
 
-    Column(modifier = modifier.fillMaxSize().background(PageBackground).padding(horizontal = 16.dp)) {
+    Column(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(horizontal = 16.dp)) {
         Spacer(Modifier.height(18.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.favorites_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = SafarNavy, modifier = Modifier.weight(1f))
+            Text(stringResource(R.string.favorites_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
             RoundIconButton(Glyph.PLUS, onClick = {}, tint = SafarBlue)
         }
         Text(stringResource(R.string.favorites_subtitle), style = MaterialTheme.typography.bodyMedium, color = Muted)
@@ -623,17 +624,17 @@ private fun PassengerFavoritesScreen(modifier: Modifier = Modifier) {
 
 @Composable
 private fun FavoriteVehicleCard(vehicle: VehicleMock, onRemove: () -> Unit) {
-    Surface(shape = RoundedCornerShape(20.dp), color = SafarWhite, shadowElevation = 2.dp) {
+    Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 2.dp) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(shape = RoundedCornerShape(14.dp), color = Color(0xFFF0F4FA)) {
                     Box(Modifier.size(76.dp), contentAlignment = Alignment.Center) {
-                        SafarGlyph(Glyph.BUS, SafarNavy, 38.dp)
+                        SafarGlyph(Glyph.BUS, MaterialTheme.colorScheme.onSurface, 38.dp)
                     }
                 }
                 Spacer(Modifier.width(14.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(vehicle.route, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = SafarNavy)
+                    Text(vehicle.route, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                     Text(vehicle.identifier, style = MaterialTheme.typography.bodyMedium, color = Muted)
                     Spacer(Modifier.height(4.dp))
                     Text(vehicle.direction, style = MaterialTheme.typography.bodySmall, color = Muted)
@@ -661,12 +662,12 @@ private fun FavoriteVehicleCard(vehicle: VehicleMock, onRemove: () -> Unit) {
 @Composable
 private fun PassengerProfileScreen(state: OnboardingState, modifier: Modifier = Modifier) {
     Column(
-        modifier = modifier.fillMaxSize().background(PageBackground).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+        modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
     ) {
         Spacer(Modifier.height(18.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.profile_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = SafarNavy)
+                Text(stringResource(R.string.profile_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                 Text(stringResource(R.string.profile_subtitle), color = Muted, style = MaterialTheme.typography.bodyMedium)
             }
             Surface(shape = RoundedCornerShape(14.dp), color = SoftBlue) {
@@ -702,14 +703,14 @@ private fun PassengerProfileScreen(state: OnboardingState, modifier: Modifier = 
 
 @Composable
 private fun ProfileHeader(name: String, phone: String) {
-    Surface(shape = RoundedCornerShape(20.dp), color = SafarWhite, shadowElevation = 1.dp) {
+    Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 1.dp) {
         Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
             Surface(shape = CircleShape, color = SoftBlue) {
                 Box(Modifier.size(64.dp), contentAlignment = Alignment.Center) { SafarGlyph(Glyph.PERSON, SafarBlue, 34.dp) }
             }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text(name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = SafarNavy)
+                Text(name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                 Text(phone.ifBlank { "—" }, color = Muted, style = MaterialTheme.typography.bodyMedium)
             }
             SafarGlyph(Glyph.CHEVRON, Muted, 22.dp)
@@ -721,7 +722,7 @@ private data class ProfileRow(val glyph: Glyph, val title: String, val trailing:
 
 @Composable
 private fun ProfileMenuCard(rows: List<ProfileRow>) {
-    Surface(shape = RoundedCornerShape(20.dp), color = SafarWhite, shadowElevation = 1.dp) {
+    Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 1.dp) {
         Column {
             rows.forEachIndexed { index, row ->
                 Row(
@@ -730,7 +731,7 @@ private fun ProfileMenuCard(rows: List<ProfileRow>) {
                 ) {
                     SafarGlyph(row.glyph, SafarBlue, 22.dp)
                     Spacer(Modifier.width(16.dp))
-                    Text(row.title, Modifier.weight(1f), color = SafarNavy, style = MaterialTheme.typography.bodyMedium)
+                    Text(row.title, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyMedium)
                     row.trailing?.let { Text(it, color = Muted, style = MaterialTheme.typography.bodySmall) }
                     Spacer(Modifier.width(8.dp))
                     SafarGlyph(Glyph.CHEVRON, Muted, 20.dp)
@@ -799,7 +800,7 @@ fun DriverMainScreen(state: OnboardingState, onLanguageSelected: (String) -> Uni
     }
 
     Scaffold(
-        containerColor = PageBackground,
+        containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
             SafarBottomBar(
                 selected = tab.ordinal,
@@ -874,6 +875,8 @@ private fun DriverHomeScreen(
     onRequestTrackingPermission: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val darkMode = LocalSafarDarkMode.current
+    val setDarkMode = LocalSetSafarDarkMode.current
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var timerPanelExpanded by remember { mutableStateOf(true) }
 
@@ -991,7 +994,7 @@ private fun DriverHomeScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(PageBackground),
+            .background(MaterialTheme.colorScheme.background),
     ) {
         // The map is the primary surface of the driver home screen. There is
         // intentionally no parent verticalScroll here, so drag gestures reach
@@ -1051,7 +1054,7 @@ private fun DriverHomeScreen(
                 },
                 modifier = Modifier.align(Alignment.TopCenter).padding(top = 82.dp),
                 shape = CircleShape,
-                color = SafarWhite,
+                color = MaterialTheme.colorScheme.surface,
                 shadowElevation = 4.dp,
             ) {
                 Row(
@@ -1060,7 +1063,7 @@ private fun DriverHomeScreen(
                 ) {
                     Text(
                         text = "Ожидают вас: ${ui.passengerLocations.size} ${russianPeopleWord(ui.passengerLocations.size)}",
-                        color = SafarNavy,
+                        color = MaterialTheme.colorScheme.onSurface,
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
@@ -1078,14 +1081,13 @@ private fun DriverHomeScreen(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
-                .statusBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Surface(
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(18.dp),
-                color = SafarWhite,
+                color = MaterialTheme.colorScheme.surface,
                 shadowElevation = 5.dp,
             ) {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 11.dp)) {
@@ -1093,7 +1095,7 @@ private fun DriverHomeScreen(
                         stringResource(R.string.driver_home_title),
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
-                        color = SafarNavy,
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                     )
                     Text(
@@ -1106,13 +1108,18 @@ private fun DriverHomeScreen(
             }
             Spacer(Modifier.width(10.dp))
             Surface(
+                onClick = { setDarkMode(!darkMode) },
                 modifier = Modifier.size(50.dp),
                 shape = RoundedCornerShape(16.dp),
-                color = SoftBlue,
+                color = if (darkMode) Color(0xFF29364A) else SoftBlue,
                 shadowElevation = 2.dp,
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    SafarGlyph(Glyph.SETTINGS, SafarBlue, 23.dp)
+                    if (darkMode) {
+                        Text("☾", color = Color(0xFFBBD2FF), fontSize = 27.sp)
+                    } else {
+                        SafarGlyph(Glyph.SETTINGS, SafarBlue, 23.dp)
+                    }
                 }
             }
         }
@@ -1124,7 +1131,7 @@ private fun DriverHomeScreen(
                     .statusBarsPadding()
                     .padding(start = 16.dp, top = 76.dp),
                 shape = RoundedCornerShape(14.dp),
-                color = SafarWhite,
+                color = MaterialTheme.colorScheme.surface,
                 shadowElevation = 3.dp,
             ) {
                 Row(
@@ -1138,7 +1145,7 @@ private fun DriverHomeScreen(
                     Text(
                         stringResource(R.string.location_permission_needed),
                         style = MaterialTheme.typography.labelLarge,
-                        color = SafarNavy,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                 }
             }
@@ -1148,7 +1155,7 @@ private fun DriverHomeScreen(
         Surface(
             modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp),
             shape = RoundedCornerShape(22.dp),
-            color = SafarWhite,
+            color = MaterialTheme.colorScheme.surface,
             shadowElevation = 8.dp,
         ) {
             Column(Modifier.padding(horizontal = 14.dp, vertical = if (timerPanelExpanded) 12.dp else 8.dp)) {
@@ -1173,15 +1180,15 @@ private fun DriverHomeScreen(
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1.35f)) {
                             Text(stringResource(R.string.work_session_label), color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1)
-                            Text(formatDuration(elapsed), color = SafarNavy, fontSize = 30.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            Text(formatDuration(elapsed), color = MaterialTheme.colorScheme.onSurface, fontSize = 30.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                         }
                         Column(Modifier.weight(0.8f)) {
                             Text(stringResource(R.string.work_distance), color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1)
-                            Text("$distanceKm км", color = SafarNavy, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1)
+                            Text("$distanceKm км", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1)
                         }
                         Column(Modifier.weight(0.65f)) {
                             Text(stringResource(R.string.work_route), color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1)
-                            Text(routeNumber, color = SafarNavy, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1)
+                            Text(routeNumber, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1)
                         }
                     }
                     Spacer(Modifier.height(9.dp))
@@ -1215,7 +1222,7 @@ private fun StatMini(label: String, value: String, modifier: Modifier) {
     Column(modifier) {
         Text(label, color = Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1)
         Spacer(Modifier.height(3.dp))
-        Text(value, color = SafarNavy, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Text(value, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }
 
@@ -1239,7 +1246,7 @@ private fun DriverStatisticsScreen(modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(PageBackground)
+            .background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp),
     ) {
@@ -1248,7 +1255,7 @@ private fun DriverStatisticsScreen(modifier: Modifier = Modifier) {
             stringResource(R.string.statistics_title),
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
-            color = SafarNavy,
+            color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
         )
         Spacer(Modifier.height(14.dp))
@@ -1301,7 +1308,7 @@ private fun DriverStatisticsScreen(modifier: Modifier = Modifier) {
             stringResource(R.string.by_days),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
-            color = SafarNavy,
+            color = MaterialTheme.colorScheme.onSurface,
         )
         Spacer(Modifier.height(8.dp))
         val days = listOf(
@@ -1313,7 +1320,7 @@ private fun DriverStatisticsScreen(modifier: Modifier = Modifier) {
             "31 авг." to ("4 ч 00 мин" to "56 км"),
             "30 авг." to ("2 ч 55 мин" to "40 км"),
         )
-        Surface(shape = RoundedCornerShape(20.dp), color = SafarWhite, shadowElevation = 1.dp) {
+        Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 1.dp) {
             Column {
                 days.forEachIndexed { index, (day, values) ->
                     Row(
@@ -1337,7 +1344,7 @@ private fun DriverStatisticsScreen(modifier: Modifier = Modifier) {
                             Spacer(Modifier.width(6.dp))
                             Text(
                                 values.first,
-                                color = SafarNavy,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 fontWeight = FontWeight.SemiBold,
                                 style = MaterialTheme.typography.bodySmall,
                                 maxLines = 1,
@@ -1351,7 +1358,7 @@ private fun DriverStatisticsScreen(modifier: Modifier = Modifier) {
                             Spacer(Modifier.width(6.dp))
                             Text(
                                 values.second,
-                                color = SafarNavy,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 fontWeight = FontWeight.SemiBold,
                                 style = MaterialTheme.typography.bodySmall,
                                 maxLines = 1,
@@ -1381,14 +1388,14 @@ private fun DriverSummaryCard(
         Column(Modifier.padding(horizontal = 16.dp, vertical = if (compact) 13.dp else 16.dp)) {
             Text(
                 title,
-                color = SafarNavy,
+                color = MaterialTheme.colorScheme.onSurface,
                 style = if (compact) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
                 maxLines = if (compact) 1 else 2,
             )
             Spacer(Modifier.height(3.dp))
             Text(
                 value,
-                color = SafarNavy,
+                color = MaterialTheme.colorScheme.onSurface,
                 style = if (compact) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
@@ -1413,7 +1420,7 @@ internal fun SegmentedControl(labels: List<String>, selected: Int, onSelected: (
                         label,
                         Modifier.padding(horizontal = 2.dp, vertical = 10.dp),
                         textAlign = TextAlign.Center,
-                        color = if (index == selected) SafarWhite else Muted,
+                        color = if (index == selected) MaterialTheme.colorScheme.surface else Muted,
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
@@ -1426,11 +1433,11 @@ internal fun SegmentedControl(labels: List<String>, selected: Int, onSelected: (
 
 @Composable
 private fun DriverProfileScreen(state: OnboardingState, route: Route?, modifier: Modifier = Modifier) {
-    Column(modifier = modifier.fillMaxSize().background(PageBackground).padding(horizontal = 16.dp).verticalScroll(rememberScrollState())) {
+    Column(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(horizontal = 16.dp).verticalScroll(rememberScrollState())) {
         Spacer(Modifier.height(18.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.profile_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = SafarNavy)
+                Text(stringResource(R.string.profile_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                 Text(stringResource(R.string.profile_subtitle), color = Muted)
             }
             Surface(shape = RoundedCornerShape(14.dp), color = SoftBlue) {
@@ -1440,7 +1447,7 @@ private fun DriverProfileScreen(state: OnboardingState, route: Route?, modifier:
         Spacer(Modifier.height(18.dp))
         ProfileHeader(name = state.name.ifBlank { stringResource(R.string.user_default_name) }, phone = state.phone)
         Spacer(Modifier.height(12.dp))
-        Surface(shape = RoundedCornerShape(20.dp), color = SafarWhite, shadowElevation = 1.dp) {
+        Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 1.dp) {
             Column {
                 DriverProfileRow(Glyph.BUS, stringResource(R.string.vehicle_label), state.vehicleIdentifier.ifBlank { "—" })
                 HorizontalDivider(color = Border)
@@ -1478,7 +1485,7 @@ private fun DriverProfileRow(glyph: Glyph, title: String, value: String) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
         SafarGlyph(glyph, SafarBlue, 22.dp)
         Spacer(Modifier.width(16.dp))
-        Text(title, Modifier.weight(1f), color = SafarNavy, style = MaterialTheme.typography.bodyMedium)
+        Text(title, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyMedium)
         Text(value, color = Muted, style = MaterialTheme.typography.bodySmall)
         Spacer(Modifier.width(8.dp))
         SafarGlyph(Glyph.CHEVRON, Muted, 20.dp)
@@ -1498,9 +1505,9 @@ private fun PrimaryActionButton(
         enabled = enabled,
         modifier = modifier.fillMaxWidth().height(54.dp),
         shape = RoundedCornerShape(16.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = SafarBlue, contentColor = SafarWhite),
+        colors = ButtonDefaults.buttonColors(containerColor = SafarBlue, contentColor = MaterialTheme.colorScheme.surface),
     ) {
-        SafarGlyph(glyph, SafarWhite, 21.dp)
+        SafarGlyph(glyph, MaterialTheme.colorScheme.surface, 21.dp)
         Spacer(Modifier.width(8.dp))
         Text(text, fontWeight = FontWeight.SemiBold)
     }
@@ -1519,7 +1526,7 @@ private fun SecondaryActionButton(
         enabled = enabled,
         modifier = modifier.fillMaxWidth().height(54.dp),
         shape = RoundedCornerShape(16.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = SafarWhite, contentColor = SafarBlue),
+        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surface, contentColor = SafarBlue),
         border = androidx.compose.foundation.BorderStroke(1.dp, Border),
     ) {
         SafarGlyph(glyph, SafarBlue, 21.dp)
@@ -1539,7 +1546,7 @@ internal fun EmptyState(glyph: Glyph, title: String, subtitle: String) {
             Box(Modifier.size(76.dp), contentAlignment = Alignment.Center) { SafarGlyph(glyph, SafarBlue, 36.dp) }
         }
         Spacer(Modifier.height(18.dp))
-        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = SafarNavy, textAlign = TextAlign.Center)
+        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, textAlign = TextAlign.Center)
         Spacer(Modifier.height(6.dp))
         Text(subtitle, color = Muted, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 30.dp))
     }
@@ -1555,7 +1562,7 @@ private fun SafarBottomBar(
     onSelected: (Int) -> Unit,
 ) {
     NavigationBar(
-        containerColor = SafarWhite,
+        containerColor = MaterialTheme.colorScheme.surface,
         tonalElevation = 3.dp,
         windowInsets = WindowInsets.navigationBars,
     ) {
@@ -1578,11 +1585,11 @@ private fun SafarBottomBar(
 }
 
 @Composable
-private fun RoundIconButton(glyph: Glyph, onClick: () -> Unit, tint: Color = SafarNavy) {
+private fun RoundIconButton(glyph: Glyph, onClick: () -> Unit, tint: Color = MaterialTheme.colorScheme.onSurface) {
     Surface(
         modifier = Modifier.size(46.dp).clickable(onClick = onClick),
         shape = CircleShape,
-        color = SafarWhite,
+        color = MaterialTheme.colorScheme.surface,
         shadowElevation = 1.dp,
     ) {
         Box(contentAlignment = Alignment.Center) {
