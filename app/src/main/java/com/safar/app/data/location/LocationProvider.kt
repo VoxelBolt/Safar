@@ -75,10 +75,25 @@ internal class LocationStabilizer(
 
         if (distance <= deadband) {
             candidate = null
-            // Keep the point fixed; only advance time so subsequent samples are
-            // compared against current measurements rather than a stale timestamp.
-            accepted = previous.copy(timestampEpochMs = maxOf(previous.timestampEpochMs, sample.timestampEpochMs))
-            return accepted
+            // Small movements are usually stationary GPS noise. However, if the
+            // new fix reports materially better horizontal accuracy, let it gently
+            // correct the held point instead of preserving an older, less accurate
+            // position indefinitely.
+            val previousAccuracy = previous.accuracyMeters
+            val currentAccuracy = sample.accuracyMeters
+            val improvedAccuracy = currentAccuracy != null &&
+                (previousAccuracy == null || currentAccuracy <= previousAccuracy * 0.75)
+            val correctedPoint = if (improvedAccuracy) {
+                blend(previous.point, sample.point, 0.35)
+            } else {
+                previous.point
+            }
+            val held = sample.copy(
+                point = correctedPoint,
+                timestampEpochMs = maxOf(previous.timestampEpochMs, sample.timestampEpochMs),
+            )
+            accepted = held
+            return held
         }
 
         if (distance >= jumpThresholdMeters) {
