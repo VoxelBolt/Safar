@@ -323,6 +323,7 @@ internal fun PassengerMapView(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .padding(end = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             MapControlButton("⌖") {
@@ -331,7 +332,6 @@ internal fun PassengerMapView(
             MapControlButton("+") {
                 map?.animateCamera(CameraUpdateFactory.zoomIn())
             }
-            Spacer(Modifier.size(8.dp))
             MapControlButton("−") {
                 map?.animateCamera(CameraUpdateFactory.zoomOut())
             }
