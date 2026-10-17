@@ -260,7 +260,7 @@ private fun PassengerMapScreen(
                     shadowElevation = 5.dp,
                 ) {
                     Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                        SafarGlyph(if (passengerDarkMode) Glyph.SUN else Glyph.MOON, MaterialTheme.colorScheme.primary, 24.dp)
+                        SafarGlyph(Glyph.MOON, MaterialTheme.colorScheme.primary, 24.dp)
                     }
                 }
             }
@@ -1569,7 +1569,7 @@ internal fun EmptyState(glyph: Glyph, title: String, subtitle: String) {
     }
 }
 
-internal enum class Glyph { MAP, STAR, STAR_FILLED, PERSON, HOME, STATS, SEARCH, PIN, LOCATE, BUS, CHEVRON, BACK, PLUS, CLOCK, ROUTE, SETTINGS, BELL, LANGUAGE, HELP, INFO, LOGOUT, PLAY, PAUSE, CHECK, SHIELD, MOON }
+internal enum class Glyph { MAP, STAR, STAR_FILLED, PERSON, HOME, STATS, SEARCH, PIN, LOCATE, BUS, CHEVRON, BACK, PLUS, CLOCK, ROUTE, SETTINGS, BELL, LANGUAGE, HELP, INFO, LOGOUT, PLAY, PAUSE, CHECK, SHIELD, MOON, SUN }
 
 @Composable
 private fun SafarBottomBar(
@@ -1701,6 +1701,20 @@ private fun SafarGlyph(glyph: Glyph, tint: Color, size: androidx.compose.ui.unit
                 drawCircle(tint,w*.10f,Offset(w*.74f,h*.68f),style=stroke)
                 val p=Path().apply{moveTo(w*.31f,h*.35f);cubicTo(w*.45f,h*.05f,w*.55f,h*.95f,w*.67f,h*.66f)}
                 drawPath(p,tint,style=stroke)
+            }
+            Glyph.SUN -> {
+                drawCircle(tint, w * .24f, Offset(cx, cy), style = stroke)
+                for (i in 0 until 8) {
+                    val angle = i * Math.PI / 4
+                    val inner = w * .34f
+                    val outer = w * .46f
+                    drawLine(
+                        tint,
+                        Offset(cx + (inner * kotlin.math.cos(angle)).toFloat(), cy + (inner * kotlin.math.sin(angle)).toFloat()),
+                        Offset(cx + (outer * kotlin.math.cos(angle)).toFloat(), cy + (outer * kotlin.math.sin(angle)).toFloat()),
+                        stroke.width,
+                    )
+                }
             }
             Glyph.MOON -> {
                 // Draw a clean crescent using two smooth stroked curves.
