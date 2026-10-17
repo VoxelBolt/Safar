@@ -164,17 +164,43 @@ class AndroidLocationProvider(private val context: Context) {
         }
 
         val rotationMatrix = FloatArray(9)
+        val screenFacingMatrix = FloatArray(9)
         val orientation = FloatArray(3)
         var gravityValues: FloatArray? = null
         var magneticValues: FloatArray? = null
         var lastEmittedHeading: Float? = null
-        // Android's azimuth is measured clockwise from magnetic north using the
-        // device's natural Y axis (the top edge in portrait). Read that value
-        // directly from the sensor matrix. The previous display-axis remapping
-        // used the current UI rotation as a second coordinate transform and could
-        // cancel/offset the physical yaw on some handsets, leaving the sector static.
+
+        // The driver holds the phone upright and points its SCREEN toward the
+        // direction they want to indicate. SensorManager.getOrientation() normally
+        // reports azimuth from the phone's natural Y axis (its top edge), which is
+        // nearly vertical in that posture; its horizontal projection can be close
+        // to zero, so the reported azimuth may barely move or become unstable.
+        //
+        // Remap the device coordinate frame so the physical +Z axis (out through
+        // the screen) becomes the new +Y axis before extracting azimuth. This
+        // calculates the bearing of the screen-facing direction, independent of
+        // the current UI/display rotation.
         fun emitHeadingFromMatrix() {
-            SensorManager.getOrientation(rotationMatrix, orientation)
+            if (!SensorManager.remapCoordinateSystem(
+                    rotationMatrix,
+                    SensorManager.AXIS_X,
+                    SensorManager.AXIS_Z,
+                    screenFacingMatrix,
+                )
+            ) {
+                Log.w(TAG, "Could not remap sensor matrix to screen-facing axis")
+                return
+            }
+
+            // If the screen faces almost straight up/down, its horizontal bearing
+            // is undefined. Do not emit noisy jumps in that posture.
+            val horizontalProjection = kotlin.math.hypot(
+                screenFacingMatrix[1].toDouble(),
+                screenFacingMatrix[4].toDouble(),
+            )
+            if (horizontalProjection < 0.10) return
+
+            SensorManager.getOrientation(screenFacingMatrix, orientation)
             val rawDegrees = Math.toDegrees(orientation[0].toDouble()).toFloat()
             val degrees = ((rawDegrees % 360f) + 360f) % 360f
             if (!degrees.isFinite()) return
@@ -188,7 +214,7 @@ class AndroidLocationProvider(private val context: Context) {
             if (delta >= 1.0f) {
                 lastEmittedHeading = degrees
                 trySend(degrees)
-                Log.d(TAG, "Compass azimuth updated: ${degrees.toInt()}°")
+                Log.d(TAG, "Screen-facing compass bearing updated: ${degrees.toInt()}°")
             }
         }
 
