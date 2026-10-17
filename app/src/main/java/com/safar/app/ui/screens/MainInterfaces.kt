@@ -1164,9 +1164,11 @@ private fun DriverHomeScreen(
                     Spacer(Modifier.width(8.dp))
                     Text(statusText, color = statusColor, fontWeight = FontWeight.SemiBold,
                         style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), maxLines = 1)
-                    Surface(onClick = { timerPanelExpanded = !timerPanelExpanded }, shape = CircleShape, color = SoftBlue) {
+                    Surface(onClick = { timerPanelExpanded = !timerPanelExpanded }, shape = CircleShape,
+                        color = if (darkMode) Color(0xFF29364A) else SoftBlue) {
                         Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) {
-                            Text(if (timerPanelExpanded) "↓" else "↑", color = SafarBlue, fontSize = 18.sp,
+                            Text(if (timerPanelExpanded) "↓" else "↑",
+                                color = if (darkMode) Color(0xFFBBD2FF) else SafarBlue, fontSize = 18.sp,
                                 lineHeight = 20.sp, fontWeight = FontWeight.Medium)
                         }
                     }
@@ -1686,11 +1688,13 @@ private fun SafarGlyph(glyph: Glyph, tint: Color, size: androidx.compose.ui.unit
             Glyph.MOON -> {
                 // Draw a clean crescent with the same stroked, custom icon style as the sun.
                 val crescent = Path().apply {
-                    moveTo(w * .70f, h * .13f)
-                    cubicTo(w * .34f, h * .13f, w * .18f, h * .40f, w * .25f, h * .63f)
-                    cubicTo(w * .32f, h * .86f, w * .59f, h * .91f, w * .79f, h * .72f)
-                    cubicTo(w * .55f, h * .76f, w * .37f, h * .57f, w * .40f, h * .38f)
-                    cubicTo(w * .42f, h * .25f, w * .54f, h * .15f, w * .70f, h * .13f)
+                    // Smooth, balanced crescent: one convex outer edge and one
+                    // concave inner edge, centered with even visual margins.
+                    moveTo(w * .68f, h * .12f)
+                    cubicTo(w * .29f, h * .12f, w * .12f, h * .43f, w * .23f, h * .68f)
+                    cubicTo(w * .34f, h * .91f, w * .59f, h * .91f, w * .78f, h * .72f)
+                    cubicTo(w * .55f, h * .78f, w * .39f, h * .60f, w * .39f, h * .41f)
+                    cubicTo(w * .39f, h * .27f, w * .51f, h * .15f, w * .68f, h * .12f)
                     close()
                 }
                 drawPath(crescent, tint, style = stroke)
