@@ -1025,19 +1025,23 @@ private fun DriverHomeScreen(
                     }
                 },
                 modifier = Modifier.align(Alignment.TopCenter).padding(top = 82.dp),
-                shape = RoundedCornerShape(18.dp),
+                shape = CircleShape,
                 color = SafarWhite,
                 shadowElevation = 4.dp,
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Ждут тебя", color = SafarNavy, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-                        Text(ui.passengerLocations.size.toString() + " чел. ожидают", color = Muted, style = MaterialTheme.typography.bodySmall)
-                    }
-                    SafarGlyph(Glyph.LOCATE, SafarBlue, 20.dp)
+                    Text(
+                        text = "Ожидают вас: ${ui.passengerLocations.size}",
+                        color = SafarNavy,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    SafarGlyph(Glyph.LOCATE, SafarBlue, 18.dp)
                 }
             }
         }
