@@ -1114,7 +1114,7 @@ private fun DriverHomeScreen(
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     if (darkMode) {
-                        Text("☾", color = Color(0xFFBBD2FF), fontSize = 27.sp)
+                        SafarGlyph(Glyph.MOON, Color(0xFFBBD2FF), 25.dp)
                     } else {
                         SafarGlyph(Glyph.SETTINGS, SafarBlue, 23.dp)
                     }
@@ -1550,7 +1550,7 @@ internal fun EmptyState(glyph: Glyph, title: String, subtitle: String) {
     }
 }
 
-internal enum class Glyph { MAP, STAR, STAR_FILLED, PERSON, HOME, STATS, SEARCH, PIN, LOCATE, BUS, CHEVRON, BACK, PLUS, CLOCK, ROUTE, SETTINGS, BELL, LANGUAGE, HELP, INFO, LOGOUT, PLAY, PAUSE, CHECK, SHIELD }
+internal enum class Glyph { MAP, STAR, STAR_FILLED, PERSON, HOME, STATS, SEARCH, PIN, LOCATE, BUS, CHEVRON, BACK, PLUS, CLOCK, ROUTE, SETTINGS, BELL, LANGUAGE, HELP, INFO, LOGOUT, PLAY, PAUSE, CHECK, SHIELD, MOON }
 
 @Composable
 private fun SafarBottomBar(
@@ -1573,7 +1573,7 @@ private fun SafarBottomBar(
                 colors = NavigationBarItemDefaults.colors(
                     selectedIconColor = SafarBlue,
                     selectedTextColor = SafarBlue,
-                    indicatorColor = SoftBlue,
+                    indicatorColor = if (LocalSafarDarkMode.current) Color(0xFF29364A) else SoftBlue,
                     unselectedIconColor = Color(0xFF8B98AD),
                     unselectedTextColor = Color(0xFF8B98AD),
                 ),
@@ -1682,6 +1682,18 @@ private fun SafarGlyph(glyph: Glyph, tint: Color, size: androidx.compose.ui.unit
                 drawCircle(tint,w*.10f,Offset(w*.74f,h*.68f),style=stroke)
                 val p=Path().apply{moveTo(w*.31f,h*.35f);cubicTo(w*.45f,h*.05f,w*.55f,h*.95f,w*.67f,h*.66f)}
                 drawPath(p,tint,style=stroke)
+            }
+            Glyph.MOON -> {
+                // Draw a clean crescent with the same stroked, custom icon style as the sun.
+                val crescent = Path().apply {
+                    moveTo(w * .70f, h * .13f)
+                    cubicTo(w * .34f, h * .13f, w * .18f, h * .40f, w * .25f, h * .63f)
+                    cubicTo(w * .32f, h * .86f, w * .59f, h * .91f, w * .79f, h * .72f)
+                    cubicTo(w * .55f, h * .76f, w * .37f, h * .57f, w * .40f, h * .38f)
+                    cubicTo(w * .42f, h * .25f, w * .54f, h * .15f, w * .70f, h * .13f)
+                    close()
+                }
+                drawPath(crescent, tint, style = stroke)
             }
             Glyph.SETTINGS -> {
                 drawCircle(tint,w*.27f,Offset(cx,cy),style=stroke)
