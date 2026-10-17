@@ -1161,8 +1161,8 @@ private fun DriverHomeScreen(
                         style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), maxLines = 1)
                     Surface(onClick = { timerPanelExpanded = !timerPanelExpanded }, shape = CircleShape, color = SoftBlue) {
                         Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) {
-                            Text(if (timerPanelExpanded) "⌄" else "⌃", color = SafarBlue, fontSize = 22.sp,
-                                lineHeight = 22.sp, fontWeight = FontWeight.Bold)
+                            Text(if (timerPanelExpanded) "↓" else "↑", color = SafarBlue, fontSize = 18.sp,
+                                lineHeight = 20.sp, fontWeight = FontWeight.Medium)
                         }
                     }
                 }
