@@ -148,7 +148,6 @@ internal fun PassengerMapView(
     val darkMode = LocalSafarDarkMode.current
     var centeredOnUser by remember { mutableStateOf(false) }
     var lastCameraRouteId by remember { mutableStateOf<String?>(null) }
-    var autoFocusedVehicle by remember(route?.id) { mutableStateOf(false) }
     val vehicleLocationStabilizer = remember(route?.id) { VehicleLocationStabilizer() }
     val stabilizedVehicleLocations = vehicleLocationStabilizer.stabilize(vehicleLocations)
     val mapReady = rememberMapLibre(context)
@@ -375,24 +374,10 @@ internal fun PassengerMapView(
     LaunchedEffect(styleReady, route?.id, stabilizedVehicleLocations) {
         if (!styleReady || route == null) return@LaunchedEffect
 
-        // If a live vehicle arrives after the map was centered on the passenger
-        // or route, bring it into view once. This is especially important when
-        // the passenger emulator is using its default location in another country.
-        // Do not keep recentering: the passenger remains free to pan and zoom.
+        // New/updated active vehicles are map data only. Never move the
+        // camera just because a driver appears or their location refreshes;
+        // the passenger's current viewport must remain unchanged.
         if (stabilizedVehicleLocations.isNotEmpty()) {
-            if (!autoFocusedVehicle) {
-                val firstLocation = stabilizedVehicleLocations.first().second
-                val vehicleTarget = LatLng(firstLocation.latitude, firstLocation.longitude)
-                val isVisible = runCatching {
-                    map?.projection?.visibleRegion?.latLngBounds?.contains(vehicleTarget) == true
-                }.getOrDefault(false)
-                if (!isVisible) {
-                    map?.animateCamera(
-                        CameraUpdateFactory.newLatLngZoom(vehicleTarget, USER_FOCUS_ZOOM)
-                    )
-                }
-                autoFocusedVehicle = true
-            }
             lastCameraRouteId = route.id
             return@LaunchedEffect
         }
