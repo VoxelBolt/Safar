@@ -1406,7 +1406,7 @@ private fun DriverSummaryCard(
 
 @Composable
 internal fun SegmentedControl(labels: List<String>, selected: Int, onSelected: (Int) -> Unit) {
-    Surface(shape = RoundedCornerShape(16.dp), color = Color(0xFFEFF3F9)) {
+    Surface(shape = RoundedCornerShape(16.dp), color = if (LocalSafarDarkMode.current) Color(0xFF252B35) else Color(0xFFEFF3F9)) {
         Row(Modifier.padding(3.dp)) {
             labels.forEachIndexed { index, label ->
                 Surface(
@@ -1420,7 +1420,7 @@ internal fun SegmentedControl(labels: List<String>, selected: Int, onSelected: (
                         label,
                         Modifier.padding(horizontal = 2.dp, vertical = 10.dp),
                         textAlign = TextAlign.Center,
-                        color = if (index == selected) MaterialTheme.colorScheme.surface else Muted,
+                        color = if (index == selected) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
