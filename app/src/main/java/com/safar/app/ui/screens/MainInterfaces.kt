@@ -874,6 +874,7 @@ private fun DriverHomeScreen(
 
     val session = ui.workSession
     val status = session?.status ?: WorkSessionStatus.NOT_STARTED
+    val routeNumber = ui.selectedRoute?.number ?: stringResource(R.string.route_not_selected)
     val elapsed = session?.let { WorkSessionTimer.elapsedWorkSeconds(it, now) } ?: 0L
 
     val context = LocalContext.current
