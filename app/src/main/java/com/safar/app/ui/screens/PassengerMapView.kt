@@ -36,6 +36,7 @@ import com.safar.app.domain.model.PassengerLocation
 import com.safar.app.domain.model.Route
 import com.safar.app.domain.model.Vehicle
 import com.safar.app.domain.model.VehicleLocation
+import com.safar.app.ui.theme.LocalSafarDarkMode
 import com.safar.app.ui.theme.SafarBlue
 import com.safar.app.ui.theme.SafarNavy
 import com.safar.app.ui.theme.SafarWhite
@@ -80,6 +81,7 @@ import org.maplibre.geojson.Point
 import org.maplibre.geojson.Polygon
 
 private const val OPEN_FREE_MAP_STYLE = "https://tiles.openfreemap.org/styles/liberty"
+private const val OPEN_FREE_MAP_DARK_STYLE = "https://tiles.openfreemap.org/styles/dark"
 private const val ROUTE_SOURCE_ID = "safar-route-source"
 private const val ROUTE_LAYER_ID = "safar-route-layer"
 private const val ROUTE_CASING_LAYER_ID = "safar-route-casing-layer"
@@ -141,6 +143,8 @@ internal fun PassengerMapView(
     val lifecycleOwner = LocalLifecycleOwner.current
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
     var styleReady by remember { mutableStateOf(false) }
+    var initialCameraSet by remember { mutableStateOf(false) }
+    val darkMode = LocalSafarDarkMode.current
     var centeredOnUser by remember { mutableStateOf(false) }
     var lastCameraRouteId by remember { mutableStateOf<String?>(null) }
     var autoFocusedVehicle by remember(route?.id) { mutableStateOf(false) }
@@ -167,6 +171,24 @@ internal fun PassengerMapView(
         // keeps the map on the stable renderer path.
         MapLibre.getInstance(context.applicationContext)
         MapView(context)
+    }
+
+    LaunchedEffect(map, darkMode) {
+        val loadedMap = map ?: return@LaunchedEffect
+        styleReady = false
+        val styleUri = if (darkMode) OPEN_FREE_MAP_DARK_STYLE else OPEN_FREE_MAP_STYLE
+        loadedMap.setStyle(Style.Builder().fromUri(styleUri)) { style ->
+            setupMapLayers(style, context)
+            styleReady = true
+            if (!initialCameraSet) {
+                loadedMap.cameraPosition = CameraPosition.Builder()
+                    .target(LatLng(DEFAULT_LATITUDE, DEFAULT_LONGITUDE))
+                    .zoom(DEFAULT_ZOOM)
+                    .build()
+                onMapCenterChanged(GeoPoint(DEFAULT_LATITUDE, DEFAULT_LONGITUDE))
+                initialCameraSet = true
+            }
+        }
     }
 
     DisposableEffect(lifecycleOwner, mapView) {
@@ -271,15 +293,7 @@ internal fun PassengerMapView(
                         loadedMap.uiSettings.isZoomGesturesEnabled = true
                         loadedMap.uiSettings.isRotateGesturesEnabled = true
                         loadedMap.uiSettings.isTiltGesturesEnabled = true
-                        loadedMap.setStyle(Style.Builder().fromUri(OPEN_FREE_MAP_STYLE)) { style ->
-                            setupMapLayers(style, context)
-                            styleReady = true
-                            loadedMap.cameraPosition = CameraPosition.Builder()
-                                .target(LatLng(DEFAULT_LATITUDE, DEFAULT_LONGITUDE))
-                                .zoom(DEFAULT_ZOOM)
-                                .build()
-                            onMapCenterChanged(GeoPoint(DEFAULT_LATITUDE, DEFAULT_LONGITUDE))
-                        }
+                        // Style loading is handled by the darkMode-aware effect below.
                     }
                 }
             },
