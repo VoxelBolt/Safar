@@ -217,33 +217,50 @@ private fun PassengerMapScreen(
                 modifier = Modifier.fillMaxSize(),
             )
 
-            Surface(
+            val passengerDarkMode = LocalSafarDarkMode.current
+            val setPassengerDarkMode = LocalSetSafarDarkMode.current
+            Row(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
-                    .clickable { pickerOpen = true },
-                shape = RoundedCornerShape(18.dp),
-                color = MaterialTheme.colorScheme.surface,
-                shadowElevation = 5.dp,
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 13.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                Surface(
+                    modifier = Modifier.weight(1f).clickable { pickerOpen = true },
+                    shape = RoundedCornerShape(18.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    shadowElevation = 5.dp,
                 ) {
-                    SafarGlyph(Glyph.SEARCH, MaterialTheme.colorScheme.onSurface, 22.dp)
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        text = ui.selectedRoute?.let { stringResource(R.string.selected_route_label, it.number) }
-                            ?: stringResource(R.string.route_search_hint),
-                        color = if (ui.selectedRoute == null) Muted else MaterialTheme.colorScheme.onSurface,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (ui.loadingRoutes) {
-                        Text("…", color = Muted)
-                    } else {
-                        SafarGlyph(Glyph.CHEVRON, SafarBlue, 22.dp)
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 13.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        SafarGlyph(Glyph.SEARCH, MaterialTheme.colorScheme.onSurface, 22.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            text = ui.selectedRoute?.let { stringResource(R.string.selected_route_label, it.number) }
+                                ?: stringResource(R.string.route_search_hint),
+                            color = if (ui.selectedRoute == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (ui.loadingRoutes) {
+                            Text("…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        } else {
+                            SafarGlyph(Glyph.CHEVRON, SafarBlue, 22.dp)
+                        }
+                    }
+                }
+                Surface(
+                    onClick = { setPassengerDarkMode(!passengerDarkMode) },
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    shadowElevation = 5.dp,
+                ) {
+                    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                        SafarGlyph(if (passengerDarkMode) Glyph.SUN else Glyph.MOON, MaterialTheme.colorScheme.primary, 24.dp)
                     }
                 }
             }
@@ -285,7 +302,7 @@ private fun PassengerMapScreen(
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(shape = RoundedCornerShape(13.dp), color = SoftBlue) {
+                        Surface(shape = RoundedCornerShape(13.dp), color = if (LocalSafarDarkMode.current) Color(0xFF25354B) else SoftBlue) {
                             Box(Modifier.size(46.dp), contentAlignment = Alignment.Center) {
                                 SafarGlyph(Glyph.BUS, SafarBlue, 25.dp)
                             }
@@ -302,7 +319,7 @@ private fun PassengerMapScreen(
                             Text(
                                 text = ui.selectedRoute?.let { it.number } ?: stringResource(R.string.route_search_hint),
                                 style = MaterialTheme.typography.bodySmall,
-                                color = Muted,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                         Row(
@@ -327,7 +344,7 @@ private fun PassengerMapScreen(
                                 enabled = !ui.findingNearestVehicle,
                                 modifier = Modifier.size(46.dp),
                                 shape = CircleShape,
-                                color = SoftBlue,
+                                color = if (LocalSafarDarkMode.current) Color(0xFF25354B) else SoftBlue,
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     SafarGlyph(Glyph.LOCATE, SafarBlue, 23.dp)
@@ -346,7 +363,7 @@ private fun PassengerMapScreen(
                                                 onToggleFavorite(favoriteVehicle)
                                             },
                                         shape = CircleShape,
-                                        color = SoftBlue,
+                                        color = if (LocalSafarDarkMode.current) Color(0xFF25354B) else SoftBlue,
                                     ) {
                                         Box(contentAlignment = Alignment.Center) {
                                             SafarGlyph(
@@ -362,7 +379,7 @@ private fun PassengerMapScreen(
                         }
                     }
                     Spacer(Modifier.height(14.dp))
-                    HorizontalDivider(color = Border)
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     Spacer(Modifier.height(12.dp))
                     Text(
                         text = stringResource(R.string.nearest_transport),
@@ -394,7 +411,7 @@ private fun PassengerMapScreen(
                     ) {
                         Surface(
                             shape = CircleShape,
-                            color = if (activeVehicle != null) SuccessSoft else Color(0xFFF0F2F5),
+                            color = if (activeVehicle != null) { if (LocalSafarDarkMode.current) Color(0xFF203B30) else SuccessSoft } else MaterialTheme.colorScheme.surfaceVariant,
                         ) { Box(Modifier.size(10.dp)) }
                         Spacer(Modifier.width(8.dp))
                         Column(modifier = Modifier.weight(1f)) {
@@ -486,7 +503,7 @@ private fun RoutePickerScreen(
             Text(stringResource(R.string.route_picker_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
         }
 
-        Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface, border = androidx.compose.foundation.BorderStroke(1.dp, Border)) {
+        Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface, border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
             Row(Modifier.padding(horizontal = 14.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
                 SafarGlyph(Glyph.SEARCH, Muted, 22.dp)
                 BasicTextField(
@@ -522,7 +539,7 @@ private fun RoutePickerScreen(
                     Surface(
                         modifier = Modifier.clickable { onRouteSelected(route) },
                         shape = RoundedCornerShape(14.dp),
-                        color = SoftBlue,
+                        color = if (LocalSafarDarkMode.current) Color(0xFF25354B) else SoftBlue,
                     ) {
                         Text(route.number, modifier = Modifier.padding(horizontal = 18.dp, vertical = 11.dp), color = SafarBlue, fontWeight = FontWeight.Bold)
                     }
