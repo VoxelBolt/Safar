@@ -65,7 +65,7 @@ fun PassengerFavoritesRealScreen(
                 stringResource(R.string.favorites_title),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
-                color = SafarNavy,
+                color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f),
             )
             TextButton(onClick = viewModel::load) { Text(stringResource(R.string.refresh)) }
@@ -117,7 +117,7 @@ fun PassengerProfileRealScreen(
 
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
         Spacer(Modifier.height(18.dp))
-        Text(stringResource(R.string.profile_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = SafarNavy)
+        Text(stringResource(R.string.profile_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
         Text(stringResource(R.string.profile_subtitle), color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(16.dp))
 
@@ -132,7 +132,7 @@ fun PassengerProfileRealScreen(
                 )
                 Spacer(Modifier.height(12.dp))
                 if (isDriver) {
-                    Surface(shape = RoundedCornerShape(18.dp), color = SafarWhite) {
+                    Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface) {
                         Column(Modifier.fillMaxWidth()) {
                             ProfileValueRow(stringResource(R.string.vehicle_label), ui.vehicle?.identifier ?: "—")
                             ProfileValueRow(stringResource(R.string.route_label), ui.route?.number ?: stringResource(R.string.route_not_selected))
@@ -247,7 +247,7 @@ fun DriverStatisticsRealScreen(modifier: Modifier = Modifier) {
         modifier = modifier.fillMaxSize().padding(horizontal = 16.dp),
     ) {
         Spacer(Modifier.height(18.dp))
-        Text(stringResource(R.string.statistics_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = SafarNavy)
+        Text(stringResource(R.string.statistics_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
         Spacer(Modifier.height(14.dp))
         SegmentedControl(
             labels = listOf(
@@ -279,14 +279,14 @@ fun DriverStatisticsRealScreen(modifier: Modifier = Modifier) {
                     value = formatDistance(ui.totalDistanceMeters),
                 )
                 Spacer(Modifier.height(18.dp))
-                Text(stringResource(R.string.statistics_sessions_count, ui.sessions.size), fontWeight = FontWeight.SemiBold, color = SafarNavy)
+                Text(stringResource(R.string.statistics_sessions_count, ui.sessions.size), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                 Spacer(Modifier.height(10.dp))
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(ui.days, key = { it.dateLabel }) { day ->
-                        Surface(shape = RoundedCornerShape(14.dp), color = SafarWhite) {
+                        Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface) {
                             Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(day.dateLabel, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(formatWorkDuration(day.workSeconds), fontWeight = FontWeight.SemiBold, color = SafarNavy)
+                                Text(formatWorkDuration(day.workSeconds), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                                 Spacer(Modifier.width(12.dp))
                                 Text(formatDistance(day.distanceMeters), color = SafarBlue)
                             }
@@ -303,16 +303,16 @@ private fun ProfileHeaderReal(name: String, phone: String, onClick: () -> Unit) 
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
-        color = SafarWhite,
+        color = MaterialTheme.colorScheme.surface,
         onClick = onClick,
     ) {
         Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-            Surface(shape = androidx.compose.foundation.shape.CircleShape, color = androidx.compose.ui.graphics.Color(0xFFEAF2FF)) {
+            Surface(shape = androidx.compose.foundation.shape.CircleShape, color = if (com.safar.app.ui.theme.LocalSafarDarkMode.current) androidx.compose.ui.graphics.Color(0xFF25354B) else androidx.compose.ui.graphics.Color(0xFFEAF2FF)) {
                 Text("●", modifier = Modifier.padding(18.dp), color = SafarBlue)
             }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text(name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = SafarNavy)
+                Text(name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                 Text(phone.ifBlank { "—" }, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -322,7 +322,7 @@ private fun ProfileHeaderReal(name: String, phone: String, onClick: () -> Unit) 
 @Composable
 private fun ProfileValueRow(title: String, value: String) {
     Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, Modifier.weight(1f), color = SafarNavy)
+        Text(title, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
         Text(value, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
@@ -332,11 +332,11 @@ private fun ProfileAction(title: String, value: String? = null, onClick: () -> U
     Surface(
         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
         shape = RoundedCornerShape(14.dp),
-        color = SafarWhite,
+        color = MaterialTheme.colorScheme.surface,
         onClick = onClick,
     ) {
         Row(Modifier.padding(horizontal = 16.dp, vertical = 15.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(title, Modifier.weight(1f), color = SafarNavy)
+            Text(title, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
             value?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
     }
@@ -400,11 +400,11 @@ private fun FavoriteVehicleRealCard(
     isFavorite: Boolean,
     onToggle: () -> Unit,
 ) {
-    Surface(shape = RoundedCornerShape(18.dp), color = SafarWhite) {
+    Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(routeNumber, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = SafarNavy)
+                    Text(routeNumber, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                     Text(vehicle.identifier, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 TextButton(onClick = onToggle) { Text(if (isFavorite) "★" else "☆", fontSize = 24.sp, color = SafarBlue) }
@@ -426,11 +426,11 @@ private fun FavoriteVehicleRealCard(
 
 @Composable
 private fun SummaryCard(title: String, value: String) {
-    Surface(shape = RoundedCornerShape(18.dp), color = SafarWhite) {
+    Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
             Text(title, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(4.dp))
-            Text(value, color = SafarNavy, fontSize = 25.sp, fontWeight = FontWeight.Bold)
+            Text(value, color = MaterialTheme.colorScheme.onSurface, fontSize = 25.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
