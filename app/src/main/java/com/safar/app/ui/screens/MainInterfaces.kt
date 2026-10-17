@@ -875,6 +875,7 @@ private fun DriverHomeScreen(
     modifier: Modifier = Modifier,
 ) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var timerPanelExpanded by remember { mutableStateOf(true) }
 
     LaunchedEffect(ui.workSession?.id, ui.workSession?.status) {
         while (ui.workSession?.status == WorkSessionStatus.ACTIVE) {
@@ -1130,147 +1131,66 @@ private fun DriverHomeScreen(
             }
         }
 
-        // Compact, responsive work-session panel. The map stays the primary
-        // surface and the session controls no longer consume half the screen
-        // on phones with smaller heights or larger system fonts.
+        // Collapsible work-session panel keeps the map usable on smaller screens.
         Surface(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 12.dp),
+            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp),
             shape = RoundedCornerShape(22.dp),
             color = SafarWhite,
             shadowElevation = 8.dp,
         ) {
-            Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+            Column(Modifier.padding(horizontal = 14.dp, vertical = if (timerPanelExpanded) 12.dp else 8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Surface(
-                        shape = CircleShape,
-                        color = if (status == WorkSessionStatus.ACTIVE) SuccessSoft else SoftBlue,
-                    ) {
+                    Surface(shape = CircleShape, color = if (status == WorkSessionStatus.ACTIVE) SuccessSoft else SoftBlue) {
                         Box(Modifier.size(10.dp))
                     }
                     Spacer(Modifier.width(8.dp))
-                    Text(
-                        statusText,
-                        color = statusColor,
-                        fontWeight = FontWeight.SemiBold,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.weight(1f),
-                        maxLines = 1,
-                    )
-                    SafarGlyph(Glyph.CLOCK, SafarBlue, 19.dp)
-                }
-
-                Spacer(Modifier.height(8.dp))
-                HorizontalDivider(color = Border)
-                Spacer(Modifier.height(8.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1.35f)) {
-                        Text(
-                            stringResource(R.string.work_session_label),
-                            color = Muted,
-                            style = MaterialTheme.typography.labelSmall,
-                            maxLines = 1,
-                        )
-                        Text(
-                            formatDuration(elapsed),
-                            color = SafarNavy,
-                            fontSize = 30.sp,
-                            lineHeight = 32.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                        )
-                    }
-                    Column(modifier = Modifier.weight(0.8f)) {
-                        Text(
-                            stringResource(R.string.work_distance),
-                            color = Muted,
-                            style = MaterialTheme.typography.labelSmall,
-                            maxLines = 1,
-                        )
-                        Text(
-                            "$distanceKm км",
-                            color = SafarNavy,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                        )
-                    }
-                    Column(modifier = Modifier.weight(0.65f)) {
-                        Text(
-                            stringResource(R.string.work_route),
-                            color = Muted,
-                            style = MaterialTheme.typography.labelSmall,
-                            maxLines = 1,
-                        )
-                        Text(
-                            routeNumber,
-                            color = SafarNavy,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                        )
-                    }
-                }
-
-                Spacer(Modifier.height(9.dp))
-                when (status) {
-                    WorkSessionStatus.NOT_STARTED, WorkSessionStatus.COMPLETED -> {
-                        PrimaryActionButton(
-                            if (status == WorkSessionStatus.COMPLETED) stringResource(R.string.start_new_work) else stringResource(R.string.start_work),
-                            Glyph.PLAY,
-                            enabled = !ui.actionInProgress,
-                        ) { onStartWork() }
-                    }
-                    WorkSessionStatus.ACTIVE -> {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            SecondaryActionButton(
-                                stringResource(R.string.pause_work),
-                                Glyph.PAUSE,
-                                Modifier.weight(1f),
-                                enabled = !ui.actionInProgress,
-                            ) { onPauseWork() }
-                            PrimaryActionButton(
-                                stringResource(R.string.finish_work),
-                                Glyph.CHECK,
-                                Modifier.weight(1f),
-                                enabled = !ui.actionInProgress,
-                            ) { onFinishWork() }
-                        }
-                    }
-                    WorkSessionStatus.PAUSED -> {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            PrimaryActionButton(
-                                stringResource(R.string.continue_work),
-                                Glyph.PLAY,
-                                Modifier.weight(1f),
-                                enabled = !ui.actionInProgress,
-                            ) { onResumeWork() }
-                            SecondaryActionButton(
-                                stringResource(R.string.finish_work),
-                                Glyph.CHECK,
-                                Modifier.weight(1f),
-                                enabled = !ui.actionInProgress,
-                            ) { onFinishWork() }
+                    Text(statusText, color = statusColor, fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), maxLines = 1)
+                    Surface(onClick = { timerPanelExpanded = !timerPanelExpanded }, shape = CircleShape, color = SoftBlue) {
+                        Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) {
+                            Text(if (timerPanelExpanded) "⌄" else "⌃", color = SafarBlue, fontSize = 22.sp,
+                                lineHeight = 22.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
-
-                ui.error?.let { error ->
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        stringResource(R.string.generic_load_error),
-                        color = Danger,
-                        style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.fillMaxWidth(),
-                        maxLines = 2,
-                        textAlign = TextAlign.Center,
-                    )
+                if (timerPanelExpanded) {
+                    Spacer(Modifier.height(8.dp))
+                    HorizontalDivider(color = Border)
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1.35f)) {
+                            Text(stringResource(R.string.work_session_label), color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                            Text(formatDuration(elapsed), color = SafarNavy, fontSize = 30.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        }
+                        Column(Modifier.weight(0.8f)) {
+                            Text(stringResource(R.string.work_distance), color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                            Text("$distanceKm км", color = SafarNavy, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1)
+                        }
+                        Column(Modifier.weight(0.65f)) {
+                            Text(stringResource(R.string.work_route), color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                            Text(routeNumber, color = SafarNavy, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1)
+                        }
+                    }
+                    Spacer(Modifier.height(9.dp))
+                    when (status) {
+                        WorkSessionStatus.NOT_STARTED, WorkSessionStatus.COMPLETED ->
+                            PrimaryActionButton(if (status == WorkSessionStatus.COMPLETED) stringResource(R.string.start_new_work) else stringResource(R.string.start_work),
+                                Glyph.PLAY, enabled = !ui.actionInProgress) { onStartWork() }
+                        WorkSessionStatus.ACTIVE -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SecondaryActionButton(stringResource(R.string.pause_work), Glyph.PAUSE, Modifier.weight(1f), enabled = !ui.actionInProgress) { onPauseWork() }
+                            PrimaryActionButton(stringResource(R.string.finish_work), Glyph.CHECK, Modifier.weight(1f), enabled = !ui.actionInProgress) { onFinishWork() }
+                        }
+                        WorkSessionStatus.PAUSED -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            PrimaryActionButton(stringResource(R.string.continue_work), Glyph.PLAY, Modifier.weight(1f), enabled = !ui.actionInProgress) { onResumeWork() }
+                            SecondaryActionButton(stringResource(R.string.finish_work), Glyph.CHECK, Modifier.weight(1f), enabled = !ui.actionInProgress) { onFinishWork() }
+                        }
+                    }
+                    ui.error?.let {
+                        Spacer(Modifier.height(6.dp))
+                        Text(stringResource(R.string.generic_load_error), color = Danger,
+                            style = MaterialTheme.typography.labelSmall, modifier = Modifier.fillMaxWidth(),
+                            maxLines = 2, textAlign = TextAlign.Center)
+                    }
                 }
             }
         }
@@ -1493,7 +1413,7 @@ internal fun SegmentedControl(labels: List<String>, selected: Int, onSelected: (
 
 @Composable
 private fun DriverProfileScreen(state: OnboardingState, route: Route?, modifier: Modifier = Modifier) {
-    Column(modifier = modifier.fillMaxSize().background(PageBackground).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
+    Column(modifier = modifier.fillMaxSize().background(PageBackground).padding(horizontal = 16.dp).verticalScroll(rememberScrollState())) {
         Spacer(Modifier.height(18.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
