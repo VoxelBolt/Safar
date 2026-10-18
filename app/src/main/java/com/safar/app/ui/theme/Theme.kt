@@ -38,6 +38,7 @@ private val SafarDarkColors = darkColorScheme(
     secondary = Color(0xFFB6C8E5),
 )
 
+@Suppress("DEPRECATION")
 @Composable
 fun SafarTheme(content: @Composable () -> Unit) {
     var darkMode by remember { mutableStateOf(false) }
