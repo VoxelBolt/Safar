@@ -1559,7 +1559,10 @@ internal fun EmptyState(glyph: Glyph, title: String, subtitle: String) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Surface(shape = CircleShape, color = SoftBlue) {
+        Surface(
+            shape = CircleShape,
+            color = if (LocalSafarDarkMode.current) Color(0xFF25354B) else SoftBlue,
+        ) {
             Box(Modifier.size(76.dp), contentAlignment = Alignment.Center) { SafarGlyph(glyph, SafarBlue, 36.dp) }
         }
         Spacer(Modifier.height(18.dp))
