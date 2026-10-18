@@ -749,18 +749,19 @@ private fun updateRouteStation(style: Style, route: Route?) {
 
 private fun updateHeadingSector(style: Style, center: GeoPoint?, headingDegrees: Float?) {
     val source = style.getSourceAs<GeoJsonSource>(USER_HEADING_SOURCE_ID) ?: return
-    if (center == null || headingDegrees == null || !headingDegrees.isFinite()) {
-        Log.d("SafarHeadingSector", "Sector hidden: centerAvailable=${center != null}, headingDegrees=$headingDegrees")
+    if (center == null) {
         source.setGeoJson(FeatureCollection.fromFeatures(emptyArray<Feature>()))
         return
     }
-    Log.d("SafarHeadingSector", "Sector updated at ${center.latitude},${center.longitude}, heading=$headingDegrees")
+    // Keep the passenger's blue direction cone visible even when the compass
+    // has not supplied a heading yet; use north as the temporary fallback.
+    val visibleHeading = headingDegrees?.takeIf { it.isFinite() } ?: 0f
     val radius = 0.0009
     val halfAngle = 30.0
     val points = mutableListOf<Point>()
     points += Point.fromLngLat(center.longitude, center.latitude)
     for (step in 0..12) {
-        val angle = Math.toRadians((headingDegrees - halfAngle) + (2 * halfAngle * step / 12.0))
+        val angle = Math.toRadians((visibleHeading - halfAngle) + (2 * halfAngle * step / 12.0))
         val lat = center.latitude + radius * Math.cos(angle)
         val lon = center.longitude + radius * Math.sin(angle) / Math.cos(Math.toRadians(center.latitude))
         points += Point.fromLngLat(lon, lat)
