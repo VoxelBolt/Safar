@@ -107,7 +107,7 @@ internal class LocationStabilizer(
                     point = blend(oldCandidate.point, sample.point, 0.5),
                     count = oldCandidate.count + 1,
                     accuracyMeters = accuracy ?: oldCandidate.accuracyMeters,
-                )
+                ) ?: Candidate(sample.point, now, 1, accuracy)
             } else {
                 Candidate(sample.point, now, 1, accuracy)
             }
