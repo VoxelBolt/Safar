@@ -23,7 +23,7 @@ import com.google.android.gms.location.Priority
 import com.safar.app.domain.model.GeoPoint
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.FlowPreview
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
