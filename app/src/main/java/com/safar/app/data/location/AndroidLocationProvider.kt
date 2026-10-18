@@ -23,6 +23,7 @@ import com.google.android.gms.location.Priority
 import com.safar.app.domain.model.GeoPoint
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.FlowPreview
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -157,6 +158,7 @@ class AndroidLocationProvider(private val context: Context) {
      * Device orientation as a compass azimuth in degrees clockwise from north.
      * Sensor updates are independent of GPS, so heading remains available while stopped.
      */
+    @OptIn(FlowPreview::class)
     @SuppressLint("MissingPermission")
     fun headingDegrees(): Flow<Float> = callbackFlow {
         val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
