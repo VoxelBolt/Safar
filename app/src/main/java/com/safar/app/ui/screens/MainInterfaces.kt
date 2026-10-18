@@ -260,7 +260,7 @@ private fun PassengerMapScreen(
                     shadowElevation = 5.dp,
                 ) {
                     Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                        SafarGlyph(Glyph.MOON, MaterialTheme.colorScheme.primary, 24.dp)
+                        SafarGlyph(if (passengerDarkMode) Glyph.SUN else Glyph.MOON, MaterialTheme.colorScheme.primary, 24.dp)
                     }
                 }
             }
@@ -612,7 +612,7 @@ private fun PassengerFavoritesScreen(modifier: Modifier = Modifier) {
             Text(stringResource(R.string.favorites_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
             RoundIconButton(Glyph.PLUS, onClick = {}, tint = SafarBlue)
         }
-        Text(stringResource(R.string.favorites_subtitle), style = MaterialTheme.typography.bodyMedium, color = Muted)
+        Text(stringResource(R.string.favorites_subtitle), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(18.dp))
 
         if (favorites.isEmpty()) {
@@ -642,7 +642,7 @@ private fun FavoriteVehicleCard(vehicle: VehicleMock, onRemove: () -> Unit) {
     Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 2.dp) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(shape = RoundedCornerShape(14.dp), color = Color(0xFFF0F4FA)) {
+                Surface(shape = RoundedCornerShape(14.dp), color = if (LocalSafarDarkMode.current) Color(0xFF25354B) else Color(0xFFF0F4FA)) {
                     Box(Modifier.size(76.dp), contentAlignment = Alignment.Center) {
                         SafarGlyph(Glyph.BUS, MaterialTheme.colorScheme.onSurface, 38.dp)
                     }
@@ -650,9 +650,9 @@ private fun FavoriteVehicleCard(vehicle: VehicleMock, onRemove: () -> Unit) {
                 Spacer(Modifier.width(14.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(vehicle.route, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                    Text(vehicle.identifier, style = MaterialTheme.typography.bodyMedium, color = Muted)
+                    Text(vehicle.identifier, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(4.dp))
-                    Text(vehicle.direction, style = MaterialTheme.typography.bodySmall, color = Muted)
+                    Text(vehicle.direction, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 RoundIconButton(Glyph.STAR_FILLED, onRemove, tint = SafarBlue)
             }
@@ -663,7 +663,7 @@ private fun FavoriteVehicleCard(vehicle: VehicleMock, onRemove: () -> Unit) {
                 Text(
                     if (vehicle.active) stringResource(R.string.transport_on_route) else stringResource(R.string.transport_offline),
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (vehicle.active) Success else Muted,
+                    color = if (vehicle.active) Success else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.weight(1f))
                 if (vehicle.active) {
