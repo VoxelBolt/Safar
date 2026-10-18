@@ -11,6 +11,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
+import android.app.Activity
 
 val LocalSafarDarkMode = compositionLocalOf { false }
 val LocalSetSafarDarkMode = compositionLocalOf<(Boolean) -> Unit> { {} }
@@ -37,6 +41,22 @@ private val SafarDarkColors = darkColorScheme(
 @Composable
 fun SafarTheme(content: @Composable () -> Unit) {
     var darkMode by remember { mutableStateOf(false) }
+    val view = LocalView.current
+    androidx.compose.runtime.SideEffect {
+        val activity = view.context.findSafarActivity()
+        val window = activity?.window ?: return@SideEffect
+        val barColor = (if (darkMode) Color(0xFF101318) else SafarWhite).toArgb()
+        window.statusBarColor = barColor
+        window.navigationBarColor = barColor
+        WindowCompat.getInsetsController(window, view).apply {
+            isAppearanceLightStatusBars = !darkMode
+            isAppearanceLightNavigationBars = !darkMode
+        }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = false
+            window.isStatusBarContrastEnforced = false
+        }
+    }
     CompositionLocalProvider(
         LocalSafarDarkMode provides darkMode,
         LocalSetSafarDarkMode provides { darkMode = it },
@@ -46,4 +66,10 @@ fun SafarTheme(content: @Composable () -> Unit) {
             content = content,
         )
     }
+}
+
+private tailrec fun android.content.Context.findSafarActivity(): Activity? = when (this) {
+    is Activity -> this
+    is android.content.ContextWrapper -> baseContext.findSafarActivity()
+    else -> null
 }
