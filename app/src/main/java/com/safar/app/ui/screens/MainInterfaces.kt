@@ -1004,7 +1004,8 @@ private fun DriverHomeScreen(
         WorkSessionStatus.COMPLETED -> stringResource(R.string.work_finished)
     }
     val statusColor = if (status == WorkSessionStatus.ACTIVE) Success else Muted
-    val distanceKm = stringResource(R.string.distance_km_format, (session?.distanceMeters ?: 0.0) / 1000.0)
+    val distanceMeters = (session?.distanceMeters ?: 0.0).toLong().coerceAtLeast(0L)
+    val formattedDistanceMeters = "%,d м".format(java.util.Locale("ru", "RU"), distanceMeters)
 
     Box(
         modifier = modifier
@@ -1201,7 +1202,7 @@ private fun DriverHomeScreen(
                         }
                         Column(Modifier.weight(0.8f)) {
                             Text(stringResource(R.string.work_distance), color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1)
-                            Text("$distanceKm км", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1)
+                            Text(formattedDistanceMeters, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1)
                         }
                         Column(Modifier.weight(0.65f)) {
                             Text(stringResource(R.string.work_route), color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1)
