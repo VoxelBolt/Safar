@@ -902,7 +902,8 @@ private fun DriverHomeScreen(
     val setDarkMode = LocalSetSafarDarkMode.current
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var timerPanelExpanded by remember { mutableStateOf(true) }
-    val timerPrefs = remember(context = LocalContext.current) { LocalContext.current.getSharedPreferences("safar_driver_trip_timer", android.content.Context.MODE_PRIVATE) }
+    val context = LocalContext.current
+    val timerPrefs = remember(context) { context.getSharedPreferences("safar_driver_trip_timer", android.content.Context.MODE_PRIVATE) }
     var tripTimerEnabled by rememberSaveable { mutableStateOf(timerPrefs.getBoolean("enabled", false)) }
     var tripTimerDurationMinutes by rememberSaveable { mutableStateOf(timerPrefs.getInt("duration_minutes", 50).coerceIn(1, 240)) }
     var tripTimerDeadlineMs by rememberSaveable { mutableLongStateOf(timerPrefs.getLong("deadline_ms", 0L)) }
@@ -927,15 +928,15 @@ private fun DriverHomeScreen(
                 timerPrefs.edit().putBoolean("enabled", false).apply()
                 runCatching {
                     val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        (LocalContext.current.getSystemService(android.content.Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+                        (context.getSystemService(android.content.Context.VIBRATOR_SERVICE) as VibratorManager).defaultVibrator
                     } else {
                         @Suppress("DEPRECATION")
-                        LocalContext.current.getSystemService(android.content.Context.VIBRATOR_SERVICE) as Vibrator
+                        context.getSystemService(android.content.Context.VIBRATOR_SERVICE) as Vibrator
                     }
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 500, 250, 500, 250, 900), -1))
                     else @Suppress("DEPRECATION") vibrator.vibrate(longArrayOf(0, 500, 250, 500, 250, 900), -1)
                     val alarm = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM) ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-                    alarm?.let { RingtoneManager.getRingtone(LocalContext.current, it)?.play() }
+                    alarm?.let { RingtoneManager.getRingtone(context, it)?.play() }
                 }
             }
             delay(1000L)
@@ -947,7 +948,6 @@ private fun DriverHomeScreen(
     val routeNumber = ui.selectedRoute?.number ?: stringResource(R.string.route_not_selected)
     val elapsed = session?.let { WorkSessionTimer.elapsedWorkSeconds(it, now) } ?: 0L
 
-    val context = LocalContext.current
     val driverLocationProvider = remember(context) { AndroidLocationProvider(context.applicationContext) }
     var driverLocation by remember { mutableStateOf<GeoPoint?>(null) }
     // Null means the compass has not produced a measured angle yet. Keep this
