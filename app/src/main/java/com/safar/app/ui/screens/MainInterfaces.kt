@@ -1263,6 +1263,23 @@ private fun DriverHomeScreen(
                     Spacer(Modifier.height(8.dp))
                     HorizontalDivider(color = Border)
                     Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Таймер рейса", color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                            val remainingMs = if (tripTimerEnabled) (tripTimerDeadlineMs - now).coerceAtLeast(0L) else tripTimerDurationMinutes * 60_000L
+                            Text(
+                                if (tripTimerEnabled) formatDuration(remainingMs / 1000L) else formatDuration(tripTimerDurationMinutes * 60L),
+                                modifier = Modifier.clickable {
+                                    tripTimerInput = tripTimerDurationMinutes.toString()
+                                    tripTimerDialogOpen = true
+                                },
+                                color = MaterialTheme.colorScheme.onSurface,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1.35f)) {
                             Text(stringResource(R.string.work_session_label), color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1)
@@ -1278,38 +1295,16 @@ private fun DriverHomeScreen(
                         }
                     }
                     Spacer(Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Таймер рейса", color = Muted, style = MaterialTheme.typography.labelSmall)
-                            val remainingMs = if (tripTimerEnabled) (tripTimerDeadlineMs - now).coerceAtLeast(0L) else tripTimerDurationMinutes * 60_000L
-                            Text(
-                                if (tripTimerEnabled) formatDuration(remainingMs / 1000L) else "Выключен",
-                                color = MaterialTheme.colorScheme.onSurface,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                            )
-                        }
-                        TextButton(onClick = {
-                            tripTimerInput = tripTimerDurationMinutes.toString()
-                            tripTimerDialogOpen = true
-                        }) { Text("Настроить") }
-                        TextButton(onClick = {
-                            tripTimerEnabled = false
-                            tripTimerDeadlineMs = 0L
-                            timerPrefs.edit().putBoolean("enabled", false).putLong("deadline_ms", 0L).apply()
-                        }) { Text("Выкл.") }
-                        Button(onClick = {
-                            tripTimerDeadlineMs = System.currentTimeMillis() + tripTimerDurationMinutes * 60_000L
-                            tripTimerEnabled = true
-                            tripTimerAlertedDeadline = 0L
-                            timerPrefs.edit().putBoolean("enabled", true).putLong("deadline_ms", tripTimerDeadlineMs).apply()
-                        }) { Text("Старт") }
-                    }
-                    Spacer(Modifier.height(9.dp))
                     when (status) {
                         WorkSessionStatus.NOT_STARTED, WorkSessionStatus.COMPLETED ->
                             PrimaryActionButton(if (status == WorkSessionStatus.COMPLETED) stringResource(R.string.start_new_work) else stringResource(R.string.start_work),
-                                Glyph.PLAY, enabled = !ui.actionInProgress) { onStartWork() }
+                                Glyph.PLAY, enabled = !ui.actionInProgress) {
+                                tripTimerDeadlineMs = System.currentTimeMillis() + tripTimerDurationMinutes * 60_000L
+                                tripTimerEnabled = true
+                                tripTimerAlertedDeadline = 0L
+                                timerPrefs.edit().putBoolean("enabled", true).putLong("deadline_ms", tripTimerDeadlineMs).apply()
+                                onStartWork()
+                            }
                         WorkSessionStatus.ACTIVE -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             SecondaryActionButton(stringResource(R.string.pause_work), Glyph.PAUSE, Modifier.weight(1f), enabled = !ui.actionInProgress) { onPauseWork() }
                             PrimaryActionButton(stringResource(R.string.finish_work), Glyph.CHECK, Modifier.weight(1f), enabled = !ui.actionInProgress) { onFinishWork() }
