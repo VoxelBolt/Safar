@@ -2,6 +2,11 @@ package com.safar.app.ui.screens
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.media.RingtoneManager
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.collectAsState
@@ -37,6 +42,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -57,6 +64,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -894,10 +902,42 @@ private fun DriverHomeScreen(
     val setDarkMode = LocalSetSafarDarkMode.current
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var timerPanelExpanded by remember { mutableStateOf(true) }
+    val timerPrefs = remember(context = LocalContext.current) { LocalContext.current.getSharedPreferences("safar_driver_trip_timer", android.content.Context.MODE_PRIVATE) }
+    var tripTimerEnabled by rememberSaveable { mutableStateOf(timerPrefs.getBoolean("enabled", false)) }
+    var tripTimerDurationMinutes by rememberSaveable { mutableStateOf(timerPrefs.getInt("duration_minutes", 50).coerceIn(1, 240)) }
+    var tripTimerDeadlineMs by rememberSaveable { mutableLongStateOf(timerPrefs.getLong("deadline_ms", 0L)) }
+    var tripTimerDialogOpen by rememberSaveable { mutableStateOf(false) }
+    var tripTimerInput by rememberSaveable { mutableStateOf(tripTimerDurationMinutes.toString()) }
+    var tripTimerAlertedDeadline by rememberSaveable { mutableLongStateOf(0L) }
 
     LaunchedEffect(ui.workSession?.id, ui.workSession?.status) {
         while (ui.workSession?.status == WorkSessionStatus.ACTIVE) {
             now = System.currentTimeMillis()
+            delay(1000L)
+        }
+    }
+
+    LaunchedEffect(tripTimerEnabled, tripTimerDeadlineMs) {
+        while (tripTimerEnabled && tripTimerDeadlineMs > 0L) {
+            now = System.currentTimeMillis()
+            val remaining = tripTimerDeadlineMs - now
+            if (remaining <= 0L && tripTimerAlertedDeadline != tripTimerDeadlineMs) {
+                tripTimerAlertedDeadline = tripTimerDeadlineMs
+                tripTimerEnabled = false
+                timerPrefs.edit().putBoolean("enabled", false).apply()
+                runCatching {
+                    val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        (LocalContext.current.getSystemService(android.content.Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+                    } else {
+                        @Suppress("DEPRECATION")
+                        LocalContext.current.getSystemService(android.content.Context.VIBRATOR_SERVICE) as Vibrator
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 500, 250, 500, 250, 900), -1))
+                    else @Suppress("DEPRECATION") vibrator.vibrate(longArrayOf(0, 500, 250, 500, 250, 900), -1)
+                    val alarm = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM) ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                    alarm?.let { RingtoneManager.getRingtone(LocalContext.current, it)?.play() }
+                }
+            }
             delay(1000L)
         }
     }
@@ -1054,6 +1094,34 @@ private fun DriverHomeScreen(
             modifier = Modifier.fillMaxSize(),
         )
 
+        if (tripTimerDialogOpen) {
+            AlertDialog(
+                onDismissRequest = { tripTimerDialogOpen = false },
+                title = { Text("Настройка таймера рейса") },
+                text = {
+                    OutlinedTextField(
+                        value = tripTimerInput,
+                        onValueChange = { value -> tripTimerInput = value.filter(Char::isDigit).take(3) },
+                        label = { Text("Минуты (1–240)") },
+                        singleLine = true,
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val minutes = tripTimerInput.toIntOrNull()?.coerceIn(1, 240) ?: 50
+                        tripTimerDurationMinutes = minutes
+                        tripTimerInput = minutes.toString()
+                        timerPrefs.edit().putInt("duration_minutes", minutes).apply()
+                        tripTimerEnabled = false
+                        tripTimerDeadlineMs = 0L
+                        timerPrefs.edit().putBoolean("enabled", false).putLong("deadline_ms", 0L).apply()
+                        tripTimerDialogOpen = false
+                    }) { Text("Сохранить") }
+                },
+                dismissButton = { TextButton(onClick = { tripTimerDialogOpen = false }) { Text("Отмена") } },
+            )
+        }
+
         if (ui.passengerLocations.isNotEmpty()) {
             Surface(
                 onClick = {
@@ -1208,6 +1276,34 @@ private fun DriverHomeScreen(
                             Text(stringResource(R.string.work_route), color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1)
                             Text(routeNumber, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1)
                         }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Таймер рейса", color = Muted, style = MaterialTheme.typography.labelSmall)
+                            val remainingMs = if (tripTimerEnabled) (tripTimerDeadlineMs - now).coerceAtLeast(0L) else tripTimerDurationMinutes * 60_000L
+                            Text(
+                                if (tripTimerEnabled) formatDuration(remainingMs / 1000L) else "Выключен",
+                                color = MaterialTheme.colorScheme.onSurface,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                        TextButton(onClick = {
+                            tripTimerInput = tripTimerDurationMinutes.toString()
+                            tripTimerDialogOpen = true
+                        }) { Text("Настроить") }
+                        TextButton(onClick = {
+                            tripTimerEnabled = false
+                            tripTimerDeadlineMs = 0L
+                            timerPrefs.edit().putBoolean("enabled", false).putLong("deadline_ms", 0L).apply()
+                        }) { Text("Выкл.") }
+                        Button(onClick = {
+                            tripTimerDeadlineMs = System.currentTimeMillis() + tripTimerDurationMinutes * 60_000L
+                            tripTimerEnabled = true
+                            tripTimerAlertedDeadline = 0L
+                            timerPrefs.edit().putBoolean("enabled", true).putLong("deadline_ms", tripTimerDeadlineMs).apply()
+                        }) { Text("Старт") }
                     }
                     Spacer(Modifier.height(9.dp))
                     when (status) {
