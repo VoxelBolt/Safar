@@ -372,31 +372,10 @@ internal fun PassengerMapView(
         centeredOnUser = true
     }
 
-    LaunchedEffect(styleReady, route?.id, stabilizedVehicleLocations) {
-        if (!styleReady || route == null) return@LaunchedEffect
-
-        // New/updated active vehicles are map data only. Never move the
-        // camera just because a driver appears or their location refreshes;
-        // the passenger's current viewport must remain unchanged.
-        if (stabilizedVehicleLocations.isNotEmpty()) {
-            lastCameraRouteId = route.id
-            return@LaunchedEffect
-        }
-
-        if (route.id == lastCameraRouteId) return@LaunchedEffect
-        if (passengerLocation != null && !centeredOnUser) return@LaunchedEffect
-        val path = route.path
-        if (path.size >= 2) {
-            val middle = path[path.size / 2]
-            map?.animateCamera(
-                CameraUpdateFactory.newLatLngZoom(
-                    LatLng(middle.latitude, middle.longitude),
-                    13.5,
-                )
-            )
-        }
-        lastCameraRouteId = route.id
-    }
+    // Route selection only draws the route overlay. It must never take
+    // camera priority over the user's actual location or their manual map view.
+    // The map is centered on the user once when a real GPS fix first arrives;
+    // the locate button remains the explicit way to recenter later.
 
     // The nearest-vehicle camera move is a one-shot action. Do NOT key this
     // effect by nearestVehicle itself: its coordinates are refreshed by realtime
