@@ -365,11 +365,11 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         // A realtime event is emitted by the database after a successful GPS write;
         // trust the server timestamp rather than comparing clocks on two devices.
         if (location == null) {
-            val active = _uiState.value.activeVehicles.filter { it.id != vehicleId }
-            _uiState.value = _uiState.value.copy(activeVehicles = active)
-            if (_uiState.value.nearestVehicleTrackingEnabled) {
-                (_uiState.value.passengerLocation ?: _uiState.value.mapCenterLocation)?.let { updateNearestVehicle(it, active) }
-            }
+            // A realtime "removed" event can be transient during reconnects or
+            // channel resubscription. Removing the marker immediately causes it
+            // to blink while the database still reports the vehicle as active.
+            // Keep the last known position; the freshness-filtered database poll
+            // below is the authority that eventually expires genuinely stale buses.
             return
         }
 
