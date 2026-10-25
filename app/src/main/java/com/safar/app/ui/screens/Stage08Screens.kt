@@ -282,7 +282,7 @@ fun DriverStatisticsRealScreen(modifier: Modifier = Modifier) {
                 Text(stringResource(R.string.statistics_sessions_count, ui.sessions.size), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                 Spacer(Modifier.height(10.dp))
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(ui.days, key = { it.dateLabel }) { day ->
+                    itemsIndexed(ui.days, key = { index, day -> "$index-${day.dateLabel}" }) { day ->
                         Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface) {
                             Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(day.dateLabel, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -463,8 +463,7 @@ private fun formatWorkDuration(seconds: Long): String {
 
 @Composable
 private fun formatDistance(meters: Double): String =
-    if (meters >= 1000.0) stringResource(R.string.distance_km_format, meters / 1000.0)
-    else stringResource(R.string.distance_m_format, meters.coerceAtLeast(0.0).toLong())
+    "%,d м".format(java.util.Locale("ru", "RU"), meters.coerceAtLeast(0.0).toLong())
 
 private fun languageName(tag: String): String = when (tag.lowercase()) {
     "en" -> "English"
