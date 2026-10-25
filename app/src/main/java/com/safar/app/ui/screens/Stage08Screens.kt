@@ -283,7 +283,10 @@ fun DriverStatisticsRealScreen(modifier: Modifier = Modifier) {
                 Text(stringResource(R.string.statistics_sessions_count, ui.sessions.size), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                 Spacer(Modifier.height(10.dp))
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    itemsIndexed(ui.days, key = { index, day -> "$index-${day.dateLabel}" }) { day ->
+                    itemsIndexed(
+                        items = ui.days,
+                        key = { index, day -> "$index-${day.dateLabel}" },
+                    ) { index, day ->
                         Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface) {
                             Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(day.dateLabel, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
