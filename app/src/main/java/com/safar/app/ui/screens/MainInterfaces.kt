@@ -928,7 +928,7 @@ private fun DriverHomeScreen(
                 timerPrefs.edit().putBoolean("enabled", false).apply()
                 runCatching {
                     val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        (context.getSystemService(android.content.Context.VIBRATOR_SERVICE) as VibratorManager).defaultVibrator
+                        (context.getSystemService(android.content.Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
                     } else {
                         @Suppress("DEPRECATION")
                         context.getSystemService(android.content.Context.VIBRATOR_SERVICE) as Vibrator
