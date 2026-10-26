@@ -45,7 +45,6 @@ class AndroidLocationProvider(private val context: Context) {
             override fun onLocationChanged(location: Location) {
                 if (location.latitude.isFinite() && location.longitude.isFinite()) {
                     emitted = true
-                    Log.d(TAG, "LocationManager fix: ${location.latitude},${location.longitude} accuracy=${location.accuracy}")
                     trySend(location.toLocationSample())
                 }
             }
@@ -128,7 +127,6 @@ class AndroidLocationProvider(private val context: Context) {
                 result.locations.maxByOrNull { it.elapsedRealtimeNanos }?.let {
                     if (it.latitude.isFinite() && it.longitude.isFinite()) {
                         emitted = true
-                        Log.d(TAG, "Fused fix: ${it.latitude},${it.longitude} accuracy=${it.accuracy}")
                         trySend(it.toLocationSample())
                     }
                 }
@@ -207,7 +205,6 @@ class AndroidLocationProvider(private val context: Context) {
             if (delta >= 1.0f) {
                 lastEmittedHeading = degrees
                 trySend(degrees)
-                Log.d(TAG, "Compass azimuth updated: ${degrees.toInt()}°")
             }
         }
 
