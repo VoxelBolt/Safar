@@ -298,25 +298,11 @@ internal fun PassengerMapView(
                     }
                 }
             },
-            update = {
-                if (styleReady) {
-                    map?.style?.let { style ->
-                        updateUserLocation(style, passengerLocation)
-                        updateRoute(style, route, routeOpacity)
-                        updateRouteStation(style, route)
-                        updateHeadingSector(style, passengerLocation, headingDegrees)
-                        updatePassengerLocations(style, passengerLocations, route?.id)
-                    }
-                    map?.let { loadedMap ->
-                        loadedMap.style?.let { style ->
-                            val visibleVehicles = displayVehicleLocations(stabilizedVehicleLocations, nearestVehicle)
-                            updateVehicles(style, visibleVehicles)
-                            updateVehicleHeadingSectors(style, visibleVehicles)
-                            updatePassengerLocations(style, passengerLocations, route?.id)
-                        }
-                    }
-                }
-            },
+            // MapLibre sources are updated by narrowly-scoped effects below.
+            // Updating every GeoJSON source in AndroidView.update on every Compose
+            // recomposition caused route/vehicle layers to be rebuilt for each
+            // compass tick and GPS sample, producing severe UI jank.
+            update = {},
             modifier = Modifier.matchParentSize(),
         )
 
@@ -339,22 +325,35 @@ internal fun PassengerMapView(
         }
     }
 
-    LaunchedEffect(styleReady, route, passengerLocation, headingDegrees, stabilizedVehicleLocations, passengerLocations) {
+    LaunchedEffect(styleReady, route, routeOpacity) {
         if (!styleReady) return@LaunchedEffect
         map?.style?.let { style ->
             updateRoute(style, route, routeOpacity)
             updateRouteStation(style, route)
-            updateHeadingSector(style, passengerLocation, headingDegrees)
-            updateUserLocation(style, passengerLocation)
-            updatePassengerLocations(style, passengerLocations, route?.id)
         }
+    }
 
-        map?.style?.let {
+    LaunchedEffect(styleReady, passengerLocation) {
+        if (!styleReady) return@LaunchedEffect
+        map?.style?.let { style -> updateUserLocation(style, passengerLocation) }
+    }
+
+    LaunchedEffect(styleReady, passengerLocation, headingDegrees) {
+        if (!styleReady) return@LaunchedEffect
+        map?.style?.let { style -> updateHeadingSector(style, passengerLocation, headingDegrees) }
+    }
+
+    LaunchedEffect(styleReady, passengerLocations, route?.id) {
+        if (!styleReady) return@LaunchedEffect
+        map?.style?.let { style -> updatePassengerLocations(style, passengerLocations, route?.id) }
+    }
+
+    LaunchedEffect(styleReady, stabilizedVehicleLocations, nearestVehicle) {
+        if (!styleReady) return@LaunchedEffect
+        map?.style?.let { style ->
             val visibleVehicles = displayVehicleLocations(stabilizedVehicleLocations, nearestVehicle)
-            updateVehicles(it, visibleVehicles)
-            updateVehicleHeadingSectors(it, visibleVehicles)
-        }
-        map?.let {
+            updateVehicles(style, visibleVehicles)
+            updateVehicleHeadingSectors(style, visibleVehicles)
         }
     }
 
@@ -809,10 +808,6 @@ private fun updateVehicles(
                 ?.let { ((it % 360f) + 360f) % 360f }
                 ?.toDouble() ?: 0.0
             addNumberProperty(VEHICLE_HEADING_PROPERTY, heading)
-            Log.d(
-                "SafarVehicleRotation",
-                "vehicle=${vehicle.id} headingDegrees=$heading timestamp=${location.timestampEpochMs}",
-            )
         }
     }
     source.setGeoJson(FeatureCollection.fromFeatures(features.toTypedArray()))
