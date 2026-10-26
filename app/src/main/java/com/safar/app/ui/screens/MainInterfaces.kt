@@ -844,7 +844,6 @@ fun DriverMainScreen(state: OnboardingState, onLanguageSelected: (String) -> Uni
                 onPauseWork = driverViewModel::pauseWork,
                 onResumeWork = driverViewModel::resumeWork,
                 onFinishWork = driverViewModel::finishWork,
-                onPublishDriverLocation = { point, heading, timestamp -> driverViewModel.publishDriverLocation(point, heading, timestamp) },
                 foregroundLocationGranted = foregroundLocationGranted,
                 onRequestTrackingPermission = ::requestDriverTrackingPermission,
                 modifier = Modifier.padding(padding),
@@ -893,7 +892,6 @@ private fun DriverHomeScreen(
     onPauseWork: () -> Unit,
     onResumeWork: () -> Unit,
     onFinishWork: () -> Unit,
-    onPublishDriverLocation: (GeoPoint, Float?, Long) -> Unit,
     foregroundLocationGranted: Boolean,
     onRequestTrackingPermission: () -> Unit,
     modifier: Modifier = Modifier,
@@ -954,28 +952,20 @@ private fun DriverHomeScreen(
     // Null means the compass has not produced a measured angle yet. Keep this
     // nullable for publishing so a placeholder north angle is never sent to Supabase.
     var driverHeadingDegrees by remember { mutableStateOf<Float?>(null) }
-    // LaunchedEffect's GPS loop survives compass updates. Read the latest heading
-    // from its callback instead of retaining the null value from the first composition.
-    val latestDriverHeadingDegrees by rememberUpdatedState(driverHeadingDegrees)
     var driverLocateRequestId by remember { mutableLongStateOf(0L) }
     var passengerFocusPoint by remember { mutableStateOf<GeoPoint?>(null) }
     var passengerFocusRequestId by remember { mutableLongStateOf(0L) }
 
-    // Fail-safe publisher: while the driver screen is visible and the driver has
-    // an assigned route, also send a fresh GPS fix every 5 seconds. The foreground
-    // service remains responsible for background tracking.
+    // The foreground DriverLocationService is the single publisher to Supabase.
+    // The screen only consumes GPS for its own blue marker. A second 5-second
+    // publisher here duplicated database writes and realtime broadcasts, increasing
+    // load and allowing older fixes to race with the service's newer coordinates.
     LaunchedEffect(ui.driver?.routeId, foregroundLocationGranted) {
         if (ui.driver?.routeId == null || !foregroundLocationGranted) return@LaunchedEffect
         while (true) {
             driverLocationProvider.currentLocationSample { sample ->
                 if (sample != null) {
                     driverLocation = sample.point
-                    val fixAgeMs = System.currentTimeMillis() - sample.timestampEpochMs
-                    if (sample.timestampEpochMs > 0L && fixAgeMs in -30_000L..180_000L) {
-                        onPublishDriverLocation(sample.point, latestDriverHeadingDegrees, sample.timestampEpochMs)
-                    } else {
-                        android.util.Log.w("SafarDriverGPS", "Skipping stale screen GPS fix: ageMs=$fixAgeMs")
-                    }
                 }
             }
             delay(5_000L)
