@@ -35,6 +35,11 @@ internal class LocationStabilizer(
         val accuracyMeters: Double?,
     )
 
+    private companion object {
+        const val MAX_PLAUSIBLE_SPEED_METERS_PER_SECOND = 35.0
+        const val MAX_MOVEMENT_FIX_ACCURACY_METERS = 15.0
+    }
+
     private var accepted: LocationSample? = null
     private var candidate: Candidate? = null
 
@@ -98,24 +103,43 @@ internal class LocationStabilizer(
 
         if (distance >= jumpThresholdMeters) {
             val now = sample.timestampEpochMs.takeIf { it > 0L } ?: System.currentTimeMillis()
+            val elapsedForSpeedMs = (sample.timestampEpochMs - previous.timestampEpochMs).coerceAtLeast(0L)
+            val speedMetersPerSecond = if (elapsedForSpeedMs >= 500L) {
+                distance / (elapsedForSpeedMs / 1000.0)
+            } else {
+                Double.POSITIVE_INFINITY
+            }
+
+            // A real driver can move more than 12 m between GPS fixes. The old
+            // confirmation-only path reset its candidate on every such fix, so a
+            // moving vehicle could remain stuck at its first coordinate forever.
+            // Trust a fresh, accurate fix when its implied speed is physically
+            // plausible; reserve multi-fix confirmation for likely GPS outliers.
+            if (elapsedForSpeedMs in 500L..10_000L &&
+                speedMetersPerSecond <= MAX_PLAUSIBLE_SPEED_METERS_PER_SECOND &&
+                (accuracy == null || accuracy <= MAX_MOVEMENT_FIX_ACCURACY_METERS)
+            ) {
+                candidate = null
+                accepted = sample
+                return sample
+            }
+
             val oldCandidate = candidate
             val candidateDistance = oldCandidate?.let { distanceMeters(it.point, sample.point) } ?: Double.MAX_VALUE
             val consistencyRadius = maxOf(6.0, minOf(10.0, (accuracy ?: 8.0) * 0.5))
             val consistent = oldCandidate != null && candidateDistance <= consistencyRadius
             candidate = if (consistent) {
-                oldCandidate?.copy(
+                oldCandidate.copy(
                     point = blend(oldCandidate.point, sample.point, 0.5),
                     count = oldCandidate.count + 1,
                     accuracyMeters = accuracy ?: oldCandidate.accuracyMeters,
-                ) ?: Candidate(sample.point, now, 1, accuracy)
+                )
             } else {
                 Candidate(sample.point, now, 1, accuracy)
             }
-            val active = candidate!!
+            val active = candidate ?: return previous
             if (active.count < 2 || now - active.startedAtMs < jumpConfirmationMs) return previous
 
-            // Once movement is confirmed, move toward it gradually rather than
-            // teleporting the marker directly to the newest noisy sample.
             val confirmed = sample.copy(point = active.point)
             accepted = confirmed
             candidate = null
