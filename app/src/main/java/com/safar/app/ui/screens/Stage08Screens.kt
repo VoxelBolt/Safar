@@ -124,7 +124,10 @@ fun PassengerProfileRealScreen(
 
         when {
             ui.loading && ui.user == null -> LoadingMessage()
-            ui.error != null && ui.user == null -> ErrorMessage(onRetry = { viewModel.retry(isDriver) })
+            ui.error != null && ui.user == null -> ErrorMessage(
+                message = ui.error,
+                onRetry = { viewModel.retry(isDriver) },
+            )
             else -> {
                 ProfileHeaderReal(
                     name = ui.user?.name ?: stringResource(R.string.user_default_name),
@@ -449,9 +452,13 @@ private fun LoadingMessage() {
 }
 
 @Composable
-private fun ErrorMessage(onRetry: () -> Unit) {
+private fun ErrorMessage(message: String? = null, onRetry: () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(stringResource(R.string.generic_load_error), color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
+        Text(
+            message?.takeIf { it.isNotBlank() } ?: stringResource(R.string.generic_load_error),
+            color = MaterialTheme.colorScheme.error,
+            textAlign = TextAlign.Center,
+        )
         Spacer(Modifier.height(10.dp))
         TextButton(onClick = onRetry) { Text(stringResource(R.string.retry)) }
     }
