@@ -911,6 +911,22 @@ private fun DriverHomeScreen(
     var tripTimerAlertedDeadline by rememberSaveable { mutableLongStateOf(0L) }
 
     LaunchedEffect(ui.workSession?.id, ui.workSession?.status) {
+        // Start the trip countdown only after the backend confirms an active
+        // work session. Starting it optimistically made the timer run while the
+        // session request could fail, leaving the Start button visible.
+        if (ui.workSession?.status == WorkSessionStatus.ACTIVE &&
+            !tripTimerEnabled && tripTimerDeadlineMs <= 0L
+        ) {
+            tripTimerDeadlineMs = System.currentTimeMillis() + tripTimerDurationMinutes * 60_000L
+            tripTimerEnabled = true
+            tripTimerAlertedDeadline = 0L
+            tripTimerPausedRemainingMs = 0L
+            timerPrefs.edit()
+                .putBoolean("enabled", true)
+                .putLong("deadline_ms", tripTimerDeadlineMs)
+                .putLong("paused_remaining_ms", 0L)
+                .apply()
+        }
         while (ui.workSession?.status == WorkSessionStatus.ACTIVE) {
             now = System.currentTimeMillis()
             delay(1000L)
@@ -1285,11 +1301,8 @@ private fun DriverHomeScreen(
                         WorkSessionStatus.NOT_STARTED, WorkSessionStatus.COMPLETED ->
                             PrimaryActionButton(if (status == WorkSessionStatus.COMPLETED) stringResource(R.string.start_new_work) else stringResource(R.string.start_work),
                                 Glyph.PLAY, enabled = !ui.actionInProgress) {
-                                tripTimerDeadlineMs = System.currentTimeMillis() + tripTimerDurationMinutes * 60_000L
-                                tripTimerEnabled = true
-                                tripTimerAlertedDeadline = 0L
-                                tripTimerPausedRemainingMs = 0L
-                                timerPrefs.edit().putBoolean("enabled", true).putLong("deadline_ms", tripTimerDeadlineMs).putLong("paused_remaining_ms", 0L).apply()
+                                // Backend session state controls the button and timer.
+                                // Do not start a local countdown before startWork succeeds.
                                 onStartWork()
                             }
                         WorkSessionStatus.ACTIVE -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1325,11 +1338,11 @@ private fun DriverHomeScreen(
                             }
                         }
                     }
-                    ui.error?.let {
+                    ui.error?.let { errorMessage ->
                         Spacer(Modifier.height(6.dp))
-                        Text(stringResource(R.string.generic_load_error), color = Danger,
+                        Text(errorMessage, color = Danger,
                             style = MaterialTheme.typography.labelSmall, modifier = Modifier.fillMaxWidth(),
-                            maxLines = 2, textAlign = TextAlign.Center)
+                            maxLines = 3, textAlign = TextAlign.Center)
                     }
                 }
             }
