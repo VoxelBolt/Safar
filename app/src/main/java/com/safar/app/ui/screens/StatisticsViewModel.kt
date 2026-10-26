@@ -87,16 +87,21 @@ class StatisticsViewModel : ViewModel() {
         val totalDistance = sessions.sumOf { it.distanceMeters.coerceAtLeast(0.0) }
         // Render one row per session, not one row per day. Grouping by date
         // made the session counter increase while the visible list stayed at one row.
-        val sessionRows = enriched.mapNotNull { (session, workSeconds) ->
-            val startMs = session.startTimeEpochMs ?: return@mapNotNull null
-            val start = Instant.ofEpochMilli(startMs).atZone(zone)
-            StatisticsDay(
-                dateLabel = "%s • %02d:%02d".format(
+        val sessionRows = enriched.map { (session, workSeconds) ->
+            val startMs = session.startTimeEpochMs
+            val dateLabel = if (startMs != null && startMs > 0L) {
+                val start = Instant.ofEpochMilli(startMs).atZone(zone)
+                "%s • %02d:%02d".format(
                     java.util.Locale.ROOT,
                     start.toLocalDate().toString(),
                     start.hour,
                     start.minute,
-                ),
+                )
+            } else {
+                "Время не указано"
+            }
+            StatisticsDay(
+                dateLabel = dateLabel,
                 workSeconds = workSeconds,
                 distanceMeters = session.distanceMeters.coerceAtLeast(0.0),
             )
