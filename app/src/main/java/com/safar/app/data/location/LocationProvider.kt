@@ -37,7 +37,7 @@ internal class LocationStabilizer(
 
     private companion object {
         const val MAX_PLAUSIBLE_SPEED_METERS_PER_SECOND = 35.0
-        const val MAX_MOVEMENT_FIX_ACCURACY_METERS = 15.0
+        const val MAX_MOVEMENT_FIX_ACCURACY_METERS = 25.0
     }
 
     private var accepted: LocationSample? = null
