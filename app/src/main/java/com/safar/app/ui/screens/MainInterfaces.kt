@@ -980,10 +980,6 @@ private fun DriverHomeScreen(
             try {
                 driverLocationProvider.headingDegrees().collect { degrees ->
                     driverHeadingDegrees = degrees
-                    android.util.Log.d(
-                        "SafarDriverHeading",
-                        "Driver map heading updated: ${degrees.toInt()}°"
-                    )
                 }
                 android.util.Log.w("SafarDriverHeading", "Compass stream ended; retrying")
             } catch (error: CancellationException) {
