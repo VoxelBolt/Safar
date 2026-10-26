@@ -54,11 +54,18 @@ class ProfileViewModel : ViewModel() {
                 val result = withTimeout(PROFILE_LOAD_TIMEOUT_MS) {
                     retryRead {
                         val user = userRepository.getCurrentUser()
-                            ?: throw IllegalStateException("Профиль не найден")
-                        val driver = if (isDriver) driverRepository.getDriver() else null
-                        val route = driver?.routeId?.let { routeRepository.getRoute(it) }
+                            ?: throw IllegalStateException("Не найдена запись пользователя для текущей учётной записи. Попробуйте выйти и войти снова.")
+
+                        // The user's profile is the primary content. A temporary failure
+                        // loading optional driver/route/vehicle metadata must not hide it.
+                        val driver = if (isDriver) {
+                            runCatching { driverRepository.getDriver() }.getOrNull()
+                        } else null
+                        val route = driver?.routeId?.let { id ->
+                            runCatching { routeRepository.getRoute(id) }.getOrNull()
+                        }
                         val vehicle = driver?.vehicleId?.let { id ->
-                            vehicleRepository.getAllVehicles().firstOrNull { it.id == id }
+                            runCatching { vehicleRepository.getAllVehicles().firstOrNull { it.id == id } }.getOrNull()
                         }
                         ProfileLoadResult(user, driver, route, vehicle)
                     }
