@@ -128,7 +128,7 @@ internal class LocationStabilizer(
             val candidateDistance = oldCandidate?.let { distanceMeters(it.point, sample.point) } ?: Double.MAX_VALUE
             val consistencyRadius = maxOf(6.0, minOf(10.0, (accuracy ?: 8.0) * 0.5))
             val consistent = oldCandidate != null && candidateDistance <= consistencyRadius
-            candidate = if (consistent) {
+            candidate = if (consistent && oldCandidate != null) {
                 oldCandidate.copy(
                     point = blend(oldCandidate.point, sample.point, 0.5),
                     count = oldCandidate.count + 1,
