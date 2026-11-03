@@ -22,53 +22,73 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.safar.app.domain.model.GeoPoint
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.sample
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
-class AndroidLocationProvider(private val context: Context) {
-    private val fusedClient = LocationServices.getFusedLocationProviderClient(context)
-    private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+class AndroidLocationProvider(context: Context) {
+    private val context = context.applicationContext
+    private val fusedClient = LocationServices.getFusedLocationProviderClient(this.context)
+    private val locationManager = this.context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
     // Shared by streaming and one-shot fixes so cached/current callbacks cannot
     // overwrite a stable map point with an unfiltered GPS wobble.
     private val locationStabilizer = LocationStabilizer()
+    // Keep a separate display filter so the local marker can show Android's
+    // approximate-location fixes without relaxing the driver's odometer filter.
+    private val displayLocationStabilizer = LocationStabilizer.display()
 
     @SuppressLint("MissingPermission")
-    fun locationSamples(): Flow<LocationSample> = callbackFlow {
-        var emitted = false
+    fun locationSamples(): Flow<LocationSample> = filteredLocationSamples(
+        stabilizer = locationStabilizer,
+        maxAcceptedAccuracyMeters = TRACKING_MAX_ACCURACY_METERS,
+    )
+
+    @SuppressLint("MissingPermission")
+    private fun filteredLocationSamples(
+        stabilizer: LocationStabilizer,
+        maxAcceptedAccuracyMeters: Double,
+        diagnosticStream: String = "tracking",
+    ): Flow<LocationSample> = SharedAndroidLocationFeed.locations(context)
+        .filter { sample -> sample.isRecentAccurateFix(maxAcceptedAccuracyMeters) }
+        .mapNotNull { sample ->
+            val accepted = stabilizer.filter(sample)
+            GpsDiagnosticLog.record(context, diagnosticStream, sample, accepted)
+            accepted
+        }
+        .distinctUntilChanged()
+
+    /** Single fused/platform GPS request shared by the map and foreground service. */
+    @SuppressLint("MissingPermission")
+    internal fun rawLocationSamples(): Flow<LocationSample> = callbackFlow {
+        val platformFallbackRequested = AtomicBoolean(false)
+        // Lock one provider for the lifetime of this stream. Switching between
+        // Fused and LocationManager fixes can turn their coordinate offsets
+        // into apparent movement even when both fixes are recent.
+        val selectedSource = AtomicInteger(SOURCE_UNDECIDED)
 
         val listener = object : LocationListener {
             override fun onLocationChanged(location: Location) {
-                if (location.latitude.isFinite() && location.longitude.isFinite()) {
-                    emitted = true
-                    trySend(location.toLocationSample())
-                }
+                if (!location.isRecentAccurateFix(MAX_DISPLAY_ACCURACY_METERS)) return
+                if (!selectedSource.compareAndSet(SOURCE_UNDECIDED, SOURCE_PLATFORM) &&
+                    selectedSource.get() != SOURCE_PLATFORM
+                ) return
+                trySend(location.toLocationSample())
             }
-        }
-
-        fun emitLastKnown() {
-            val candidates = buildList {
-                runCatching { locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER) }
-                    .getOrNull()?.let(::add)
-                runCatching { locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) }
-                    .getOrNull()?.let(::add)
-            }
-            // Prefer the freshest reasonably accurate cached fix. The newest
-            // fix can be a coarse network estimate that jumps away from GPS.
-            val nowNanos = android.os.SystemClock.elapsedRealtimeNanos()
-            candidates
-                .filter { nowNanos - it.elapsedRealtimeNanos <= 120_000_000_000L }
-                .minWithOrNull(
-                    compareBy<Location> { if (it.hasAccuracy()) it.accuracy else Float.MAX_VALUE }
-                        .thenByDescending { it.elapsedRealtimeNanos }
-                )?.let {
-                    emitted = true
-                    trySend(it.toLocationSample())
-                }
         }
 
         val gpsEnabled = runCatching {
@@ -83,50 +103,57 @@ class AndroidLocationProvider(private val context: Context) {
             gpsEnabled || networkEnabled
         }
 
+        fun requestPlatformFallback() {
+            if (!platformFallbackRequested.compareAndSet(false, true)) return
+            val fallbackProvider = when {
+                hasFineLocationPermission() && gpsEnabled -> LocationManager.GPS_PROVIDER
+                networkEnabled -> LocationManager.NETWORK_PROVIDER
+                gpsEnabled -> LocationManager.GPS_PROVIDER
+                else -> null
+            } ?: return
+
+            runCatching {
+                locationManager.requestLocationUpdates(
+                    fallbackProvider,
+                    5_000L,
+                    SHARED_MIN_UPDATE_DISTANCE_METERS,
+                    listener,
+                    Looper.getMainLooper(),
+                )
+            }.onSuccess {
+                // Fused can recover while the platform fallback is being started.
+                if (selectedSource.get() == SOURCE_FUSED && platformFallbackRequested.compareAndSet(true, false)) {
+                    locationManager.removeUpdates(listener)
+                }
+            }.onFailure {
+                platformFallbackRequested.set(false)
+                Log.w(TAG, "Platform GPS fallback failed", it)
+            }
+        }
+
         Log.d(TAG, "locationSamples: locationEnabled=$locationEnabled gps=$gpsEnabled network=$networkEnabled")
-        emitLastKnown()
 
-        if (gpsEnabled) {
-            runCatching {
-                locationManager.requestLocationUpdates(
-                    LocationManager.GPS_PROVIDER,
-                    1_000L,
-                    0f,
-                    listener,
-                    Looper.getMainLooper(),
-                )
-            }.onFailure { Log.w(TAG, "GPS requestLocationUpdates failed", it) }
-        }
-
-        // When fine location is available, don't mix raw network-provider fixes
-        // into the GPS stream: the lower-accuracy source can pull the marker back
-        // and create visible jumps. Fused high-accuracy updates still combine sources.
-        if (networkEnabled && !hasFineLocationPermission()) {
-            runCatching {
-                locationManager.requestLocationUpdates(
-                    LocationManager.NETWORK_PROVIDER,
-                    1_000L,
-                    0f,
-                    listener,
-                    Looper.getMainLooper(),
-                )
-            }.onFailure { Log.w(TAG, "Network requestLocationUpdates failed", it) }
-        }
-
-        // Fused is retained as a second source, because some Samsung devices
-        // provide a faster fix through Google Play Services.
+        // Use one live provider so raw GPS and fused fixes cannot alternate and
+        // turn source-to-source offsets into apparent movement. Fall back to the
+        // platform provider only if fused updates fail or never deliver a fix.
         val fusedPriority = if (hasFineLocationPermission()) Priority.PRIORITY_HIGH_ACCURACY else Priority.PRIORITY_BALANCED_POWER_ACCURACY
 
         val fusedRequest = LocationRequest.Builder(fusedPriority, 2_000L)
             .setMinUpdateIntervalMillis(1_000L)
-            .setWaitForAccurateLocation(false)
+            .setMinUpdateDistanceMeters(SHARED_MIN_UPDATE_DISTANCE_METERS)
+            .setWaitForAccurateLocation(true)
             .build()
 
         val fusedCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 result.locations.maxByOrNull { it.elapsedRealtimeNanos }?.let {
-                    if (it.latitude.isFinite() && it.longitude.isFinite()) {
-                        emitted = true
+                    if (it.isRecentAccurateFix(MAX_DISPLAY_ACCURACY_METERS) &&
+                        (selectedSource.compareAndSet(SOURCE_UNDECIDED, SOURCE_FUSED) ||
+                            selectedSource.get() == SOURCE_FUSED)
+                    ) {
+                        if (platformFallbackRequested.compareAndSet(true, false)) {
+                            locationManager.removeUpdates(listener)
+                        }
                         trySend(it.toLocationSample())
                     }
                 }
@@ -139,26 +166,51 @@ class AndroidLocationProvider(private val context: Context) {
                 fusedCallback,
                 Looper.getMainLooper(),
             )
-        }.onFailure { Log.w(TAG, "Fused requestLocationUpdates failed", it) }
+        }.onSuccess { task ->
+            task.addOnFailureListener { error ->
+                Log.w(TAG, "Fused requestLocationUpdates failed; using platform GPS", error)
+                requestPlatformFallback()
+            }
+        }.onFailure {
+            Log.w(TAG, "Fused requestLocationUpdates failed; using platform GPS", it)
+            requestPlatformFallback()
+        }
+
+        launch {
+            delay(10_000L)
+            if (selectedSource.get() == SOURCE_UNDECIDED) requestPlatformFallback()
+        }
 
         awaitClose {
             locationManager.removeUpdates(listener)
             fusedClient.removeLocationUpdates(fusedCallback)
         }
     }
-        .mapNotNull { sample -> locationStabilizer.filter(sample) }
-        .distinctUntilChanged()
 
     @SuppressLint("MissingPermission")
     fun locations(): Flow<GeoPoint> = locationSamples().map { it.point }
+
+    /** Local driver marker stream; tracking and passenger location publishing stay strict. */
+    @SuppressLint("MissingPermission")
+    fun displayLocations(): Flow<GeoPoint> = displayLocationSamples().map { it.point }
+
+    /** Best recent position for the local blue dot, including Android approximate-location fixes. */
+    @SuppressLint("MissingPermission")
+    fun displayLocationSamples(): Flow<LocationSample> = filteredLocationSamples(
+        stabilizer = displayLocationStabilizer,
+        maxAcceptedAccuracyMeters = displayFixAccuracyLimit(),
+        diagnosticStream = "display",
+    )
 
     /**
      * Device orientation as a compass azimuth in degrees clockwise from north.
      * Sensor updates are independent of GPS, so heading remains available while stopped.
      */
+    fun headingDegrees(): Flow<Float> = SharedAndroidLocationFeed.headings(context)
+
     @OptIn(FlowPreview::class)
     @SuppressLint("MissingPermission")
-    fun headingDegrees(): Flow<Float> = callbackFlow {
+    internal fun rawHeadingDegrees(): Flow<Float> = callbackFlow {
         val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
         val rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
         // Fallback for devices that expose only the game rotation vector. It still
@@ -302,7 +354,46 @@ class AndroidLocationProvider(private val context: Context) {
     }
 
     @SuppressLint("MissingPermission")
-    fun currentLocationSample(onResult: (LocationSample?) -> Unit) {
+    fun currentLocationSample(onResult: (LocationSample?) -> Unit) =
+        currentLocationSample(locationStabilizer, TRACKING_MAX_ACCURACY_METERS, onResult)
+
+    @SuppressLint("MissingPermission")
+    fun currentDisplayLocationSample(onResult: (LocationSample?) -> Unit) =
+        currentFusedLocationSample(
+            displayLocationStabilizer,
+            displayFixAccuracyLimit(),
+            onResult,
+        )
+
+    /** Keeps one-shot map recentering on the same source as the live fused stream. */
+    @SuppressLint("MissingPermission")
+    private fun currentFusedLocationSample(
+        stabilizer: LocationStabilizer,
+        maxAcceptedAccuracyMeters: Double,
+        onResult: (LocationSample?) -> Unit,
+    ) {
+        val priority = if (hasFineLocationPermission()) Priority.PRIORITY_HIGH_ACCURACY
+            else Priority.PRIORITY_BALANCED_POWER_ACCURACY
+        fusedClient.getCurrentLocation(priority, CancellationTokenSource().token)
+            .addOnSuccessListener { location ->
+                val sample = location
+                    ?.takeIf { it.isRecentAccurateFix(maxAcceptedAccuracyMeters) }
+                    ?.toLocationSample()
+                    ?.let(stabilizer::filter)
+                onResult(sample)
+            }
+            .addOnFailureListener { error ->
+                Log.w(TAG, "Fused display location request failed", error)
+                onResult(null)
+            }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun currentLocationSample(
+        stabilizer: LocationStabilizer,
+        maxAcceptedAccuracyMeters: Double,
+        onResult: (LocationSample?) -> Unit,
+    ) {
         val fine = hasFineLocationPermission()
         val coarse = hasCoarseLocationPermission()
         val gpsEnabled = runCatching {
@@ -328,9 +419,9 @@ class AndroidLocationProvider(private val context: Context) {
             runCatching { locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) }.getOrNull(),
         ).maxByOrNull { it.elapsedRealtimeNanos }
 
-        if (cached != null && cached.latitude.isFinite() && cached.longitude.isFinite()) {
+        if (cached != null && cached.isRecentAccurateFix(maxAcceptedAccuracyMeters)) {
             Log.d(TAG, "LocationManager cached fix: ${cached.latitude},${cached.longitude} accuracy=${cached.accuracy}")
-            locationStabilizer.filter(cached.toLocationSample())?.let(onResult)
+            stabilizer.filter(cached.toLocationSample())?.let(onResult)
         }
 
         // If the phone-wide Location switch is off, no provider can produce
@@ -370,8 +461,8 @@ class AndroidLocationProvider(private val context: Context) {
                             TAG,
                             "LocationManager current fix provider=$provider result=${location?.latitude},${location?.longitude}"
                         )
-                        if (location != null && location.latitude.isFinite() && location.longitude.isFinite()) {
-                            locationStabilizer.filter(location.toLocationSample())?.let(onResult)
+                        if (location != null && location.isRecentAccurateFix(maxAcceptedAccuracyMeters)) {
+                            stabilizer.filter(location.toLocationSample())?.let(onResult)
                         }
                     }
                 }.onFailure {
@@ -390,8 +481,8 @@ class AndroidLocationProvider(private val context: Context) {
             CancellationTokenSource().token,
         ).addOnSuccessListener { location ->
             Log.d(TAG, "Fused getCurrentLocation result: ${location?.latitude},${location?.longitude}")
-            if (location != null && location.latitude.isFinite() && location.longitude.isFinite()) {
-                locationStabilizer.filter(location.toLocationSample())?.let(onResult)
+            if (location != null && location.isRecentAccurateFix(maxAcceptedAccuracyMeters)) {
+                stabilizer.filter(location.toLocationSample())?.let(onResult)
             }
         }.addOnFailureListener { error ->
             Log.w(TAG, "Fused getCurrentLocation failed", error)
@@ -399,20 +490,36 @@ class AndroidLocationProvider(private val context: Context) {
     }
     @SuppressLint("MissingPermission")
     fun lastKnownLocation(onResult: (GeoPoint?) -> Unit) {
+        lastKnownLocation(locationStabilizer, TRACKING_MAX_ACCURACY_METERS, onResult)
+    }
+
+    @SuppressLint("MissingPermission")
+    fun lastKnownDisplayLocation(onResult: (GeoPoint?) -> Unit) {
+        lastKnownLocation(displayLocationStabilizer, displayFixAccuracyLimit(), onResult)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun lastKnownLocation(
+        stabilizer: LocationStabilizer,
+        maxAcceptedAccuracyMeters: Double,
+        onResult: (GeoPoint?) -> Unit,
+    ) {
         val candidates = listOfNotNull(
             runCatching { locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER) }.getOrNull(),
             runCatching { locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) }.getOrNull(),
         )
-        val best = candidates.maxByOrNull { it.elapsedRealtimeNanos }
+        val best = candidates.filter { it.isRecentAccurateFix(maxAcceptedAccuracyMeters) }
+            .maxByOrNull { it.elapsedRealtimeNanos }
         if (best != null) {
-            val stable = locationStabilizer.filter(best.toLocationSample())
+            val stable = stabilizer.filter(best.toLocationSample())
             if (stable != null) onResult(stable.point)
             return
         }
 
         fusedClient.lastLocation
             .addOnSuccessListener { location ->
-                val stable = location?.toLocationSample()?.let(locationStabilizer::filter)
+                val stable = location?.takeIf { it.isRecentAccurateFix(maxAcceptedAccuracyMeters) }
+                    ?.toLocationSample()?.let(stabilizer::filter)
                 onResult(stable?.point)
             }
             .addOnFailureListener { onResult(null) }
@@ -430,12 +537,75 @@ class AndroidLocationProvider(private val context: Context) {
             android.Manifest.permission.ACCESS_COARSE_LOCATION,
         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
-    private companion object { const val TAG = "SafarGPS" }
+    private fun displayFixAccuracyLimit(): Double =
+        if (hasFineLocationPermission()) PRECISE_DISPLAY_MAX_ACCURACY_METERS else DISPLAY_MAX_ACCURACY_METERS
+
+    private companion object {
+        const val TAG = "SafarGPS"
+        const val SOURCE_UNDECIDED = 0
+        const val SOURCE_FUSED = 1
+        const val SOURCE_PLATFORM = 2
+        const val TRACKING_MAX_ACCURACY_METERS = 20.0
+        const val SHARED_MIN_UPDATE_DISTANCE_METERS = 2f
+        const val MAX_DISPLAY_ACCURACY_METERS = 250.0
+        const val PRECISE_DISPLAY_MAX_ACCURACY_METERS = 30.0
+        const val DISPLAY_MAX_ACCURACY_METERS = 250.0
+    }
+
+    private fun Location.isRecentAccurateFix(maxAccuracyMeters: Double): Boolean {
+        if (!latitude.isFinite() || !longitude.isFinite() || !hasAccuracy() ||
+            !accuracy.isFinite() || accuracy < 0f || accuracy.toDouble() > maxAccuracyMeters
+        ) return false
+        val ageMs = System.currentTimeMillis() - time
+        return time > 0L && ageMs in -5_000L..15_000L
+    }
+
+    private fun LocationSample.isRecentAccurateFix(maxAccuracyMeters: Double): Boolean {
+        val accuracy = accuracyMeters ?: return false
+        if (!point.latitude.isFinite() || !point.longitude.isFinite() ||
+            accuracy.isFinite().not() || accuracy < 0.0 || accuracy > maxAccuracyMeters
+        ) return false
+        val ageMs = System.currentTimeMillis() - timestampEpochMs
+        return timestampEpochMs > 0L && ageMs in -5_000L..15_000L
+    }
 
     private fun Location.toGeoPoint() = GeoPoint(latitude, longitude)
     private fun Location.toLocationSample() = LocationSample(
         point = toGeoPoint(),
         timestampEpochMs = time,
         accuracyMeters = if (hasAccuracy()) accuracy.toDouble() else null,
+        speedMetersPerSecond = if (hasSpeed() && speed.isFinite() && speed >= 0f) speed.toDouble() else null,
+        speedAccuracyMetersPerSecond = if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && hasSpeedAccuracy() && speedAccuracyMetersPerSecond.isFinite()
+        ) speedAccuracyMetersPerSecond.toDouble() else null,
+        provider = provider,
     )
+
+}
+
+/** Shares one Android location callback between driver display and publishing flows. */
+private object SharedAndroidLocationFeed {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    @Volatile private var sharedLocations: SharedFlow<LocationSample>? = null
+    @Volatile private var sharedHeadings: SharedFlow<Float>? = null
+
+    fun locations(context: Context): SharedFlow<LocationSample> {
+        sharedLocations?.let { return it }
+        return synchronized(this) {
+            sharedLocations ?: AndroidLocationProvider(context.applicationContext)
+                .rawLocationSamples()
+                .shareIn(scope, SharingStarted.WhileSubscribed(stopTimeoutMillis = 5_000L), replay = 1)
+                .also { sharedLocations = it }
+        }
+    }
+
+    fun headings(context: Context): SharedFlow<Float> {
+        sharedHeadings?.let { return it }
+        return synchronized(this) {
+            sharedHeadings ?: AndroidLocationProvider(context.applicationContext)
+                .rawHeadingDegrees()
+                .shareIn(scope, SharingStarted.WhileSubscribed(stopTimeoutMillis = 5_000L), replay = 1)
+                .also { sharedHeadings = it }
+        }
+    }
 }

@@ -120,6 +120,7 @@
     <string name="ok">Хуб</string>
     <string name="verified">Тасдиқшуда</string>
     <string name="not_verified">Тасдиқ нашудааст</string>
+    <string name="driver_pending_approval">Профили шумо тасдиқи маъмурро интизор аст. Ҳоло оғози сессия ва ирсоли макон дастрас нест.</string>
     <string name="notifications_info">Танзимоти огоҳиномаҳо дар версияи минбаъдаи MVP дастрас мешаванд.</string>
     <string name="help_info">Агар харита ё маълумот бор нашавад, пайвастшавиро санҷед ва «Аз нав кӯшиш кардан»-ро пахш кунед.</string>
     <string name="about_info">Safar — барнома барои пайгирии нақлиёти шаҳрӣ.</string>
@@ -127,6 +128,8 @@
     <string name="statistics_empty_title">Маълумот кофӣ нест</string>
     <string name="statistics_empty_subtitle">Барои дидани омор як сессияи кориро анҷом диҳед.</string>
     <string name="statistics_sessions_count">Сессияҳои корӣ: %1$d</string>
+    <string name="favorites_load_more">Бештар бор кунед</string>
+    <string name="statistics_load_more">Сессияҳои бештарро бор кунед</string>
     <string name="work_duration_format">%1$d соат %2$02d дақ</string>
     <string name="distance_km_format">%.1f км</string>
     <string name="distance_m_format">%1$d м</string>
@@ -134,4 +137,8 @@
     <string name="location_stale">Ҷойгиршавӣ кӯҳна аст</string>
 
     <string name="passengers_waiting">Интизори масири %1$s: %2$d</string>
+    <string name="driver_location_title">Дастрасӣ ба ҷойгиршавӣ</string>
+    <string name="driver_location_description">Иҷозати ҷойгиршавиро диҳед, то мусофирон нақлиёти шуморо дар харита бинанд. Пас аз додани иҷозат интиқоли ҷойгиршавӣ худкор оғоз мешавад.</string>
+    <string name="allow_location">Иҷозат додан</string>
+    <string name="driver_route_load_error">Масирҳоро бор кардан нашуд.</string>
 </resources>

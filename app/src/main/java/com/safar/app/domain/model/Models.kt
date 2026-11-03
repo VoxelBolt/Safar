@@ -26,6 +26,12 @@ data class Driver(
     val verified: Boolean
 )
 
+data class DriverApplication(
+    val userId: String,
+    val routeId: String,
+    val vehicleIdentifier: String,
+)
+
 data class Vehicle(
     val id: String,
     val identifier: String,
@@ -57,6 +63,14 @@ data class VehicleLocation(
     val headingDegrees: Float? = null
 )
 
+/** Accepted driver GPS fix sent in order after a temporary network outage. */
+data class DriverLocationFix(
+    val latitude: Double,
+    val longitude: Double,
+    val timestampEpochMs: Long,
+    val headingDegrees: Float? = null,
+)
+
 /** Current passenger location published only while a passenger has a route selected. */
 data class PassengerLocation(
     val passengerId: String,
@@ -65,8 +79,8 @@ data class PassengerLocation(
     val longitude: Double,
     /** Sender timestamp from the realtime message; not used as the stale timer. */
     val timestampEpochMs: Long,
-    /** Local arrival time, used to expire transient passenger markers after no updates. */
-    val receivedAtEpochMs: Long = timestampEpochMs,
+    /** Local monotonic arrival time, used to expire transient markers after no updates. */
+    val receivedAtElapsedMs: Long = timestampEpochMs,
 )
 
 data class WorkSession(
@@ -79,6 +93,12 @@ data class WorkSession(
     val totalPausedSeconds: Long,
     val distanceMeters: Double,
     val status: WorkSessionStatus
+)
+
+data class WorkSessionSummary(
+    val sessionCount: Long,
+    val workSeconds: Long,
+    val distanceMeters: Double,
 )
 
 data class FavoriteVehicle(

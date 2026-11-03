@@ -2,6 +2,7 @@ package com.safar.app.data.repository
 
 import com.safar.app.data.remote.SafarApi
 import com.safar.app.domain.model.Driver
+import com.safar.app.domain.model.DriverApplication
 import com.safar.app.domain.repository.DriverRepository
 
 class DriverRepositoryImpl(
@@ -9,11 +10,14 @@ class DriverRepositoryImpl(
 ) : DriverRepository {
     override suspend fun getDriver(): Driver? = api.getDriver()
 
+    override suspend fun getDriverApplication(): DriverApplication? = api.getDriverApplication()
+
     override suspend fun registerDriver(
         name: String,
         phone: String,
         vehicleIdentifier: String,
-    ): Driver = api.registerDriver(name, phone, vehicleIdentifier)
+        routeId: String,
+    ): DriverApplication = api.registerDriver(name, phone, vehicleIdentifier, routeId)
 
     override suspend fun assignRoute(routeId: String): Driver = api.assignDriverRoute(routeId)
 }

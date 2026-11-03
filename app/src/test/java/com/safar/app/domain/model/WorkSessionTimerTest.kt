@@ -71,4 +71,21 @@ class WorkSessionTimerTest {
 
         assertEquals(12L, WorkSessionTimer.elapsedWorkSeconds(session, 100_000L))
     }
+
+    @Test
+    fun completedSessionRecoversElapsedTimeWhenPersistedDurationIsZero() {
+        val session = WorkSession(
+            id = "s1",
+            driverId = "d1",
+            startTimeEpochMs = 1_000L,
+            pauseTimeEpochMs = null,
+            endTimeEpochMs = 61_000L,
+            durationSeconds = 0L,
+            totalPausedSeconds = 15L,
+            distanceMeters = 0.0,
+            status = WorkSessionStatus.COMPLETED,
+        )
+
+        assertEquals(45L, WorkSessionTimer.elapsedWorkSeconds(session, 100_000L))
+    }
 }

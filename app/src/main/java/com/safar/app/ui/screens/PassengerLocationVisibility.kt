@@ -1,27 +1,28 @@
 package com.safar.app.ui.screens
 
+import android.os.SystemClock
 import com.safar.app.domain.model.PassengerLocation
 
 /**
  * A passenger marker is visible only for the currently selected route and
  * for at most one minute after the last realtime update was received locally.
- * Using receive time avoids false expiry caused by device clock differences.
+ * A monotonic clock avoids false expiry when the device clock changes.
  */
 internal object PassengerLocationVisibility {
     const val MAX_AGE_MS = 60_000L
 
-    fun isFresh(receivedAtEpochMs: Long, nowEpochMs: Long = System.currentTimeMillis()): Boolean =
-        nowEpochMs - receivedAtEpochMs in 0L..MAX_AGE_MS
+    fun isFresh(receivedAtElapsedMs: Long, nowElapsedMs: Long = SystemClock.elapsedRealtime()): Boolean =
+        nowElapsedMs - receivedAtElapsedMs in 0L..MAX_AGE_MS
 
     fun visibleOnRoute(
         locations: List<PassengerLocation>,
         routeId: String?,
-        nowEpochMs: Long = System.currentTimeMillis(),
+        nowElapsedMs: Long = SystemClock.elapsedRealtime(),
     ): List<PassengerLocation> {
         if (routeId == null) return emptyList()
         return locations.filter { passenger ->
             passenger.routeId == routeId &&
-                isFresh(passenger.receivedAtEpochMs, nowEpochMs) &&
+                isFresh(passenger.receivedAtElapsedMs, nowElapsedMs) &&
                 passenger.latitude.isFinite() &&
                 passenger.longitude.isFinite()
         }

@@ -2,6 +2,7 @@ package com.safar.app.data.repository
 
 import com.safar.app.data.remote.SafarApi
 import com.safar.app.domain.model.VehicleLocation
+import com.safar.app.domain.model.DriverLocationFix
 import com.safar.app.domain.repository.DriverLocationRepository
 
 class DriverLocationRepositoryImpl(
@@ -13,4 +14,7 @@ class DriverLocationRepositoryImpl(
         recordedAtIso: String?,
         headingDegrees: Float?,
     ): VehicleLocation = api.submitVehicleLocation(latitude, longitude, recordedAtIso, headingDegrees)
+
+    override suspend fun submitLocations(locations: List<DriverLocationFix>) =
+        api.submitVehicleLocationBatch(locations)
 }

@@ -10,8 +10,11 @@ class VehicleRepositoryImpl(
     override suspend fun getVehiclesForRoute(routeId: String): List<Vehicle> =
         api.getVehiclesForRoute(routeId)
 
-    override suspend fun getAllVehicles(): List<Vehicle> =
-        api.getAllVehicles()
+    override suspend fun getAllVehicles(offset: Int, limit: Int): List<Vehicle> =
+        api.getAllVehicles(offset, limit)
+
+    override suspend fun getVehiclesByIds(vehicleIds: List<String>): List<Vehicle> =
+        api.getVehiclesByIds(vehicleIds)
 
     override suspend fun getActiveVehiclesForRoute(routeId: String): List<Vehicle> =
         api.getActiveVehiclesForRoute(routeId)

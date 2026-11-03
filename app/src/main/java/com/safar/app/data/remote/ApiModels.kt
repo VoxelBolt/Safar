@@ -58,6 +58,13 @@ data class WorkSessionDto(
 )
 
 @Serializable
+data class WorkSessionSummaryDto(
+    @SerialName("session_count") val sessionCount: Long,
+    @SerialName("work_seconds") val workSeconds: Long,
+    @SerialName("distance_meters") val distanceMeters: Double,
+)
+
+@Serializable
 data class FavoriteVehicleDto(
     @SerialName("user_id") val userId: String,
     @SerialName("vehicle_id") val vehicleId: String,
@@ -72,6 +79,14 @@ data class RegistrationResponseDto(
     @SerialName("vehicle_id") val vehicleId: String? = null,
     @SerialName("route_id") val routeId: String? = null,
     val verified: Boolean? = null,
+)
+
+@Serializable
+data class DriverApplicationDto(
+    @SerialName("user_id") val userId: String,
+    @SerialName("route_id") val routeId: String,
+    @SerialName("vehicle_identifier") val vehicleIdentifier: String,
+    val status: String,
 )
 
 @Serializable
@@ -91,6 +106,7 @@ data class VehicleLocationDto(
     @SerialName("recorded_at") val recordedAt: String,
     @SerialName("updated_at") val updatedAt: String? = null,
     @SerialName("heading_degrees") val headingDegrees: Float? = null,
+    @SerialName("location_fix_at") val locationFixAt: String? = null,
 )
 
 @Serializable

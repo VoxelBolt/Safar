@@ -20,8 +20,13 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -92,6 +97,9 @@ private const val ROUTE_STATION_CIRCLE_LAYER_ID = "safar-route-station-circle-la
 private const val ROUTE_STATION_LABEL_LAYER_ID = "safar-route-station-label-layer"
 private const val USER_HEADING_SOURCE_ID = "safar-user-heading-source"
 private const val USER_HEADING_LAYER_ID = "safar-user-heading-layer"
+private const val USER_ACCURACY_SOURCE_ID = "safar-user-accuracy-source"
+private const val USER_ACCURACY_FILL_LAYER_ID = "safar-user-accuracy-fill-layer"
+private const val USER_ACCURACY_OUTLINE_LAYER_ID = "safar-user-accuracy-outline-layer"
 private const val USER_LOCATION_SOURCE_ID = "safar-user-location-source"
 private const val VEHICLE_HEADING_SOURCE_ID = "safar-vehicle-heading-source"
 private const val VEHICLE_HEADING_LAYER_ID = "safar-vehicle-heading-layer"
@@ -110,11 +118,16 @@ private const val DEFAULT_LATITUDE = 40.2829
 private const val DEFAULT_LONGITUDE = 69.6228
 private const val DEFAULT_ZOOM = 12.0
 private const val USER_FOCUS_ZOOM = 16.0
+private const val FOLLOW_CAMERA_ANIMATION_MS = 650
+private const val USER_ACCURACY_RADIUS_METERS = 27.5
+private const val USER_MARKER_OUTER_RADIUS_PIXELS = 8.25f
+private const val MAX_MAP_ZOOM = 20.5
 
 @Composable
 internal fun PassengerMapView(
     route: Route?,
     passengerLocation: GeoPoint?,
+    locationAccuracyMeters: Double? = null,
     headingDegrees: Float?,
     locationPermissionGranted: Boolean,
     locateRequestId: Long = 0L,
@@ -146,8 +159,18 @@ internal fun PassengerMapView(
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
     var styleReady by remember { mutableStateOf(false) }
     var initialCameraSet by remember { mutableStateOf(false) }
+    var cameraIdleRevision by remember { mutableLongStateOf(0L) }
+    var accuracyCircleNeeded by remember { mutableStateOf(false) }
+    val latestPassengerLocation by rememberUpdatedState(passengerLocation)
+    val latestLocationAccuracy by rememberUpdatedState(locationAccuracyMeters)
+    val accuracyCircleProgress by animateFloatAsState(
+        targetValue = if (accuracyCircleNeeded) 1f else 0f,
+        animationSpec = tween(durationMillis = 450, easing = FastOutSlowInEasing),
+        label = "user-accuracy-circle-growth",
+    )
     val darkMode = LocalSafarDarkMode.current
     var centeredOnUser by remember { mutableStateOf(false) }
+    var followingUser by remember { mutableStateOf(false) }
     var lastCameraRouteId by remember { mutableStateOf<String?>(null) }
     val vehicleLocationStabilizer = remember(route?.id) { VehicleLocationStabilizer() }
     val stabilizedVehicleLocations = vehicleLocationStabilizer.stabilize(vehicleLocations)
@@ -285,10 +308,23 @@ internal fun PassengerMapView(
                     getMapAsync { loadedMap ->
                         map = loadedMap
                         loadedMap.addOnCameraIdleListener {
+                            accuracyCircleNeeded = shouldShowAccuracyCircle(
+                                map = loadedMap,
+                                mapView = this,
+                                point = latestPassengerLocation,
+                                accuracyMeters = latestLocationAccuracy,
+                            )
+                            cameraIdleRevision += 1L
                             loadedMap.cameraPosition.target?.let { target ->
                                 onMapCenterChanged(GeoPoint(target.latitude, target.longitude))
                             }
                         }
+                        loadedMap.addOnCameraMoveStartedListener { reason ->
+                            if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
+                                followingUser = false
+                            }
+                        }
+                        loadedMap.setMaxZoomPreference(MAX_MAP_ZOOM)
                         loadedMap.uiSettings.isCompassEnabled = false
                         loadedMap.uiSettings.isScrollGesturesEnabled = true
                         loadedMap.uiSettings.isZoomGesturesEnabled = true
@@ -313,8 +349,20 @@ internal fun PassengerMapView(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            MapControlButton("⌖") {
-                onLocateUser()
+            MapControlButton("⌖", active = followingUser) {
+                if (followingUser) {
+                    followingUser = false
+                } else {
+                    followingUser = true
+                    onLocateUser()
+                    passengerLocation?.let { point ->
+                        val zoom = maxOf(map?.cameraPosition?.zoom ?: DEFAULT_ZOOM, USER_FOCUS_ZOOM)
+                        map?.animateCamera(
+                            CameraUpdateFactory.newLatLngZoom(LatLng(point.latitude, point.longitude), zoom),
+                            FOLLOW_CAMERA_ANIMATION_MS,
+                        )
+                    }
+                }
             }
             MapControlButton("+") {
                 map?.animateCamera(CameraUpdateFactory.zoomIn())
@@ -336,6 +384,46 @@ internal fun PassengerMapView(
     LaunchedEffect(styleReady, passengerLocation) {
         if (!styleReady) return@LaunchedEffect
         map?.style?.let { style -> updateUserLocation(style, passengerLocation) }
+    }
+
+    LaunchedEffect(map, passengerLocation, locationAccuracyMeters) {
+        val loadedMap = map ?: return@LaunchedEffect
+        accuracyCircleNeeded = shouldShowAccuracyCircle(
+            map = loadedMap,
+            mapView = mapView,
+            point = passengerLocation,
+            accuracyMeters = locationAccuracyMeters,
+        )
+    }
+
+    LaunchedEffect(
+        styleReady,
+        passengerLocation,
+        locationAccuracyMeters,
+        accuracyCircleProgress,
+        cameraIdleRevision,
+    ) {
+        if (!styleReady) return@LaunchedEffect
+        map?.style?.let { style ->
+            updateUserAccuracy(
+                style = style,
+                map = map,
+                mapView = mapView,
+                point = passengerLocation,
+                accuracyMeters = locationAccuracyMeters,
+                expansion = accuracyCircleProgress,
+            )
+        }
+    }
+
+    LaunchedEffect(styleReady, accuracyCircleProgress) {
+        if (!styleReady) return@LaunchedEffect
+        map?.style?.let { style ->
+            style.getLayerAs<FillLayer>(USER_ACCURACY_FILL_LAYER_ID)
+                ?.setProperties(fillOpacity(accuracyCircleProgress * 0.18f))
+            style.getLayerAs<LineLayer>(USER_ACCURACY_OUTLINE_LAYER_ID)
+                ?.setProperties(lineOpacity(accuracyCircleProgress * 0.72f))
+        }
     }
 
     LaunchedEffect(styleReady, passengerLocation, headingDegrees) {
@@ -367,6 +455,17 @@ internal fun PassengerMapView(
                 LatLng(passengerLocation.latitude, passengerLocation.longitude),
                 USER_FOCUS_ZOOM,
             )
+        )
+        centeredOnUser = true
+    }
+
+    LaunchedEffect(styleReady, followingUser, passengerLocation) {
+        if (!styleReady || !followingUser) return@LaunchedEffect
+        val point = passengerLocation ?: return@LaunchedEffect
+        val loadedMap = map ?: return@LaunchedEffect
+        loadedMap.animateCamera(
+            CameraUpdateFactory.newLatLng(LatLng(point.latitude, point.longitude)),
+            FOLLOW_CAMERA_ANIMATION_MS,
         )
         centeredOnUser = true
     }
@@ -436,12 +535,13 @@ internal fun PassengerMapView(
 }
 
 @Composable
-private fun MapControlButton(symbol: String, onClick: () -> Unit) {
+private fun MapControlButton(symbol: String, active: Boolean = false, onClick: () -> Unit) {
     val darkMode = LocalSafarDarkMode.current
     androidx.compose.material3.Surface(
         modifier = Modifier.size(46.dp).clickable(onClick = onClick),
         shape = androidx.compose.foundation.shape.CircleShape,
-        color = androidx.compose.material3.MaterialTheme.colorScheme.surface,
+        color = if (active) androidx.compose.material3.MaterialTheme.colorScheme.primary
+            else androidx.compose.material3.MaterialTheme.colorScheme.surface,
         border = BorderStroke(
             1.dp,
             if (darkMode) Color(0xFF343B48) else Color(0xFFE3E9F2),
@@ -451,7 +551,7 @@ private fun MapControlButton(symbol: String, onClick: () -> Unit) {
         Box(contentAlignment = Alignment.Center) {
             androidx.compose.material3.Text(
                 text = symbol,
-                color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
+                color = if (active) Color.White else androidx.compose.material3.MaterialTheme.colorScheme.primary,
                 style = androidx.compose.material3.MaterialTheme.typography.titleLarge,
             )
         }
@@ -478,6 +578,9 @@ private fun setupMapLayers(style: Style, context: Context) {
     }
     if (style.getSource(USER_HEADING_SOURCE_ID) == null) {
         style.addSource(GeoJsonSource(USER_HEADING_SOURCE_ID, FeatureCollection.fromFeatures(emptyArray<Feature>())))
+    }
+    if (style.getSource(USER_ACCURACY_SOURCE_ID) == null) {
+        style.addSource(GeoJsonSource(USER_ACCURACY_SOURCE_ID, FeatureCollection.fromFeatures(emptyArray<Feature>())))
     }
     if (style.getSource(USER_LOCATION_SOURCE_ID) == null) {
         style.addSource(GeoJsonSource(USER_LOCATION_SOURCE_ID, FeatureCollection.fromFeatures(emptyArray<Feature>())))
@@ -579,8 +682,8 @@ private fun setupMapLayers(style: Style, context: Context) {
         style.addLayer(
             CircleLayer(USER_LOCATION_PULSE_LAYER_ID, USER_LOCATION_SOURCE_ID).withProperties(
                 circleColor(SafarBlue.toArgb()),
-                circleRadius(16f),
-                circleOpacity(0.16f),
+                circleRadius(11f),
+                circleOpacity(0.12f),
             )
         )
     }
@@ -599,14 +702,29 @@ private fun setupMapLayers(style: Style, context: Context) {
     // style load: pulse -> compass sector -> location dot. Do not rely on relative
     // insertion order left over from the initial style setup.
     style.getLayer(USER_HEADING_LAYER_ID)?.let { style.removeLayer(it) }
+    style.getLayer(USER_ACCURACY_OUTLINE_LAYER_ID)?.let { style.removeLayer(it) }
+    style.getLayer(USER_ACCURACY_FILL_LAYER_ID)?.let { style.removeLayer(it) }
     style.getLayer(USER_LOCATION_CIRCLE_LAYER_ID)?.let { style.removeLayer(it) }
     style.getLayer(USER_LOCATION_PULSE_LAYER_ID)?.let { style.removeLayer(it) }
 
     style.addLayer(
+        FillLayer(USER_ACCURACY_FILL_LAYER_ID, USER_ACCURACY_SOURCE_ID).withProperties(
+            fillColor(SafarBlue.toArgb()),
+            fillOpacity(0f),
+        )
+    )
+    style.addLayer(
+        LineLayer(USER_ACCURACY_OUTLINE_LAYER_ID, USER_ACCURACY_SOURCE_ID).withProperties(
+            lineColor(Color.White.toArgb()),
+            lineWidth(1.5f),
+            lineOpacity(0f),
+        )
+    )
+    style.addLayer(
         CircleLayer(USER_LOCATION_PULSE_LAYER_ID, USER_LOCATION_SOURCE_ID).withProperties(
             circleColor(SafarBlue.toArgb()),
-            circleRadius(16f),
-            circleOpacity(0.16f),
+            circleRadius(11f),
+            circleOpacity(0.12f),
         )
     )
     style.addLayer(
@@ -691,6 +809,93 @@ private fun updateUserLocation(style: Style, point: GeoPoint?) {
     )
 }
 
+private fun updateUserAccuracy(
+    style: Style,
+    map: MapLibreMap?,
+    mapView: MapView,
+    point: GeoPoint?,
+    accuracyMeters: Double?,
+    expansion: Float,
+) {
+    val source = style.getSourceAs<GeoJsonSource>(USER_ACCURACY_SOURCE_ID) ?: return
+    val loadedMap = map
+    if (point == null || loadedMap == null || expansion <= 0f) {
+        source.setGeoJson(FeatureCollection.fromFeatures(emptyArray<Feature>()))
+        return
+    }
+
+    val radiusMeters = accuracyRegionRadiusMeters(accuracyMeters)
+    val markerGroundRadius = markerGroundRadiusMeters(loadedMap, point, mapView)
+        ?.coerceAtMost(radiusMeters)
+        ?: radiusMeters
+    // Animate outward from the visible blue dot, but stop at the 25–30 m
+    // uncertainty region. The geographic radius never grows beyond that area;
+    // map projection makes it naturally larger on screen as the user zooms in.
+    val animatedRadiusMeters = markerGroundRadius + (radiusMeters - markerGroundRadius) * expansion
+    val earthRadiusMeters = 6_371_000.0
+    val latitudeRadians = Math.toRadians(point.latitude)
+    val angularRadius = animatedRadiusMeters / earthRadiusMeters
+    val ring = (0..48).map { step ->
+        val bearing = 2.0 * Math.PI * step / 48.0
+        val latitude = Math.asin(
+            Math.sin(latitudeRadians) * Math.cos(angularRadius) +
+                Math.cos(latitudeRadians) * Math.sin(angularRadius) * Math.cos(bearing)
+        )
+        val longitude = Math.toRadians(point.longitude) + Math.atan2(
+            Math.sin(bearing) * Math.sin(angularRadius) * Math.cos(latitudeRadians),
+            Math.cos(angularRadius) - Math.sin(latitudeRadians) * Math.sin(latitude),
+        )
+        Point.fromLngLat(Math.toDegrees(longitude), Math.toDegrees(latitude))
+    }
+    source.setGeoJson(
+        FeatureCollection.fromFeature(
+            Feature.fromGeometry(Polygon.fromLngLats(listOf(ring)))
+        )
+    )
+}
+
+private fun shouldShowAccuracyCircle(
+    map: MapLibreMap,
+    mapView: MapView,
+    point: GeoPoint?,
+    accuracyMeters: Double?,
+): Boolean {
+    if (point == null) return false
+    val markerGroundRadius = markerGroundRadiusMeters(map, point, mapView) ?: return false
+    return markerGroundRadius < accuracyRegionRadiusMeters(accuracyMeters)
+}
+
+private fun markerGroundRadiusMeters(map: MapLibreMap, point: GeoPoint, mapView: MapView): Double? {
+    if (mapView.width <= 0 || mapView.height <= 0) return null
+    return runCatching {
+        val markerCenter = map.projection.toScreenLocation(LatLng(point.latitude, point.longitude))
+        val markerEdge = map.projection.fromScreenLocation(
+            PointF(
+                markerCenter.x + USER_MARKER_OUTER_RADIUS_PIXELS * mapView.resources.displayMetrics.density,
+                markerCenter.y,
+            )
+        )
+        distanceMeters(point.latitude, point.longitude, markerEdge.latitude, markerEdge.longitude)
+    }.getOrNull()
+}
+
+private fun accuracyRegionRadiusMeters(accuracyMeters: Double?): Double =
+    accuracyMeters?.takeIf { it.isFinite() && it > 0.0 }
+        ?.coerceIn(25.0, 30.0)
+        ?: USER_ACCURACY_RADIUS_METERS
+
+private fun distanceMeters(startLatitude: Double, startLongitude: Double, endLatitude: Double, endLongitude: Double): Double {
+    val earthRadiusMeters = 6_371_000.0
+    val latitudeDelta = Math.toRadians(endLatitude - startLatitude)
+    val longitudeDelta = Math.toRadians(endLongitude - startLongitude)
+    val startLatitudeRadians = Math.toRadians(startLatitude)
+    val endLatitudeRadians = Math.toRadians(endLatitude)
+    val haversine = kotlin.math.sin(latitudeDelta / 2.0) * kotlin.math.sin(latitudeDelta / 2.0) +
+        kotlin.math.cos(startLatitudeRadians) * kotlin.math.cos(endLatitudeRadians) *
+        kotlin.math.sin(longitudeDelta / 2.0) * kotlin.math.sin(longitudeDelta / 2.0)
+    return 2.0 * earthRadiusMeters * kotlin.math.asin(kotlin.math.sqrt(haversine.coerceIn(0.0, 1.0)))
+}
+
 private fun updateRoute(style: Style, route: Route?, opacity: Float) {
     val source = style.getSourceAs<GeoJsonSource>(ROUTE_SOURCE_ID) ?: return
     val path = route?.path.orEmpty()
@@ -734,8 +939,8 @@ private fun updateHeadingSector(style: Style, center: GeoPoint?, headingDegrees:
     // Keep the passenger's blue direction cone visible even when the compass
     // has not supplied a heading yet; use north as the temporary fallback.
     val visibleHeading = headingDegrees?.takeIf { it.isFinite() } ?: 0f
-    val radius = 0.0009
-    val halfAngle = 30.0
+    val radius = 0.00065
+    val halfAngle = 24.0
     val points = mutableListOf<Point>()
     points += Point.fromLngLat(center.longitude, center.latitude)
     for (step in 0..12) {

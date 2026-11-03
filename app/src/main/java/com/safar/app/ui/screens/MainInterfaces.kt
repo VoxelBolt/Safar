@@ -124,6 +124,7 @@ fun PassengerMainScreen(state: OnboardingState, onLanguageSelected: (String) -> 
     var tab by remember { mutableStateOf(PassengerTab.MAP) }
     val mapViewModel: PassengerMapViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val favoriteViewModel: FavoriteViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    val lifecycleOwner = LocalLifecycleOwner.current
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
@@ -137,6 +138,18 @@ fun PassengerMainScreen(state: OnboardingState, onLanguageSelected: (String) -> 
         mapViewModel.loadRoutes()
         mapViewModel.refreshLocationPermissionState()
         favoriteViewModel.load()
+    }
+
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner, mapViewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                // Location permission can change in Android Settings while the
+                // map remains in the back stack. Reconcile the GPS stream on return.
+                mapViewModel.refreshLocationPermissionState()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     Scaffold(
@@ -208,6 +221,7 @@ private fun PassengerMapScreen(
             PassengerMapView(
                 route = ui.selectedRoute,
                 passengerLocation = ui.passengerLocation,
+                locationAccuracyMeters = ui.passengerLocationAccuracyMeters,
                 headingDegrees = ui.headingDegrees,
                 locationPermissionGranted = !ui.locationPermissionRequired,
                 locateRequestId = ui.locateRequestId,
@@ -773,6 +787,7 @@ fun DriverMainScreen(state: OnboardingState, onLanguageSelected: (String) -> Uni
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var foregroundLocationGranted by remember { mutableStateOf(hasForegroundLocationPermission(context)) }
+    var notificationPermissionRequested by rememberSaveable { mutableStateOf(false) }
     // Driver GPS tracking is independent from the Work Session timer. A driver
     // with location permission and an assigned route stays visible to passengers
     // even after Pause/Finish.
@@ -787,6 +802,9 @@ fun DriverMainScreen(state: OnboardingState, onLanguageSelected: (String) -> Uni
             hasForegroundLocationPermission(context)
         // GPS publishing starts as soon as the driver has permission and an assigned route; it is not tied to the timer.
     }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* Location sharing continues even if notification permission is denied. */ }
 
     androidx.compose.runtime.DisposableEffect(lifecycleOwner, trackingReady) {
         val observer = LifecycleEventObserver { _, event ->
@@ -797,7 +815,7 @@ fun DriverMainScreen(state: OnboardingState, onLanguageSelected: (String) -> Uni
                 // state stayed unchanged, the old LaunchedEffect would not fire
                 // again. This keeps driver GPS publishing self-healing.
                 if (trackingReady && hasForegroundLocationPermission(context)) {
-                    runCatching { DriverLocationService.start(context) }
+                    runCatching { DriverLocationService.start(context, ui.driver?.userId, ui.driver?.routeId) }
                 }
             }
         }
@@ -818,7 +836,14 @@ fun DriverMainScreen(state: OnboardingState, onLanguageSelected: (String) -> Uni
 
     LaunchedEffect(trackingReady) {
         if (trackingReady) {
-            runCatching { DriverLocationService.start(context) }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                !notificationPermissionRequested &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) {
+                notificationPermissionRequested = true
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            runCatching { DriverLocationService.start(context, ui.driver?.userId, ui.driver?.routeId) }
         }
     }
 
@@ -965,28 +990,13 @@ private fun DriverHomeScreen(
 
     val driverLocationProvider = remember(context) { AndroidLocationProvider(context.applicationContext) }
     var driverLocation by remember { mutableStateOf<GeoPoint?>(null) }
+    var driverLocationAccuracyMeters by remember { mutableStateOf<Double?>(null) }
     // Null means the compass has not produced a measured angle yet. Keep this
     // nullable for publishing so a placeholder north angle is never sent to Supabase.
     var driverHeadingDegrees by remember { mutableStateOf<Float?>(null) }
     var driverLocateRequestId by remember { mutableLongStateOf(0L) }
     var passengerFocusPoint by remember { mutableStateOf<GeoPoint?>(null) }
     var passengerFocusRequestId by remember { mutableLongStateOf(0L) }
-
-    // The foreground DriverLocationService is the single publisher to Supabase.
-    // The screen only consumes GPS for its own blue marker. A second 5-second
-    // publisher here duplicated database writes and realtime broadcasts, increasing
-    // load and allowing older fixes to race with the service's newer coordinates.
-    LaunchedEffect(ui.driver?.routeId, foregroundLocationGranted) {
-        if (ui.driver?.routeId == null || !foregroundLocationGranted) return@LaunchedEffect
-        while (true) {
-            driverLocationProvider.currentLocationSample { sample ->
-                if (sample != null) {
-                    driverLocation = sample.point
-                }
-            }
-            delay(5_000L)
-        }
-    }
 
     // Compass sensors do not require location permission. Keep the driver's
     // direction sector alive independently from GPS permission/state so it cannot
@@ -1013,30 +1023,26 @@ private fun DriverHomeScreen(
             return@LaunchedEffect
         }
 
-        driverLocationProvider.lastKnownLocation { point ->
-            if (point != null) driverLocation = point
-        }
-        driverLocationProvider.currentLocation { point ->
-            if (point != null) {
-                driverLocation = point
-            }
+        // DriverHomeScreen is removed from composition when the user opens
+        // another tab. Re-seed the blue dot from Android's fresh cached fix
+        // immediately on return instead of waiting for the next movement update.
+        driverLocationProvider.lastKnownDisplayLocation { cachedPoint ->
+            if (cachedPoint != null) driverLocation = cachedPoint
         }
 
-        try {
-            driverLocationProvider.locations().collect { point ->
-                driverLocation = point
-            }
-        } catch (error: CancellationException) {
-            throw error
-        } catch (_: Exception) {
-            while (true) {
-                driverLocationProvider.currentLocation { point ->
-                    if (point != null) {
-                        driverLocation = point
-                    }
+        while (true) {
+            try {
+                driverLocationProvider.displayLocationSamples().collect { sample ->
+                    driverLocation = sample.point
+                    driverLocationAccuracyMeters = sample.accuracyMeters
                 }
-                delay(2_000L)
+                android.util.Log.w("SafarDriverLocation", "Location stream ended; retrying")
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                android.util.Log.w("SafarDriverLocation", "Location stream failed; retrying", error)
             }
+            delay(1_000L)
         }
     }
 
@@ -1061,18 +1067,14 @@ private fun DriverHomeScreen(
         PassengerMapView(
             route = ui.selectedRoute,
             passengerLocation = driverLocation,
+            locationAccuracyMeters = driverLocationAccuracyMeters,
             // Keep the direction sector visible while the compass initializes.
             // Actual measured readings replace this temporary north fallback.
             headingDegrees = driverHeadingDegrees ?: 0f,
             locationPermissionGranted = foregroundLocationGranted,
             locateRequestId = driverLocateRequestId,
             onLocateUser = {
-                driverLocationProvider.currentLocation { point ->
-                    if (point != null) {
-                        driverLocation = point
-                        driverLocateRequestId += 1L
-                    }
-                }
+                if (driverLocation != null) driverLocateRequestId += 1L
             },
             vehicleLocations = ui.activeVehicles
                 .filter { vehicle ->
@@ -1205,7 +1207,7 @@ private fun DriverHomeScreen(
                     if (darkMode) {
                         SafarGlyph(Glyph.MOON, Color(0xFFBBD2FF), 25.dp)
                     } else {
-                        SafarGlyph(Glyph.SETTINGS, SafarBlue, 23.dp)
+                        SafarGlyph(Glyph.SUN, SafarBlue, 25.dp)
                     }
                 }
             }
@@ -1246,6 +1248,14 @@ private fun DriverHomeScreen(
             shadowElevation = 8.dp,
         ) {
             Column(Modifier.padding(horizontal = 14.dp, vertical = if (timerPanelExpanded) 12.dp else 8.dp)) {
+                if (ui.driverApplication != null || ui.driver?.verified == false) {
+                    Text(
+                        stringResource(R.string.driver_pending_approval),
+                        color = Muted,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    )
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(shape = CircleShape, color = if (status == WorkSessionStatus.ACTIVE) SuccessSoft else SoftBlue) {
                         Box(Modifier.size(10.dp))
@@ -1300,19 +1310,19 @@ private fun DriverHomeScreen(
                     when (status) {
                         WorkSessionStatus.NOT_STARTED, WorkSessionStatus.COMPLETED ->
                             PrimaryActionButton(if (status == WorkSessionStatus.COMPLETED) stringResource(R.string.start_new_work) else stringResource(R.string.start_work),
-                                Glyph.PLAY, enabled = !ui.actionInProgress) {
+                                Glyph.PLAY, enabled = !ui.actionInProgress && ui.driver?.verified == true) {
                                 // Backend session state controls the button and timer.
                                 // Do not start a local countdown before startWork succeeds.
                                 onStartWork()
                             }
                         WorkSessionStatus.ACTIVE -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            SecondaryActionButton(stringResource(R.string.pause_work), Glyph.PAUSE, Modifier.weight(1f), enabled = !ui.actionInProgress) {
+                            SecondaryActionButton(stringResource(R.string.pause_work), Glyph.PAUSE, Modifier.weight(1f), enabled = !ui.actionInProgress && ui.driver?.verified == true) {
                                 tripTimerPausedRemainingMs = (tripTimerDeadlineMs - System.currentTimeMillis()).coerceAtLeast(0L)
                                 tripTimerEnabled = false
                                 timerPrefs.edit().putBoolean("enabled", false).putLong("paused_remaining_ms", tripTimerPausedRemainingMs).apply()
                                 onPauseWork()
                             }
-                            PrimaryActionButton(stringResource(R.string.finish_work), Glyph.CHECK, Modifier.weight(1f), enabled = !ui.actionInProgress) {
+                            PrimaryActionButton(stringResource(R.string.finish_work), Glyph.CHECK, Modifier.weight(1f), enabled = !ui.actionInProgress && ui.driver?.verified == true) {
                                 tripTimerEnabled = false
                                 tripTimerPausedRemainingMs = 0L
                                 tripTimerDeadlineMs = 0L
@@ -1321,7 +1331,7 @@ private fun DriverHomeScreen(
                             }
                         }
                         WorkSessionStatus.PAUSED -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            PrimaryActionButton(stringResource(R.string.continue_work), Glyph.PLAY, Modifier.weight(1f), enabled = !ui.actionInProgress) {
+                            PrimaryActionButton(stringResource(R.string.continue_work), Glyph.PLAY, Modifier.weight(1f), enabled = !ui.actionInProgress && ui.driver?.verified == true) {
                                 val remaining = tripTimerPausedRemainingMs.takeIf { it > 0L } ?: tripTimerDurationMinutes * 60_000L
                                 tripTimerDeadlineMs = System.currentTimeMillis() + remaining
                                 tripTimerEnabled = true
@@ -1329,7 +1339,7 @@ private fun DriverHomeScreen(
                                 timerPrefs.edit().putBoolean("enabled", true).putLong("deadline_ms", tripTimerDeadlineMs).putLong("paused_remaining_ms", 0L).apply()
                                 onResumeWork()
                             }
-                            SecondaryActionButton(stringResource(R.string.finish_work), Glyph.CHECK, Modifier.weight(1f), enabled = !ui.actionInProgress) {
+                            SecondaryActionButton(stringResource(R.string.finish_work), Glyph.CHECK, Modifier.weight(1f), enabled = !ui.actionInProgress && ui.driver?.verified == true) {
                                 tripTimerEnabled = false
                                 tripTimerPausedRemainingMs = 0L
                                 tripTimerDeadlineMs = 0L

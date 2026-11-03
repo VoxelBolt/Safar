@@ -1,12 +1,15 @@
 package com.safar.app.data.remote
 
 import com.safar.app.domain.model.Driver
+import com.safar.app.domain.model.DriverApplication
+import com.safar.app.domain.model.DriverLocationFix
 import com.safar.app.domain.model.FavoriteVehicle
 import com.safar.app.domain.model.Route
 import com.safar.app.domain.model.User
 import com.safar.app.domain.model.Vehicle
 import com.safar.app.domain.model.VehicleLocation
 import com.safar.app.domain.model.WorkSession
+import com.safar.app.domain.model.WorkSessionSummary
 
 /**
  * Backend boundary used by repositories.
@@ -22,13 +25,14 @@ interface SafarApi {
     suspend fun signOut()
 
     suspend fun registerPassenger(name: String, phone: String): User
-    suspend fun registerDriver(name: String, phone: String, vehicleIdentifier: String): Driver
+    suspend fun registerDriver(name: String, phone: String, vehicleIdentifier: String, routeId: String): DriverApplication
     suspend fun assignDriverRoute(routeId: String): Driver
 
     suspend fun getRoutes(): List<Route>
     suspend fun getRoute(routeId: String): Route?
     suspend fun getVehiclesForRoute(routeId: String): List<Vehicle>
-    suspend fun getAllVehicles(): List<Vehicle>
+    suspend fun getAllVehicles(offset: Int = 0, limit: Int = 50): List<Vehicle>
+    suspend fun getVehiclesByIds(vehicleIds: List<String>): List<Vehicle>
     suspend fun getActiveVehiclesForRoute(routeId: String): List<Vehicle>
 
     suspend fun getFavoriteVehicles(): List<FavoriteVehicle>
@@ -36,12 +40,19 @@ interface SafarApi {
     suspend fun removeFavoriteVehicle(vehicleId: String)
 
     suspend fun getDriver(): Driver?
+    suspend fun getDriverApplication(): DriverApplication?
     suspend fun getCurrentWorkSession(): WorkSession?
     suspend fun startWorkSession(): WorkSession
     suspend fun pauseWorkSession(sessionId: String): WorkSession
     suspend fun resumeWorkSession(sessionId: String): WorkSession
     suspend fun finishWorkSession(sessionId: String): WorkSession
-    suspend fun getWorkSessionHistory(startEpochMs: Long? = null, endEpochMs: Long? = null): List<WorkSession>
+    suspend fun getWorkSessionHistory(
+        startEpochMs: Long? = null,
+        endEpochMs: Long? = null,
+        offset: Int = 0,
+        limit: Int = 50,
+    ): List<WorkSession>
+    suspend fun getWorkSessionSummary(startEpochMs: Long? = null, endEpochMs: Long? = null): WorkSessionSummary
 
     suspend fun submitVehicleLocation(
         latitude: Double,
@@ -49,4 +60,5 @@ interface SafarApi {
         recordedAtIso: String? = null,
         headingDegrees: Float? = null,
     ): VehicleLocation
+    suspend fun submitVehicleLocationBatch(locations: List<DriverLocationFix>)
 }

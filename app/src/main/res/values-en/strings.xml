@@ -120,6 +120,7 @@
     <string name="ok">OK</string>
     <string name="verified">Verified</string>
     <string name="not_verified">Not verified</string>
+    <string name="driver_pending_approval">Your profile is awaiting administrator approval. Work sessions and location sharing are unavailable for now.</string>
     <string name="notifications_info">Notification settings will be available in a later MVP version.</string>
     <string name="help_info">If the map or data does not load, check your connection and tap Retry.</string>
     <string name="about_info">Safar is an app for tracking city transport.</string>
@@ -127,6 +128,8 @@
     <string name="statistics_empty_title">Not enough data</string>
     <string name="statistics_empty_subtitle">Finish a work session to see statistics.</string>
     <string name="statistics_sessions_count">Work sessions: %1$d</string>
+    <string name="favorites_load_more">Load more</string>
+    <string name="statistics_load_more">Load more sessions</string>
     <string name="work_duration_format">%1$d h %2$02d min</string>
     <string name="distance_km_format">%.1f km</string>
     <string name="distance_m_format">%1$d m</string>
@@ -134,4 +137,8 @@
     <string name="location_stale">Location is stale</string>
 
     <string name="passengers_waiting">Waiting for route %1$s: %2$d</string>
+    <string name="driver_location_title">Location access</string>
+    <string name="driver_location_description">Allow location access so passengers can see your vehicle on the map. Location sharing starts automatically after permission is granted.</string>
+    <string name="allow_location">Allow</string>
+    <string name="driver_route_load_error">Could not load routes.</string>
 </resources>

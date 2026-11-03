@@ -154,8 +154,8 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
                                     name = current.name.trim(),
                                     phone = current.phone.trim(),
                                     vehicleIdentifier = current.vehicleIdentifier.trim(),
+                                    routeId = routeId,
                                 )
-                                driverRepository.assignRoute(routeId)
                             }
                         }
                     }
@@ -194,6 +194,8 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
             .lowercase()
 
         return when {
+            "user role is already passenger" in chain ->
+                "Эта сессия уже зарегистрирована как пассажир. Для регистрации водителем нужно изменить роль аккаунта."
             "users_phone_unique" in chain ||
                 ("duplicate key value violates unique constraint" in chain && "phone" in chain) ->
                 "Этот номер телефона уже зарегистрирован. Используйте другой номер."

@@ -15,33 +15,77 @@ data class LocationSample(
     val point: GeoPoint,
     val timestampEpochMs: Long,
     val accuracyMeters: Double? = null,
+    val speedMetersPerSecond: Double? = null,
+    val speedAccuracyMetersPerSecond: Double? = null,
+    val provider: String? = null,
 )
 
 /**
  * Filters transient GPS drift before coordinates reach the map or Supabase.
  * Poor fixes are discarded, small stationary movement is held in place, and
- * larger jumps must be confirmed by consistent fixes before being accepted.
+ * movement outside a fix's accuracy radius must be confirmed by a coherent path.
  */
 internal class LocationStabilizer(
-    private val stationaryDeadbandMeters: Double = 7.0,
-    private val maxTrustedAccuracyMeters: Double = 25.0,
-    private val jumpThresholdMeters: Double = 12.0,
-    private val jumpConfirmationMs: Long = 2_500L,
+    private val stationaryDeadbandMeters: Double = 8.0,
+    private val maxTrustedAccuracyMeters: Double = 20.0,
+    private val maxMovementFixAccuracyMeters: Double = 20.0,
+    private val accuracyDeadbandFactor: Double = 1.0,
+    private val maxAccuracyDeadbandMeters: Double = 20.0,
+    private val requiredConsecutiveMovingSteps: Int = 3,
+    private val maxPlausibleSpeedMetersPerSecond: Double = 22.2,
+    private val movementAccuracyFactor: Double = 1.0,
+    private val minMovementThresholdMeters: Double = 8.0,
+    private val maxMovementThresholdMeters: Double = 25.0,
+    private val allowAccurateFixReanchor: Boolean = false,
 ) {
     private data class Candidate(
         val point: GeoPoint,
-        val startedAtMs: Long,
-        val count: Int,
+        val lastPoint: GeoPoint,
+        val lastTimestampEpochMs: Long,
         val accuracyMeters: Double?,
+        val movementStartPoint: GeoPoint? = null,
+        val consecutiveMovingSteps: Int = 0,
+        val consistentFixCount: Int = 1,
     )
 
-    private companion object {
-        const val MAX_PLAUSIBLE_SPEED_METERS_PER_SECOND = 35.0
-        const val MAX_MOVEMENT_FIX_ACCURACY_METERS = 25.0
+    /** Separate, stricter filter for the driver's local map marker. */
+    companion object {
+        private const val MIN_DIRECTIONAL_STEP_METERS = 0.75
+        private const val MAX_STATIONARY_SPEED_ACCURACY_METERS_PER_SECOND = 1.0
+        private const val MAX_STATIONARY_SPEED_UPPER_BOUND_METERS_PER_SECOND = 0.75
+        private const val MAX_LIKELY_STATIONARY_SPEED_METERS_PER_SECOND = 0.25
+        private const val MAX_LIKELY_STATIONARY_SPEED_ACCURACY_METERS_PER_SECOND = 2.0
+        private const val MAX_DISPLAY_ACCURACY_METERS = 250.0
+        private const val MAX_MOVEMENT_ACCURACY_METERS = 30.0
+        private const val ACCURATE_REANCHOR_ACCURACY_METERS = 30.0
+        private const val REQUIRED_ACCURATE_REANCHOR_FIXES = 3
+
+        fun display() = LocationStabilizer(
+            // A blue dot is still useful with Android's approximate permission
+            // or an indoor fix. This filter is display-only; the odometer keeps
+            // the stricter 20 m limit from the default constructor.
+            stationaryDeadbandMeters = 4.0,
+            maxTrustedAccuracyMeters = MAX_DISPLAY_ACCURACY_METERS,
+            // Coarse location can seed the visible dot, but only precise fixes
+            // can move it or contribute to the driver's odometer.
+            maxMovementFixAccuracyMeters = MAX_MOVEMENT_ACCURACY_METERS,
+            accuracyDeadbandFactor = 0.2,
+            maxAccuracyDeadbandMeters = 6.0,
+            // The display stream is not the odometer. Two coherent fixes make
+            // the blue dot respond sooner while the strict tracking stream
+            // still requires three fixes before adding distance.
+            requiredConsecutiveMovingSteps = 2,
+            maxPlausibleSpeedMetersPerSecond = 22.2,
+            movementAccuracyFactor = 0.5,
+            minMovementThresholdMeters = 4.0,
+            maxMovementThresholdMeters = 10.0,
+            allowAccurateFixReanchor = true,
+        )
     }
 
     private var accepted: LocationSample? = null
     private var candidate: Candidate? = null
+    private var likelyStationaryFixCount = 0
 
     @Synchronized
     fun filter(sample: LocationSample): LocationSample? {
@@ -61,8 +105,52 @@ internal class LocationStabilizer(
 
         // Cached/out-of-order samples must not pull the marker backwards.
         if (sample.timestampEpochMs > 0L && previous.timestampEpochMs > 0L &&
-            sample.timestampEpochMs < previous.timestampEpochMs - 2_000L
+            sample.timestampEpochMs < previous.timestampEpochMs
         ) return previous
+
+        val previousAccuracy = previous.accuracyMeters
+        if (allowAccurateFixReanchor && accuracy != null &&
+            accuracy <= ACCURATE_REANCHOR_ACCURACY_METERS &&
+            previousAccuracy != null && previousAccuracy >= 30.0 &&
+            distanceMeters(previous.point, sample.point) > maxOf(stationaryDeadbandMeters, accuracy * 0.5)
+        ) {
+            // A coarse first fix can be far from the real position. Wait for a
+            // small cluster of precise samples before correcting the display
+            // marker, and do not count that correction as travelled distance.
+            val oldCandidate = candidate
+            val consistencyRadius = maxOf(3.0, minOf(6.0, accuracy * 0.35))
+            val matchesCluster = oldCandidate != null &&
+                distanceMeters(oldCandidate.point, sample.point) <= consistencyRadius
+            val consistentFixCount = if (matchesCluster) oldCandidate.consistentFixCount + 1 else 1
+            if (consistentFixCount >= REQUIRED_ACCURATE_REANCHOR_FIXES) {
+                accepted = sample
+                candidate = null
+                return sample
+            }
+            candidate = Candidate(
+                point = if (matchesCluster) blend(oldCandidate.point, sample.point, 0.5) else sample.point,
+                lastPoint = sample.point,
+                lastTimestampEpochMs = sample.timestampEpochMs,
+                accuracyMeters = accuracy,
+                consistentFixCount = consistentFixCount,
+            )
+            return previous
+        }
+
+        // GNSS Doppler speed is much less sensitive to position jitter than
+        // subtracting two coordinates. A speed fix whose entire uncertainty
+        // interval is near zero is strong evidence that the phone is stationary.
+        likelyStationaryFixCount = if (sample.isLikelyStationary()) likelyStationaryFixCount + 1 else 0
+        if (sample.isConfidentlyStationary() || likelyStationaryFixCount >= 2) {
+            candidate = null
+            val held = sample.copy(
+                point = previous.point,
+                timestampEpochMs = maxOf(previous.timestampEpochMs, sample.timestampEpochMs),
+                accuracyMeters = previous.accuracyMeters,
+            )
+            accepted = held
+            return held
+        }
 
         // Accuracy is a radius estimate, not a guarantee. Do not let a poor fix
         // move the map when a reasonably accurate position has already been found.
@@ -72,95 +160,170 @@ internal class LocationStabilizer(
         }
 
         val distance = distanceMeters(previous.point, sample.point)
-        val elapsedMs = (sample.timestampEpochMs - previous.timestampEpochMs).coerceAtLeast(0L)
         val deadband = maxOf(
             stationaryDeadbandMeters,
-            minOf(12.0, (accuracy ?: 8.0) * 0.65),
+            minOf(maxAccuracyDeadbandMeters, (accuracy ?: 8.0) * accuracyDeadbandFactor),
         )
 
-        if (distance <= deadband) {
+        val oldCandidate = candidate
+        if (distance <= deadband && oldCandidate == null) {
             candidate = null
-            // Small movements are usually stationary GPS noise. However, if the
-            // new fix reports materially better horizontal accuracy, let it gently
-            // correct the held point instead of preserving an older, less accurate
-            // position indefinitely.
-            val previousAccuracy = previous.accuracyMeters
-            val currentAccuracy = sample.accuracyMeters
-            val improvedAccuracy = currentAccuracy != null &&
-                (previousAccuracy == null || currentAccuracy <= previousAccuracy * 0.75)
-            val correctedPoint = if (improvedAccuracy) {
-                blend(previous.point, sample.point, 0.35)
-            } else {
-                previous.point
-            }
+            // Keep the movement baseline fixed while fixes wobble inside their
+            // accuracy radius. Advancing it on every noisy fix turns GPS drift
+            // into a random walk and inflates the odometer.
             val held = sample.copy(
-                point = correctedPoint,
+                point = previous.point,
                 timestampEpochMs = maxOf(previous.timestampEpochMs, sample.timestampEpochMs),
+                accuracyMeters = previous.accuracyMeters,
             )
             accepted = held
             return held
         }
 
-        if (distance >= jumpThresholdMeters) {
-            val now = sample.timestampEpochMs.takeIf { it > 0L } ?: System.currentTimeMillis()
-            val elapsedForSpeedMs = (sample.timestampEpochMs - previous.timestampEpochMs).coerceAtLeast(0L)
-            val speedMetersPerSecond = if (elapsedForSpeedMs >= 500L) {
-                distance / (elapsedForSpeedMs / 1000.0)
-            } else {
-                Double.POSITIVE_INFINITY
-            }
+        if (oldCandidate == null) {
+            // Retain sub-deadband steps as a path candidate. Dropping each one
+            // independently meant a person walking slowly could never build
+            // enough displacement to move the marker or odometer.
+            if (distance < MIN_DIRECTIONAL_STEP_METERS) return previous
+            candidate = Candidate(
+                point = sample.point,
+                lastPoint = sample.point,
+                lastTimestampEpochMs = sample.timestampEpochMs,
+                accuracyMeters = accuracy,
+            )
+            return previous
+        }
 
-            // A real driver can move more than 12 m between GPS fixes. The old
-            // confirmation-only path reset its candidate on every such fix, so a
-            // moving vehicle could remain stuck at its first coordinate forever.
-            // Trust a fresh, accurate fix when its implied speed is physically
-            // plausible; reserve multi-fix confirmation for likely GPS outliers.
-            if (elapsedForSpeedMs in 500L..10_000L &&
-                speedMetersPerSecond <= MAX_PLAUSIBLE_SPEED_METERS_PER_SECOND &&
-                (accuracy == null || accuracy <= MAX_MOVEMENT_FIX_ACCURACY_METERS)
-            ) {
-                candidate = null
+        val stepDistance = distanceMeters(oldCandidate.lastPoint, sample.point)
+        val stepElapsedMs = (sample.timestampEpochMs - oldCandidate.lastTimestampEpochMs).coerceAtLeast(0L)
+        val stepSpeed = if (stepElapsedMs >= 500L) stepDistance / (stepElapsedMs / 1000.0) else Double.POSITIVE_INFINITY
+        val plausibleStep = stepDistance >= MIN_DIRECTIONAL_STEP_METERS &&
+            stepElapsedMs in 500L..10_000L &&
+            stepSpeed <= maxPlausibleSpeedMetersPerSecond &&
+            (accuracy == null || accuracy <= maxMovementFixAccuracyMeters)
+
+        if (plausibleStep) {
+            val directionStart = oldCandidate.movementStartPoint
+            val continuesDirection = directionStart != null &&
+                isDirectionallyConsistent(directionStart, oldCandidate.lastPoint, sample.point)
+            val movementSteps = if (continuesDirection) oldCandidate.consecutiveMovingSteps + 1 else 1
+            // Speed can confirm that the phone is moving, but a single GPS
+            // coordinate can still be an outlier. Always require the position
+            // path to be confirmed by the configured number of fixes.
+            val requiredSteps = requiredConsecutiveMovingSteps
+            val moving = oldCandidate.copy(
+                point = sample.point,
+                lastPoint = sample.point,
+                lastTimestampEpochMs = sample.timestampEpochMs,
+                accuracyMeters = bestAccuracy(oldCandidate.accuracyMeters, accuracy),
+                movementStartPoint = oldCandidate.lastPoint,
+                consecutiveMovingSteps = movementSteps,
+                consistentFixCount = 1,
+            )
+            val cumulativeDistance = distanceMeters(previous.point, sample.point)
+            val uncertainty = maxOf(accuracy ?: 8.0, previous.accuracyMeters ?: 0.0)
+            val movementThreshold = maxOf(
+                minMovementThresholdMeters,
+                minOf(maxMovementThresholdMeters, uncertainty * movementAccuracyFactor),
+            )
+            if (movementSteps >= requiredSteps && cumulativeDistance >= movementThreshold) {
                 accepted = sample
+                // Keep the confirmed path alive while direction and speed stay
+                // coherent. Clearing it here made each next fix start a new
+                // confirmation sequence, so the display marker appeared to lag
+                // by several more seconds even after movement was established.
+                candidate = moving
+                return sample
+            }
+            candidate = moving
+            return previous
+        }
+
+        val consistencyRadius = maxOf(3.0, minOf(6.0, (accuracy ?: 8.0) * 0.35))
+        val consistentPosition = distanceMeters(oldCandidate.point, sample.point) <= consistencyRadius
+        if (consistentPosition) {
+            val consistentFixCount = oldCandidate.consistentFixCount + 1
+            val previousAccuracy = previous.accuracyMeters
+            val materiallyBetterFix = allowAccurateFixReanchor &&
+                consistentFixCount >= REQUIRED_ACCURATE_REANCHOR_FIXES &&
+                accuracy != null && accuracy <= ACCURATE_REANCHOR_ACCURACY_METERS &&
+                (previousAccuracy == null ||
+                    previousAccuracy >= 30.0 && accuracy <= previousAccuracy * 0.5)
+            if (materiallyBetterFix) {
+                // A coarse first fix can be tens or hundreds of metres away.
+                // Re-anchor to a much better, repeatedly confirmed fix without
+                // counting that correction as travelled distance.
+                accepted = sample
+                candidate = null
                 return sample
             }
 
-            val oldCandidate = candidate
-            val candidateDistance = oldCandidate?.let { distanceMeters(it.point, sample.point) } ?: Double.MAX_VALUE
-            val consistencyRadius = maxOf(6.0, minOf(10.0, (accuracy ?: 8.0) * 0.5))
-            val consistent = oldCandidate != null && candidateDistance <= consistencyRadius
-            candidate = if (consistent && oldCandidate != null) {
-                oldCandidate.copy(
-                    point = blend(oldCandidate.point, sample.point, 0.5),
-                    count = oldCandidate.count + 1,
-                    accuracyMeters = accuracy ?: oldCandidate.accuracyMeters,
-                )
-            } else {
-                Candidate(sample.point, now, 1, accuracy)
-            }
-            val active = candidate ?: return previous
-            if (active.count < 2 || now - active.startedAtMs < jumpConfirmationMs) return previous
-
-            val confirmed = sample.copy(point = active.point)
-            accepted = confirmed
-            candidate = null
-            return confirmed
+            val stationary = oldCandidate.copy(
+                point = blend(oldCandidate.point, sample.point, 0.5),
+                lastPoint = sample.point,
+                lastTimestampEpochMs = sample.timestampEpochMs,
+                accuracyMeters = bestAccuracy(oldCandidate.accuracyMeters, accuracy),
+                movementStartPoint = null,
+                consecutiveMovingSteps = 0,
+                consistentFixCount = consistentFixCount,
+            )
+            candidate = stationary
+            // Repeated fixes at a shifted coordinate are not evidence of travel:
+            // GPS can settle at a wrong location and stay there. Only the moving
+            // path branch above is allowed to advance the odometer baseline.
+            return previous
         }
 
-        candidate = null
-        // Smooth plausible movement; relax the filter over longer sample intervals
-        // so a moving driver does not trail too far behind.
-        // Do not average the current fix with the previous position here: that
-        // creates a persistent positional lag and can leave the marker 20–30 m
-        // behind/aside even when the incoming fix is better. Only outlier jumps
-        // are delayed above; plausible movement uses the measured coordinate.
-        accepted = sample
-        return sample
+        candidate = Candidate(
+            point = sample.point,
+            lastPoint = sample.point,
+            lastTimestampEpochMs = sample.timestampEpochMs,
+            accuracyMeters = accuracy,
+        )
+        return previous
     }
 
     private fun blend(from: GeoPoint, to: GeoPoint, alpha: Double) = GeoPoint(
         latitude = from.latitude + (to.latitude - from.latitude) * alpha,
         longitude = from.longitude + (to.longitude - from.longitude) * alpha,
     )
+
+    private fun bestAccuracy(first: Double?, second: Double?): Double? =
+        listOfNotNull(first, second).minOrNull()
+
+    private fun LocationSample.isConfidentlyStationary(): Boolean {
+        val speed = speedMetersPerSecond ?: return false
+        val speedAccuracy = speedAccuracyMetersPerSecond ?: return false
+        return speed.isFinite() && speedAccuracy.isFinite() && speed >= 0.0 &&
+            speedAccuracy in 0.0..MAX_STATIONARY_SPEED_ACCURACY_METERS_PER_SECOND &&
+            speed + speedAccuracy <= MAX_STATIONARY_SPEED_UPPER_BOUND_METERS_PER_SECOND
+    }
+
+    private fun LocationSample.isLikelyStationary(): Boolean {
+        val speed = speedMetersPerSecond ?: return false
+        val speedAccuracy = speedAccuracyMetersPerSecond ?: return false
+        return speed.isFinite() && speedAccuracy.isFinite() && speed >= 0.0 &&
+            speedAccuracy in 0.0..MAX_LIKELY_STATIONARY_SPEED_ACCURACY_METERS_PER_SECOND &&
+            speed <= MAX_LIKELY_STATIONARY_SPEED_METERS_PER_SECOND
+    }
+
+    private fun isDirectionallyConsistent(start: GeoPoint, middle: GeoPoint, end: GeoPoint): Boolean {
+        val first = localVectorMeters(start, middle)
+        val second = localVectorMeters(middle, end)
+        val firstLength = kotlin.math.hypot(first.first, first.second)
+        val secondLength = kotlin.math.hypot(second.first, second.second)
+        if (firstLength < MIN_DIRECTIONAL_STEP_METERS || secondLength < MIN_DIRECTIONAL_STEP_METERS) return false
+        val cosine = (first.first * second.first + first.second * second.second) / (firstLength * secondLength)
+        return cosine >= 0.5
+    }
+
+    private fun localVectorMeters(from: GeoPoint, to: GeoPoint): Pair<Double, Double> {
+        val earthRadius = 6_371_000.0
+        val averageLatitude = Math.toRadians((from.latitude + to.latitude) / 2.0)
+        val north = Math.toRadians(to.latitude - from.latitude) * earthRadius
+        val east = Math.toRadians(to.longitude - from.longitude) * earthRadius * kotlin.math.cos(averageLatitude)
+        return east to north
+    }
 
     private fun distanceMeters(a: GeoPoint, b: GeoPoint): Double {
         val earthRadius = 6_371_000.0

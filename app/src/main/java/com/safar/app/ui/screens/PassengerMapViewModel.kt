@@ -10,8 +10,9 @@ import android.provider.Settings
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.google.android.gms.location.LocationServices
+import android.os.SystemClock
 import com.safar.app.data.location.AndroidLocationProvider
+import com.safar.app.data.realtime.RealtimeRetryPolicy
 import com.safar.app.data.realtime.RealtimeTransport
 import com.safar.app.di.AppContainer
 import com.safar.app.domain.model.GeoPoint
@@ -21,7 +22,7 @@ import com.safar.app.domain.model.VehicleLocation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
@@ -29,11 +30,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import java.time.Instant
+import kotlin.random.Random
 
 data class PassengerMapUiState(
     val routes: List<Route> = emptyList(),
@@ -41,6 +44,7 @@ data class PassengerMapUiState(
     val selectedRoute: Route? = null,
     val activeVehicles: List<Vehicle> = emptyList(),
     val passengerLocation: GeoPoint? = null,
+    val passengerLocationAccuracyMeters: Double? = null,
     // Last map camera position. Used only as a fallback when Android has no GPS fix (for example on an emulator).
     val mapCenterLocation: GeoPoint? = GeoPoint(40.2829, 69.6228),
     val headingDegrees: Float? = null,
@@ -62,6 +66,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     private val vehicleRepository = AppContainer.vehicleRepository
     private val realtimeTransport: RealtimeTransport = AppContainer.realtimeTransport
     private val locationProvider = AndroidLocationProvider(application)
+    private val vehicleMarkerFreshness = VehicleMarkerFreshness()
 
     private val _uiState = MutableStateFlow(PassengerMapUiState())
     val uiState: StateFlow<PassengerMapUiState> = _uiState.asStateFlow()
@@ -211,7 +216,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
 
     private suspend fun awaitFreshPassengerLocation(): GeoPoint? =
         suspendCancellableCoroutine { continuation ->
-            locationProvider.currentLocationSample { sample ->
+            locationProvider.currentDisplayLocationSample { sample ->
                 val point = sample?.point
                 if (continuation.isActive && point != null) {
                     continuation.resume(point)
@@ -246,6 +251,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             nearestVehicleTrackingEnabled = true,
             error = null,
         )
+        vehicleMarkerFreshness.clear()
         loadVehicles(route)
         startVehicleLocationPolling(route.id)
         if (oldRouteId != null && oldRouteId != route.id) {
@@ -268,6 +274,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                     vehicleRepository.getActiveVehiclesForRoute(route.id)
                 }
                 val fresh = freshVehicles(vehicles)
+                vehicleMarkerFreshness.observeSnapshot(fresh, SystemClock.elapsedRealtime())
                 _uiState.value = _uiState.value.copy(
                     activeVehicles = fresh,
                     loadingVehicles = false,
@@ -295,11 +302,16 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         vehicleLocationPollingJob?.cancel()
         vehicleLocationPollingJob = viewModelScope.launch {
             while (isActive && _uiState.value.selectedRoute?.id == routeId) {
+                // Route selection already performs an immediate initial fetch.
+                // Let Realtime carry live movement and use polling as recovery.
+                delay(VEHICLE_POLL_INTERVAL_MS)
+                if (!isActive || _uiState.value.selectedRoute?.id != routeId) break
                 try {
                     val vehicles = withTimeout(BACKEND_REQUEST_TIMEOUT_MS) {
                         vehicleRepository.getActiveVehiclesForRoute(routeId)
                     }
                     val active = freshVehicles(vehicles)
+                    vehicleMarkerFreshness.observeSnapshot(active, SystemClock.elapsedRealtime())
                     _uiState.value = _uiState.value.copy(activeVehicles = active, error = null)
                     if (_uiState.value.nearestVehicleTrackingEnabled) {
                         (_uiState.value.passengerLocation ?: _uiState.value.mapCenterLocation)?.let { updateNearestVehicle(it, active) }
@@ -311,50 +323,112 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                 } catch (error: Exception) {
                     android.util.Log.w("SafarVehicle", "poll failed; next retry will run after the polling interval", error)
                 }
-                delay(VEHICLE_POLL_INTERVAL_MS)
             }
         }
     }
     private fun switchRealtime(routeId: String) {
         realtimeJob?.cancel()
         passengerPublishJob?.cancel()
-        realtimeTransport.disconnect()
         realtimeJob = viewModelScope.launch {
-            try {
-                realtimeTransport.connect(routeId)
-                // Passenger position is transient route-scoped Broadcast data, never persisted.
-                passengerPublishJob?.cancel()
-                passengerPublishJob = viewModelScope.launch {
-                    while (isActive && _uiState.value.selectedRoute?.id == routeId) {
-                        val now = System.currentTimeMillis()
-                        val state = _uiState.value
-                        val point = state.passengerLocation
-                        if (!state.locationPermissionRequired && point != null && lastPassengerFixAtMs > 0L &&
-                            now - lastPassengerFixAtMs in 0L..PASSENGER_FIX_MAX_AGE_MS) {
-                            runCatching {
-                                realtimeTransport.sendPassengerLocation(
-                                    routeId = routeId,
-                                    latitude = point.latitude,
-                                    longitude = point.longitude,
-                                    recordedAtIso = Instant.ofEpochMilli(now).toString(),
-                                )
-                            }.onFailure { error ->
-                                android.util.Log.w("SafarPassenger", "Location broadcast failed", error)
+            var attempt = 0
+            while (isActive && _uiState.value.selectedRoute?.id == routeId) {
+                try {
+                    withTimeout(BACKEND_REQUEST_TIMEOUT_MS) {
+                        realtimeTransport.connect(routeId, receivePassengerLocations = false)
+                    }
+                    val connected = withTimeoutOrNull(BACKEND_REQUEST_TIMEOUT_MS) {
+                        realtimeTransport.connectionState.first { it.routeId == routeId && it.subscribed }
+                    } ?: error("Realtime подписка не подтвердилась вовремя")
+                    startPassengerLocationPublishing(routeId)
+                    refreshVehiclesAfterReconnect(routeId)
+
+                    coroutineScope {
+                        launch {
+                            realtimeTransport.vehicleEvents.collectLatest { event ->
+                                applyRealtimeEvent(event.vehicleId, event.routeId, event.location)
                             }
                         }
-                        delay(PASSENGER_BROADCAST_INTERVAL_MS)
+                        var lastEpoch = connected.epoch
+                        var stableSinceElapsedMs = SystemClock.elapsedRealtime()
+                        while (isActive && _uiState.value.selectedRoute?.id == routeId) {
+                            val disconnected = realtimeTransport.connectionState.first {
+                                it.routeId != routeId || !it.subscribed
+                            }
+                            val recovered = withTimeoutOrNull(REALTIME_SDK_RECOVERY_GRACE_MS) {
+                                realtimeTransport.connectionState.first {
+                                    it.routeId == routeId && it.subscribed && it.epoch > lastEpoch
+                                }
+                            }
+                            if (recovered == null) {
+                                android.util.Log.w("SafarRealtime", "Channel did not recover for route $routeId")
+                                break
+                            }
+                            lastEpoch = recovered.epoch
+                            if (SystemClock.elapsedRealtime() - stableSinceElapsedMs >= REALTIME_STABLE_RESET_MS) {
+                                attempt = 0
+                            }
+                            stableSinceElapsedMs = SystemClock.elapsedRealtime()
+                            refreshVehiclesAfterReconnect(routeId)
+                            if (disconnected.routeId == null) break
+                        }
                     }
-                }
-                realtimeTransport.vehicleEvents.collectLatest { event ->
-                    applyRealtimeEvent(event.vehicleId, event.routeId, event.location)
-                }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                if (currentCoroutineContext().isActive) {
+                    attempt += 1
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    android.util.Log.w("SafarRealtime", "Passenger map Realtime connection failed", error)
                     _uiState.value = _uiState.value.copy(error = error.message ?: "Realtime недоступен")
+                    attempt += 1
+                }
+                if (isActive && _uiState.value.selectedRoute?.id == routeId) {
+                    delay(RealtimeRetryPolicy.delayMs(attempt.coerceAtLeast(1), Random.nextDouble(0.75, 1.25)))
                 }
             }
+        }
+    }
+
+    private fun startPassengerLocationPublishing(routeId: String) {
+        if (passengerPublishJob?.isActive == true) return
+        passengerPublishJob = viewModelScope.launch {
+            while (isActive && _uiState.value.selectedRoute?.id == routeId) {
+                val now = System.currentTimeMillis()
+                val state = _uiState.value
+                val point = state.passengerLocation
+                if (!state.locationPermissionRequired && point != null && lastPassengerFixAtMs > 0L &&
+                    state.passengerLocationAccuracyMeters?.let { it <= LOCATION_BROADCAST_MAX_ACCURACY_METERS } == true &&
+                    now - lastPassengerFixAtMs in 0L..PASSENGER_FIX_MAX_AGE_MS) {
+                    runCatching {
+                        realtimeTransport.sendPassengerLocation(
+                            routeId = routeId,
+                            latitude = point.latitude,
+                            longitude = point.longitude,
+                            recordedAtIso = Instant.ofEpochMilli(now).toString(),
+                        )
+                    }.onFailure { error ->
+                        android.util.Log.w("SafarPassenger", "Location broadcast failed", error)
+                    }
+                }
+                delay(PASSENGER_BROADCAST_INTERVAL_MS)
+            }
+        }
+    }
+
+    private suspend fun refreshVehiclesAfterReconnect(routeId: String) {
+        try {
+            val vehicles = withTimeout(BACKEND_REQUEST_TIMEOUT_MS) {
+                vehicleRepository.getActiveVehiclesForRoute(routeId)
+            }
+            if (_uiState.value.selectedRoute?.id != routeId) return
+            val active = freshVehicles(vehicles)
+            vehicleMarkerFreshness.observeSnapshot(active, SystemClock.elapsedRealtime())
+            _uiState.value = _uiState.value.copy(activeVehicles = active, error = null)
+            if (_uiState.value.nearestVehicleTrackingEnabled) {
+                (_uiState.value.passengerLocation ?: _uiState.value.mapCenterLocation)?.let { updateNearestVehicle(it, active) }
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            android.util.Log.w("SafarRealtime", "Vehicle snapshot refresh after reconnect failed", error)
         }
     }
 
@@ -365,16 +439,27 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         // A realtime event is emitted by the database after a successful GPS write;
         // trust the server timestamp rather than comparing clocks on two devices.
         if (location == null) {
-            // A realtime "removed" event can be transient during reconnects or
-            // channel resubscription. Removing the marker immediately causes it
-            // to blink while the database still reports the vehicle as active.
-            // Keep the last known position; the freshness-filtered database poll
-            // below is the authority that eventually expires genuinely stale buses.
+            vehicleMarkerFreshness.remove(vehicleId)
+            val active = _uiState.value.activeVehicles.filterNot { it.id == vehicleId }
+            val nearest = _uiState.value.nearestVehicle?.takeIf { it.id != vehicleId }
+            _uiState.value = _uiState.value.copy(
+                activeVehicles = active,
+                nearestVehicle = nearest,
+                nearestVehicleDistanceMeters = if (nearest == null) null else _uiState.value.nearestVehicleDistanceMeters,
+                nearestVehicleEtaMinutes = if (nearest == null) null else _uiState.value.nearestVehicleEtaMinutes,
+            )
+            if (nearest == null && _uiState.value.nearestVehicleTrackingEnabled) {
+                (_uiState.value.passengerLocation ?: _uiState.value.mapCenterLocation)?.let {
+                    updateNearestVehicle(it, active)
+                }
+            }
             return
         }
 
         val currentVehicle = _uiState.value.activeVehicles.firstOrNull { it.id == vehicleId }
         if (currentVehicle != null) {
+            if ((currentVehicle.currentLocation?.timestampEpochMs ?: Long.MIN_VALUE) > location.timestampEpochMs) return
+            vehicleMarkerFreshness.observeRealtime(vehicleId, SystemClock.elapsedRealtime())
             // Some GPS-only broadcasts or cached database rows may omit heading.
             // Do not let such a packet reset a previously measured live rotation to north.
             val effectiveLocation = if (location.headingDegrees == null) {
@@ -398,6 +483,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             runCatching { vehicleRepository.getActiveVehiclesForRoute(selectedRoute.id) }
                 .onSuccess { vehicles ->
                     val active = freshVehicles(vehicles)
+                    vehicleMarkerFreshness.observeSnapshot(active, SystemClock.elapsedRealtime())
                     _uiState.value = _uiState.value.copy(activeVehicles = active, error = null)
                     if (_uiState.value.nearestVehicleTrackingEnabled) {
                         (_uiState.value.passengerLocation ?: _uiState.value.mapCenterLocation)?.let { updateNearestVehicle(it, active) }
@@ -459,10 +545,10 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             while (isActive) {
                 delay(STALE_SWEEP_INTERVAL_MS)
                 val current = _uiState.value
-                val active = freshVehicles(current.activeVehicles)
-                // Do not age server-confirmed vehicles using the passenger phone's
-                // clock. The 10-second server poll removes vehicles when the
-                // database's one-minute freshness window expires.
+                val active = vehicleMarkerFreshness.retainFresh(
+                    current.activeVehicles,
+                    SystemClock.elapsedRealtime(),
+                )
                 if (active.size != current.activeVehicles.size) {
                     val activeIds = active.mapTo(mutableSetOf()) { it.id }
                     val nearest = current.nearestVehicle?.takeIf { it.id in activeIds }
@@ -472,15 +558,16 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                         nearestVehicleDistanceMeters = if (nearest != null) current.nearestVehicleDistanceMeters else null,
                         nearestVehicleEtaMinutes = if (nearest != null) current.nearestVehicleEtaMinutes else null,
                     )
+                    if (nearest == null && current.nearestVehicleTrackingEnabled) {
+                        (current.passengerLocation ?: current.mapCenterLocation)?.let {
+                            updateNearestVehicle(it, active)
+                        }
+                    }
                 }
             }
         }
     }
 
-    // Freshness is calculated by PostgreSQL in vehicle_current_locations using
-    // server time. Filtering these rows again with the phone clock caused valid
-    // drivers to disappear when a device clock was ahead of the server.
-    //
     // Realtime heading events can arrive between polling snapshots. If a backend
     // response omits heading_degrees (for example during a schema/cache transition),
     // do not let that null erase the last measured compass angle and freeze the
@@ -491,9 +578,11 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             .filter { it.active && it.currentLocation != null }
             .map { vehicle ->
                 val location = vehicle.currentLocation ?: return@map vehicle
-                val previousHeading = previousById[vehicle.id]?.currentLocation?.headingDegrees
-                if (location.headingDegrees == null && previousHeading != null) {
-                    vehicle.copy(currentLocation = location.copy(headingDegrees = previousHeading))
+                val previousLocation = previousById[vehicle.id]?.currentLocation
+                if (previousLocation != null && previousLocation.timestampEpochMs > location.timestampEpochMs) {
+                    vehicle.copy(currentLocation = previousLocation)
+                } else if (location.headingDegrees == null && previousLocation?.headingDegrees != null) {
+                    vehicle.copy(currentLocation = location.copy(headingDegrees = previousLocation.headingDegrees))
                 } else {
                     vehicle
                 }
@@ -504,11 +593,13 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         _uiState.value = _uiState.value.copy(locationPermissionRequired = !granted)
         if (granted) {
             startLocationUpdates()
-            requestCurrentLocation(centerCamera = false)
         } else {
             stopLocationUpdates()
             lastPassengerFixAtMs = 0L
-            _uiState.value = _uiState.value.copy(passengerLocation = null)
+            _uiState.value = _uiState.value.copy(
+                passengerLocation = null,
+                passengerLocationAccuracyMeters = null,
+            )
             _uiState.value.selectedRoute?.id?.let { routeId ->
                 viewModelScope.launch { runCatching { realtimeTransport.removePassengerLocation(routeId) } }
             }
@@ -518,24 +609,33 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     fun refreshLocationPermissionState() {
         val granted = hasLocationPermission()
         _uiState.value = _uiState.value.copy(locationPermissionRequired = !granted)
-        if (granted) startLocationUpdates()
+        if (granted) {
+            startLocationUpdates()
+        } else if (locationJob?.isActive == true || _uiState.value.passengerLocation != null) {
+            stopLocationUpdates()
+            lastPassengerFixAtMs = 0L
+            _uiState.value = _uiState.value.copy(
+                passengerLocation = null,
+                passengerLocationAccuracyMeters = null,
+            )
+            _uiState.value.selectedRoute?.id?.let { routeId ->
+                viewModelScope.launch { runCatching { realtimeTransport.removePassengerLocation(routeId) } }
+            }
+        }
     }
 
     private fun startLocationUpdates() {
         if (locationJob?.isActive == true) return
-        locationProvider.lastKnownLocation { point ->
-            if (point != null) {
-                lastPassengerFixAtMs = System.currentTimeMillis()
-                _uiState.value = _uiState.value.copy(passengerLocation = point)
-                if (_uiState.value.nearestVehicleTrackingEnabled) updateNearestVehicle(point, _uiState.value.activeVehicles)
-            }
-        }
         requestCurrentLocation(centerCamera = false)
         locationJob = viewModelScope.launch {
             try {
-                locationProvider.locations().collectLatest { point ->
+                locationProvider.displayLocationSamples().collectLatest { sample ->
+                    val point = sample.point
                     lastPassengerFixAtMs = System.currentTimeMillis()
-                    _uiState.value = _uiState.value.copy(passengerLocation = point)
+                    _uiState.value = _uiState.value.copy(
+                        passengerLocation = point,
+                        passengerLocationAccuracyMeters = sample.accuracyMeters,
+                    )
                     if (_uiState.value.nearestVehicleTrackingEnabled) updateNearestVehicle(point, _uiState.value.activeVehicles)
                 }
             } catch (error: CancellationException) {
@@ -569,25 +669,14 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
 
     private fun requestCurrentLocation(centerCamera: Boolean) {
         if (!hasLocationPermission()) return
-        locationProvider.currentLocationSample { sample ->
+        locationProvider.currentDisplayLocationSample { sample ->
             if (sample != null) {
                 lastPassengerFixAtMs = System.currentTimeMillis()
                 _uiState.value = _uiState.value.copy(
                     passengerLocation = sample.point,
+                    passengerLocationAccuracyMeters = sample.accuracyMeters,
                     locateRequestId = if (centerCamera) _uiState.value.locateRequestId + 1L else _uiState.value.locateRequestId,
                 )
-            } else {
-                LocationServices.getFusedLocationProviderClient(getApplication<Application>())
-                    .lastLocation
-                    .addOnSuccessListener { location ->
-                        if (location != null) {
-                            lastPassengerFixAtMs = System.currentTimeMillis()
-                            _uiState.value = _uiState.value.copy(
-                                passengerLocation = GeoPoint(location.latitude, location.longitude),
-                                locateRequestId = if (centerCamera) _uiState.value.locateRequestId + 1L else _uiState.value.locateRequestId,
-                            )
-                        }
-                    }
             }
         }
     }
@@ -615,15 +704,6 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
 
         locateRequestJob?.cancel()
         locateRequestJob = viewModelScope.launch {
-            locationProvider.lastKnownLocation { point ->
-                if (point != null) {
-                    lastPassengerFixAtMs = System.currentTimeMillis()
-                    _uiState.value = _uiState.value.copy(
-                        passengerLocation = point,
-                        locateRequestId = _uiState.value.locateRequestId + 1L,
-                    )
-                }
-            }
             requestCurrentLocation(centerCamera = true)
             delay(750L)
             requestCurrentLocation(centerCamera = true)
@@ -640,7 +720,6 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         vehicleRefreshJob?.cancel()
         realtimeTransport.disconnect()
         nearestVehicleRequestJob?.cancel()
-        super.onCleared()
     }
 
     private fun hasLocationPermission(): Boolean =
@@ -649,9 +728,11 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     private companion object {
         const val BACKEND_REQUEST_TIMEOUT_MS = 15_000L
         const val VEHICLE_POLL_INTERVAL_MS = 10_000L
-        const val LOCATION_FRESHNESS_MS = 5 * 60_000L
         const val STALE_SWEEP_INTERVAL_MS = 5_000L
         const val PASSENGER_BROADCAST_INTERVAL_MS = 5_000L
         const val PASSENGER_FIX_MAX_AGE_MS = 15_000L
+        const val LOCATION_BROADCAST_MAX_ACCURACY_METERS = 20.0
+        const val REALTIME_SDK_RECOVERY_GRACE_MS = 20_000L
+        const val REALTIME_STABLE_RESET_MS = 120_000L
     }
 }

@@ -17,6 +17,8 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.safar.app.R
 import com.safar.app.di.AppContainer
+import com.safar.app.domain.model.Driver
+import com.safar.app.domain.model.DriverLocationFix
 import kotlinx.coroutines.delay
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.sync.Mutex
@@ -32,6 +34,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.io.File
 import java.time.Instant
 
 class DriverLocationService : Service() {
@@ -45,18 +48,28 @@ class DriverLocationService : Service() {
     @Volatile private var lastPublishedHeadingDegrees: Float? = null
     @Volatile private var lastHeadingPublishRequestAtMs = 0L
     @Volatile private var lastHeadingPublishedAtMs = 0L
+    @Volatile private var lastAcceptedLocation: LocationSample? = null
     private val locationPublishMutex = Mutex()
     private var lastPublishedLocationTimestamp = 0L
     @Volatile private var lastSuccessfulPublishAtMs = 0L
-    private val driverSnapshot = AtomicReference<com.safar.app.domain.model.Driver?>(null)
+    private val driverSnapshot = AtomicReference<Driver?>(null)
     @Volatile private var driverSnapshotLoadedAt = 0L
     @Volatile private var networkAvailable = false
+    @Volatile private var expectedDriverId: String? = null
+    @Volatile private var expectedRouteId: String? = null
+    private val identityPreferences by lazy { getSharedPreferences(IDENTITY_PREFS, Context.MODE_PRIVATE) }
+    private val pendingLocationQueue by lazy {
+        PendingDriverLocationQueue(
+            File(noBackupFilesDir, PENDING_LOCATION_FILE),
+            onCorrupt = { error -> android.util.Log.e(TAG, "Discarded a corrupt pending GPS queue", error) },
+        )
+    }
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
             networkAvailable = true
             updateNotification("Геопозиция передаётся пассажирам")
-            publishCurrentLocationOnce()
+            scope.launch { publishLastAcceptedLocation() }
         }
         override fun onLost(network: Network) {
             networkAvailable = isNetworkAvailable()
@@ -66,6 +79,7 @@ class DriverLocationService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        restoreExpectedDriverIdentity()
         createNotificationChannel()
 
         // Android gives a foreground service started with startForegroundService()
@@ -91,10 +105,16 @@ class DriverLocationService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
             stopPublishing()
+            runCatching { pendingLocationQueue.clear() }
+                .onFailure { android.util.Log.e(TAG, "Could not clear pending GPS fixes on sign out", it) }
+            identityPreferences.edit().clear().apply()
+            expectedDriverId = null
+            expectedRouteId = null
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return START_NOT_STICKY
         }
+        updateExpectedDriverIdentity(intent)
         if (!hasLocationPermission()) {
             updateNotification("Разрешение на геолокацию не предоставлено")
             stopSelf()
@@ -152,7 +172,7 @@ class DriverLocationService : Service() {
                                     now - lastHeadingPublishRequestAtMs >= HEADING_PUBLISH_MIN_INTERVAL_MS
                                 ) {
                                     lastHeadingPublishRequestAtMs = now
-                                    publishCurrentLocationOnce()
+                                    publishLastAcceptedLocation()
                                 }
                             }
                         }
@@ -177,7 +197,7 @@ class DriverLocationService : Service() {
             while (currentCoroutineContext().isActive && hasLocationPermission()) {
                 try {
                     locationProvider.locationSamples().collect { sample ->
-                        if (!networkAvailable || !hasLocationPermission()) return@collect
+                        if (!hasLocationPermission()) return@collect
                         publishLocationSample(sample)
                     }
                 } catch (error: CancellationException) {
@@ -189,13 +209,17 @@ class DriverLocationService : Service() {
             }
         }
 
-        // Safety channel: ask Android for a fresh single fix every few seconds.
+        // Heartbeat the last stabilized coordinate. Requesting another one-shot
+        // fix here mixed fresh fused updates with cached GPS/network fixes and
+        // let source changes inflate the session distance while standing still.
         publishingJob = scope.launch {
             while (currentCoroutineContext().isActive && hasLocationPermission()) {
                 try {
                     if (networkAvailable) {
-                        publishCurrentLocationOnce()
-                        updateNotification("Геопозиция передаётся пассажирам")
+                        publishLastAcceptedLocation()
+                        if (lastAcceptedLocation != null) {
+                            updateNotification("Геопозиция передаётся пассажирам")
+                        }
                     } else {
                         updateNotification("Нет интернета — отправка приостановлена")
                     }
@@ -214,26 +238,6 @@ class DriverLocationService : Service() {
         }
     }
 
-    private fun publishCurrentLocationOnce() {
-        if (!networkAvailable || !hasLocationPermission()) return
-        locationProvider.currentLocationSample { sample ->
-            if (sample == null || !networkAvailable) {
-                android.util.Log.w(TAG, "No fresh current-location sample received")
-                return@currentLocationSample
-            }
-            scope.launch {
-                try {
-                    publishLocationSample(sample)
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (error: Exception) {
-                    android.util.Log.e(TAG, "Driver location publish failed", error)
-                    updateNotification("Не удалось передать координату — повторяю автоматически")
-                }
-            }
-        }
-    }
-
     private suspend fun publishLocationSample(sample: LocationSample) {
         val timestampEpochMs = sample.timestampEpochMs
         if (timestampEpochMs <= 0L) return
@@ -249,98 +253,192 @@ class DriverLocationService : Service() {
             return
         }
 
-        // Stream and fallback fixes can arrive concurrently. Serialize them so
-        // the same fix cannot trigger overlapping backend writes.
+        // Serialize location writes, offline queue flushes, compass updates, and
+        // heartbeats so the server always receives monotonically ordered fixes.
         locationPublishMutex.withLock {
-            val publishNow = System.currentTimeMillis()
-            val isNewGpsFix = timestampEpochMs > lastPublishedLocationTimestamp
-            val heading = latestHeadingDegrees
-            val headingChanged = heading != null && (
-                lastPublishedHeadingDegrees == null ||
-                    angularDifferenceDegrees(lastPublishedHeadingDegrees!!, heading) >= HEADING_CHANGE_THRESHOLD_DEGREES
-                )
-            val canPublishHeading = headingChanged &&
-                publishNow - lastHeadingPublishedAtMs >= HEADING_PUBLISH_MIN_INTERVAL_MS
-
-            // Some Android devices repeatedly return the same cached timestamp
-            // while stationary. Refresh that coordinate at the normal GPS
-            // heartbeat interval, otherwise cleanup_expired_location_state()
-            // deletes it after four minutes and passengers see "no active vehicle".
-            val heartbeatDue = !isNewGpsFix &&
-                publishNow - lastSuccessfulPublishAtMs >= PUBLISH_INTERVAL_MS
-
-            if (!isNewGpsFix && !canPublishHeading && !heartbeatDue) return
-
-            // A heartbeat gets a fresh timestamp only when the underlying fix is
-            // still recent. This keeps the server TTL meaningful and allows the
-            // passenger map to continue receiving a stationary driver's marker.
-            val publishTimestamp = if (isNewGpsFix) timestampEpochMs else publishNow
-            val recordedAtIso = Instant.ofEpochMilli(publishTimestamp).toString()
-            publishDriverSample(sample.point.latitude, sample.point.longitude, recordedAtIso)
-
-            lastSuccessfulPublishAtMs = System.currentTimeMillis()
-            if (isNewGpsFix) lastPublishedLocationTimestamp = timestampEpochMs
-            if (heading != null) {
-                lastPublishedHeadingDegrees = heading
-                lastHeadingPublishedAtMs = publishNow
+            lastAcceptedLocation = sample
+            if (!networkAvailable) {
+                enqueuePendingFix(sample)
+                return
             }
-            android.util.Log.d(
-                TAG,
-                "Published driver fix: newGps=" + isNewGpsFix +
-                    " heartbeat=" + heartbeatDue + " heading=" + heading +
-                    " lat=" + sample.point.latitude + " lon=" + sample.point.longitude,
+
+            try {
+                val driver = requireVerifiedDriver()
+                flushPendingFixes(driver)
+                publishAcceptedSample(driver, sample)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                enqueuePendingFix(sample)
+                android.util.Log.w(TAG, "Could not publish GPS fix; queued it for retry", error)
+                updateNotification("Нет соединения с сервером — GPS сохраняется локально")
+            }
+        }
+    }
+
+    private suspend fun publishLastAcceptedLocation() {
+        if (!networkAvailable || !hasLocationPermission()) return
+        locationPublishMutex.withLock {
+            try {
+                val driver = requireVerifiedDriver()
+                flushPendingFixes(driver)
+                val latest = lastAcceptedLocation ?: return
+                val now = System.currentTimeMillis()
+                val fixAgeMs = now - latest.timestampEpochMs
+                // Do not reactivate an old point after an outage. A fresh GPS
+                // callback will make the vehicle active again immediately.
+                if (fixAgeMs < -30_000L || fixAgeMs > MAX_HEARTBEAT_FIX_AGE_MS) return
+                publishAcceptedSample(driver, latest)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                android.util.Log.w(TAG, "Could not restore driver location publishing", error)
+            }
+        }
+    }
+
+    private suspend fun publishAcceptedSample(driver: Driver, sample: LocationSample) {
+        val publishNow = System.currentTimeMillis()
+        val isNewGpsFix = sample.timestampEpochMs > lastPublishedLocationTimestamp
+        val heading = latestHeadingDegrees
+        val headingChanged = heading != null && (
+            lastPublishedHeadingDegrees == null ||
+                angularDifferenceDegrees(lastPublishedHeadingDegrees!!, heading) >= HEADING_CHANGE_THRESHOLD_DEGREES
             )
+        val canPublishHeading = headingChanged &&
+            publishNow - lastHeadingPublishedAtMs >= HEADING_PUBLISH_MIN_INTERVAL_MS
+        val heartbeatDue = !isNewGpsFix &&
+            publishNow - lastSuccessfulPublishAtMs >= PUBLISH_INTERVAL_MS
+
+        if (!isNewGpsFix && !canPublishHeading && !heartbeatDue) return
+
+        val publishTimestamp = if (isNewGpsFix) sample.timestampEpochMs else publishNow
+        AppContainer.driverLocationRepository.submitLocation(
+            latitude = sample.point.latitude,
+            longitude = sample.point.longitude,
+            recordedAtIso = Instant.ofEpochMilli(publishTimestamp).toString(),
+            headingDegrees = heading,
+        )
+
+        lastSuccessfulPublishAtMs = System.currentTimeMillis()
+        if (isNewGpsFix) lastPublishedLocationTimestamp = sample.timestampEpochMs
+        if (heading != null) {
+            lastPublishedHeadingDegrees = heading
+            lastHeadingPublishedAtMs = publishNow
+        }
+        android.util.Log.d(
+            TAG,
+            "Published driver fix: newGps=$isNewGpsFix heartbeat=$heartbeatDue heading=$heading " +
+                "lat=${sample.point.latitude} lon=${sample.point.longitude}",
+        )
+        updateNotification("Геопозиция передаётся пассажирам")
+    }
+
+    private suspend fun requireVerifiedDriver(): Driver {
+        val now = System.currentTimeMillis()
+        val cached = driverSnapshot.get()
+        val identityMismatch = cached != null && (
+            expectedDriverId?.let { it != cached.userId } == true ||
+                expectedRouteId?.let { it != cached.routeId } == true
+            )
+        if (cached == null || identityMismatch || now - driverSnapshotLoadedAt >= DRIVER_REFRESH_MS) {
+            val loaded = AppContainer.driverRepository.getDriver()
+                ?: error("Driver profile not found")
+            driverSnapshot.set(loaded)
+            driverSnapshotLoadedAt = now
+        }
+
+        val driver = driverSnapshot.get() ?: error("Driver profile not found")
+        check(driver.verified) { "Driver is not verified" }
+        val routeId = driver.routeId ?: error("Driver route is not assigned yet")
+        check(expectedDriverId == null || expectedDriverId == driver.userId) {
+            "Authenticated user changed while the GPS service was running"
+        }
+        check(expectedRouteId == null || expectedRouteId == routeId) {
+            "Driver route changed while the GPS service was running"
+        }
+        if (expectedDriverId == null || expectedRouteId == null) {
+            expectedDriverId = driver.userId
+            expectedRouteId = routeId
+            identityPreferences.edit()
+                .putString(EXTRA_DRIVER_ID, driver.userId)
+                .putString(EXTRA_ROUTE_ID, routeId)
+                .apply()
+        }
+        return driver
+    }
+
+    private fun enqueuePendingFix(sample: LocationSample) {
+        val driverId = expectedDriverId ?: driverSnapshot.get()?.userId
+        val routeId = expectedRouteId ?: driverSnapshot.get()?.routeId
+        if (driverId.isNullOrBlank() || routeId.isNullOrBlank()) {
+            android.util.Log.w(TAG, "Cannot persist an offline GPS fix before driver identity and route are known")
+            return
+        }
+        runCatching {
+            pendingLocationQueue.enqueue(
+                driverId = driverId,
+                routeId = routeId,
+                sample = sample,
+                headingDegrees = latestHeadingDegrees,
+                nowEpochMs = System.currentTimeMillis(),
+            )
+        }.onFailure { error ->
+            android.util.Log.e(TAG, "Could not persist pending driver GPS fix", error)
+        }
+    }
+
+    private suspend fun flushPendingFixes(driver: Driver) {
+        val routeId = requireNotNull(driver.routeId)
+        val fixes = pendingLocationQueue.pendingFor(driver.userId, routeId, System.currentTimeMillis())
+        if (fixes.isEmpty()) return
+
+        val batch = fixes.take(MAX_BATCHED_LOCATION_FIXES)
+        AppContainer.driverLocationRepository.submitLocations(
+            batch.map { fix ->
+                DriverLocationFix(
+                    latitude = fix.sample.point.latitude,
+                    longitude = fix.sample.point.longitude,
+                    timestampEpochMs = fix.sample.timestampEpochMs,
+                    headingDegrees = fix.headingDegrees,
+                )
+            },
+        )
+        val lastFix = batch.last()
+        pendingLocationQueue.acknowledgeThrough(driver.userId, routeId, lastFix.sample.timestampEpochMs)
+        lastPublishedLocationTimestamp = maxOf(lastPublishedLocationTimestamp, lastFix.sample.timestampEpochMs)
+        lastSuccessfulPublishAtMs = System.currentTimeMillis()
+        lastPublishedHeadingDegrees = lastFix.headingDegrees
+        lastHeadingPublishedAtMs = lastSuccessfulPublishAtMs
+        android.util.Log.i(TAG, "Uploaded ${batch.size} queued GPS fixes for route $routeId")
+    }
+
+    private fun restoreExpectedDriverIdentity() {
+        expectedDriverId = identityPreferences.getString(EXTRA_DRIVER_ID, null)
+        expectedRouteId = identityPreferences.getString(EXTRA_ROUTE_ID, null)
+    }
+
+    private fun updateExpectedDriverIdentity(intent: Intent?) {
+        val driverId = intent?.getStringExtra(EXTRA_DRIVER_ID)?.takeIf(String::isNotBlank) ?: return
+        val routeId = intent.getStringExtra(EXTRA_ROUTE_ID)?.takeIf(String::isNotBlank) ?: return
+        val changed = expectedDriverId != driverId || expectedRouteId != routeId
+        expectedDriverId = driverId
+        expectedRouteId = routeId
+        identityPreferences.edit()
+            .putString(EXTRA_DRIVER_ID, driverId)
+            .putString(EXTRA_ROUTE_ID, routeId)
+            .apply()
+        if (changed) {
+            driverSnapshot.set(null)
+            driverSnapshotLoadedAt = 0L
+            lastPublishedLocationTimestamp = 0L
+            lastAcceptedLocation = null
         }
     }
 
     private fun angularDifferenceDegrees(a: Float, b: Float): Float {
         val difference = kotlin.math.abs(a - b) % 360f
         return kotlin.math.min(difference, 360f - difference)
-    }
-
-    private suspend fun publishDriverSample(latitude: Double, longitude: Double, recordedAtIso: String?) {
-        val now = System.currentTimeMillis()
-        if (driverSnapshot.get() == null || now - driverSnapshotLoadedAt >= DRIVER_REFRESH_MS) {
-            val driver = AppContainer.driverRepository.getDriver()
-            driverSnapshot.set(driver)
-            driverSnapshotLoadedAt = now
-        }
-        val driver = driverSnapshot.get() ?: error("Driver profile not found")
-        val routeId = driver.routeId ?: error("Driver route is not assigned yet")
-        val timestamp = recordedAtIso ?: Instant.now().toString()
-
-        // The database write is authoritative. Do not broadcast a location to
-        // passengers if saving the current state failed.
-        val savedLocation = AppContainer.driverLocationRepository.submitLocation(
-            latitude = latitude,
-            longitude = longitude,
-            recordedAtIso = timestamp,
-            headingDegrees = latestHeadingDegrees,
-        )
-        // Use the exact heading accepted by the database response. This avoids
-        // broadcasting a local compass value that the backend has not persisted.
-        val publishedHeading = savedLocation.headingDegrees ?: latestHeadingDegrees
-
-        runCatching {
-            AppContainer.realtimeTransport.connect(routeId)
-            AppContainer.realtimeTransport.sendDriverLocation(
-                routeId = routeId,
-                vehicleId = driver.vehicleId,
-                latitude = latitude,
-                longitude = longitude,
-                recordedAtIso = timestamp,
-                headingDegrees = publishedHeading,
-            )
-        }.onFailure { error ->
-            android.util.Log.w(TAG, "Realtime vehicle location broadcast failed", error)
-        }
-
-        android.util.Log.d(
-            TAG,
-            "Vehicle location saved: vehicle=${driver.vehicleId} route=$routeId",
-        )
-
-        updateNotification("Геопозиция передаётся пассажирам")
     }
 
     private fun hasLocationPermission(): Boolean =
@@ -396,13 +494,19 @@ class DriverLocationService : Service() {
         private const val CHANNEL_ID = "driver_location"
         private const val NOTIFICATION_ID = 1001
         private const val ACTION_STOP = "com.safar.app.STOP_DRIVER_LOCATION"
+        private const val EXTRA_DRIVER_ID = "com.safar.app.DRIVER_LOCATION_DRIVER_ID"
+        private const val EXTRA_ROUTE_ID = "com.safar.app.DRIVER_LOCATION_ROUTE_ID"
+        private const val IDENTITY_PREFS = "driver_location_identity"
+        private const val PENDING_LOCATION_FILE = "pending_driver_gps.json"
         private const val DRIVER_REFRESH_MS = 30_000L
         private const val PUBLISH_INTERVAL_MS = 10_000L
         private const val HEADING_CHANGE_THRESHOLD_DEGREES = 4f
         private const val HEADING_PUBLISH_MIN_INTERVAL_MS = 1_000L
         private const val MAX_REUSABLE_FIX_AGE_MS = 3 * 60 * 1_000L
+        private const val MAX_HEARTBEAT_FIX_AGE_MS = 20_000L
+        private const val MAX_BATCHED_LOCATION_FIXES = 100
         private const val TAG = "SafarDriverGPS"
-        fun start(context: Context) {
+        fun start(context: Context, driverId: String? = null, routeId: String? = null) {
             val hasPermission =
                 ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
                     ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -410,9 +514,14 @@ class DriverLocationService : Service() {
                 android.util.Log.w(TAG, "DriverLocationService.start skipped: location permission is not granted")
                 return
             }
+            val intent = Intent(context, DriverLocationService::class.java)
+            if (!driverId.isNullOrBlank() && !routeId.isNullOrBlank()) {
+                intent.putExtra(EXTRA_DRIVER_ID, driverId)
+                intent.putExtra(EXTRA_ROUTE_ID, routeId)
+            }
             ContextCompat.startForegroundService(
                 context,
-                Intent(context, DriverLocationService::class.java),
+                intent,
             )
         }
         fun stop(context: Context) { context.startService(Intent(context, DriverLocationService::class.java).setAction(ACTION_STOP)) }

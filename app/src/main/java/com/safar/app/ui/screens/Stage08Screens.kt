@@ -22,6 +22,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -30,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -48,6 +50,9 @@ import com.safar.app.ui.theme.SafarWhite
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.safar.app.data.location.GpsDiagnosticLog
 
 @Composable
 fun PassengerFavoritesRealScreen(
@@ -76,7 +81,7 @@ fun PassengerFavoritesRealScreen(
 
         when {
             ui.loading -> LoadingMessage()
-            ui.error != null -> ErrorMessage(onRetry = viewModel::retry)
+            ui.error != null && ui.vehicles.isEmpty() -> ErrorMessage(onRetry = viewModel::retry)
             ui.vehicles.isEmpty() -> EmptyState(
                 glyph = Glyph.STAR,
                 title = stringResource(R.string.favorites_empty_title),
@@ -90,6 +95,27 @@ fun PassengerFavoritesRealScreen(
                         isFavorite = true,
                         onToggle = { viewModel.toggle(vehicle) },
                     )
+                }
+                if (ui.error != null) {
+                    item {
+                        Text(
+                            ui.error.orEmpty(),
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+                if (ui.hasMore || ui.loadingMore) {
+                    item {
+                        TextButton(
+                            onClick = viewModel::loadNextPage,
+                            enabled = !ui.loadingMore,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            if (ui.loadingMore) CircularProgressIndicator()
+                            else Text(stringResource(R.string.favorites_load_more))
+                        }
+                    }
                 }
             }
         }
@@ -113,6 +139,13 @@ fun PassengerProfileRealScreen(
     val driverVerificationInfo = stringResource(R.string.driver_verification_info)
     val helpInfo = stringResource(R.string.help_info)
     val aboutInfo = stringResource(R.string.about_info)
+    val context = LocalContext.current
+    var diagnosticEnabled by remember { mutableStateOf(GpsDiagnosticLog.isEnabled(context)) }
+    val exportDiagnostics = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+        if (uri != null) runCatching {
+            context.contentResolver.openOutputStream(uri)?.use { output -> GpsDiagnosticLog.copyTo(context, output) }
+        }
+    }
 
     LaunchedEffect(isDriver) { viewModel.load(isDriver) }
 
@@ -140,6 +173,28 @@ fun PassengerProfileRealScreen(
                         Column(Modifier.fillMaxWidth()) {
                             ProfileValueRow(stringResource(R.string.vehicle_label), ui.vehicle?.identifier ?: "—")
                             ProfileValueRow(stringResource(R.string.route_label), ui.route?.number ?: stringResource(R.string.route_not_selected))
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface) {
+                        Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                            Text("Диагностика GPS", fontWeight = FontWeight.SemiBold)
+                            Text(
+                                if (diagnosticEnabled) "Запись включена. Координаты сохраняются только на этом телефоне."
+                                else "Включите запись перед тестом стоя и в движении.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Button(onClick = {
+                                diagnosticEnabled = !diagnosticEnabled
+                                GpsDiagnosticLog.setEnabled(context, diagnosticEnabled)
+                            }, modifier = Modifier.fillMaxWidth()) {
+                                Text(if (diagnosticEnabled) "Остановить запись" else "Начать запись GPS")
+                            }
+                            OutlinedButton(
+                                onClick = { exportDiagnostics.launch("safar-gps-diagnostics.csv") },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("Экспортировать CSV") }
                         }
                     }
                     Spacer(Modifier.height(12.dp))
@@ -245,7 +300,7 @@ fun DriverProfileRealScreen(
 fun DriverStatisticsRealScreen(modifier: Modifier = Modifier) {
     val viewModel: StatisticsViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val ui by viewModel.uiState.collectAsState()
-    LaunchedEffect(ui.period) { viewModel.load(ui.period) }
+    LaunchedEffect(Unit) { viewModel.load() }
 
     Column(
         modifier = modifier.fillMaxSize().padding(horizontal = 16.dp),
@@ -266,7 +321,7 @@ fun DriverStatisticsRealScreen(modifier: Modifier = Modifier) {
 
         when {
             ui.loading -> LoadingMessage()
-            ui.error != null -> ErrorMessage(onRetry = viewModel::retry)
+            ui.error != null && ui.sessions.isEmpty() -> ErrorMessage(onRetry = viewModel::retry)
             ui.sessions.isEmpty() -> EmptyState(
                 glyph = Glyph.STATS,
                 title = stringResource(R.string.statistics_empty_title),
@@ -283,7 +338,7 @@ fun DriverStatisticsRealScreen(modifier: Modifier = Modifier) {
                     value = formatDistance(ui.totalDistanceMeters),
                 )
                 Spacer(Modifier.height(18.dp))
-                Text(stringResource(R.string.statistics_sessions_count, ui.sessions.size), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                Text(stringResource(R.string.statistics_sessions_count, ui.sessionCount), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                 Spacer(Modifier.height(10.dp))
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     itemsIndexed(
@@ -296,6 +351,27 @@ fun DriverStatisticsRealScreen(modifier: Modifier = Modifier) {
                                 Text(formatWorkDuration(day.workSeconds), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                                 Spacer(Modifier.width(12.dp))
                                 Text(formatDistance(day.distanceMeters), color = SafarBlue)
+                            }
+                        }
+                    }
+                    if (ui.loadMoreError != null) {
+                        item {
+                            Text(
+                                ui.loadMoreError.orEmpty(),
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                    if (ui.hasMore || ui.loadingMore) {
+                        item {
+                            TextButton(
+                                onClick = viewModel::loadMore,
+                                enabled = !ui.loadingMore,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                if (ui.loadingMore) CircularProgressIndicator()
+                                else Text(stringResource(R.string.statistics_load_more))
                             }
                         }
                     }

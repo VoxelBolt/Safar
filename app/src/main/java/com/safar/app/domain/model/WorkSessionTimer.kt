@@ -8,7 +8,11 @@ package com.safar.app.domain.model
 object WorkSessionTimer {
     fun elapsedWorkSeconds(session: WorkSession, nowEpochMs: Long): Long {
         if (session.status == WorkSessionStatus.COMPLETED) {
-            return session.durationSeconds.coerceAtLeast(0L)
+            if (session.durationSeconds > 0L) return session.durationSeconds
+            val started = session.startTimeEpochMs ?: return 0L
+            val ended = session.endTimeEpochMs ?: nowEpochMs
+            return ((ended - started) / 1000L - session.totalPausedSeconds.coerceAtLeast(0L))
+                .coerceAtLeast(0L)
         }
 
         val started = session.startTimeEpochMs

@@ -1,13 +1,16 @@
 package com.safar.app.ui.screens
 
 import android.app.Application
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.safar.app.data.realtime.RealtimeTransport
+import com.safar.app.data.realtime.RealtimeRetryPolicy
 import com.safar.app.data.location.DriverLocationService
 import com.safar.app.di.AppContainer
 import com.safar.app.domain.model.PassengerLocation
 import com.safar.app.domain.model.Driver
+import com.safar.app.domain.model.DriverApplication
 import com.safar.app.domain.model.Route
 import com.safar.app.domain.model.WorkSession
 import com.safar.app.domain.model.WorkSessionStatus
@@ -17,18 +20,22 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.time.Instant
+import kotlin.random.Random
 
 data class DriverUiState(
     val driver: Driver? = null,
+    val driverApplication: DriverApplication? = null,
     val routes: List<Route> = emptyList(),
     val selectedRoute: Route? = null,
     val workSession: WorkSession? = null,
@@ -39,12 +46,20 @@ data class DriverUiState(
     val error: String? = null,
 )
 
+private data class DriverLoadSnapshot(
+    val driver: Driver?,
+    val application: DriverApplication?,
+    val routes: List<Route>,
+    val session: WorkSession?,
+)
+
 class DriverViewModel(application: Application) : AndroidViewModel(application) {
     private val driverRepository = AppContainer.driverRepository
     private val routeRepository = AppContainer.routeRepository
     private val workSessionRepository = AppContainer.workSessionRepository
     private val vehicleRepository = AppContainer.vehicleRepository
     private val realtimeTransport: RealtimeTransport = AppContainer.realtimeTransport
+    private val vehicleMarkerFreshness = VehicleMarkerFreshness()
 
     private val _uiState = MutableStateFlow(DriverUiState())
     val uiState: StateFlow<DriverUiState> = _uiState.asStateFlow()
@@ -52,6 +67,7 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
     private var realtimeJob: Job? = null
     private var staleSweepJob: Job? = null
     private var vehiclePollingJob: Job? = null
+    private var sessionDistancePollingJob: Job? = null
 
     init {
         startPassengerStaleSweep()
@@ -66,22 +82,39 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
                 withContext(Dispatchers.IO) {
                     withTimeout(BACKEND_TIMEOUT_MS) {
                         val driver = driverRepository.getDriver()
+                        val application = if (driver == null) driverRepository.getDriverApplication() else null
                         val routes = routeRepository.getRoutes().sortedBy { it.number }
                         val session = workSessionRepository.getCurrent()
-                        Triple(driver, routes, session)
+                        DriverLoadSnapshot(driver, application, routes, session)
                     }
                 }
-            }.onSuccess { (driver, routes, session) ->
-                val selected = driver?.routeId?.let { id -> routes.firstOrNull { it.id == id } }
-                _uiState.value = _uiState.value.copy(driver = driver, routes = routes, selectedRoute = selected, workSession = session, loading = false, error = null)
-                selected?.let {
+            }.onSuccess { snapshot ->
+                val driver = snapshot.driver
+                val application = snapshot.application
+                val routes = snapshot.routes
+                val session = snapshot.session
+                val routeId = driver?.routeId ?: application?.routeId
+                val selected = routeId?.let { id -> routes.firstOrNull { it.id == id } }
+                _uiState.value = _uiState.value.copy(
+                    driver = driver,
+                    driverApplication = application,
+                    routes = routes,
+                    selectedRoute = selected,
+                    workSession = session,
+                    loading = false,
+                    error = null,
+                )
+                startSessionDistancePolling(session)
+                if (driver?.verified == true) selected?.let {
                     switchPassengerRealtime(it.id)
                     startVehiclePolling(it.id)
                 }
-                if (driver?.routeId != null) {
+                if (driver?.routeId != null && driver.verified) {
                     // Work Session and GPS tracking are independent systems. Restore
                     // the location foreground service whenever a routed driver is loaded.
-                    runCatching { DriverLocationService.start(getApplication()) }
+                    runCatching { DriverLocationService.start(getApplication(), driver.userId, driver.routeId) }
+                } else {
+                    runCatching { DriverLocationService.stop(getApplication()) }
                 }
             }.onFailure { error ->
                 _uiState.value = _uiState.value.copy(loading = false, error = error.userMessage())
@@ -91,6 +124,10 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
 
     fun selectRoute(route: Route) {
         val ui = _uiState.value
+        if (ui.driver?.verified != true) {
+            _uiState.value = ui.copy(error = "Профиль водителя ожидает подтверждения")
+            return
+        }
         if (ui.actionInProgress || ui.workSession?.status == WorkSessionStatus.ACTIVE || ui.workSession?.status == WorkSessionStatus.PAUSED) return
         viewModelScope.launch {
             _uiState.value = ui.copy(actionInProgress = true, error = null)
@@ -100,10 +137,10 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
                 .onSuccess { driver ->
-                    _uiState.value = _uiState.value.copy(driver = driver, selectedRoute = route, passengerLocations = emptyList(), activeVehicles = emptyList(), actionInProgress = false, error = null)
+                    _uiState.value = _uiState.value.copy(driver = driver, driverApplication = null, selectedRoute = route, passengerLocations = emptyList(), activeVehicles = emptyList(), actionInProgress = false, error = null)
                     startVehiclePolling(route.id)
                     // A route assignment enables GPS tracking; Work Session state does not.
-                    runCatching { DriverLocationService.start(getApplication()) }
+                    runCatching { DriverLocationService.start(getApplication(), driver.userId, route.id) }
                     switchPassengerRealtime(route.id)
                 }.onFailure { error ->
                     _uiState.value = _uiState.value.copy(actionInProgress = false, error = error.userMessage())
@@ -122,8 +159,9 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
                 }
                     .onSuccess { vehicles ->
                         val active = vehicles
-                            .filter { it.active && isFresh(it.currentLocation?.timestampEpochMs) && it.currentLocation != null }
+                            .filter { it.active && it.currentLocation != null }
                             .map { it.copy(active = true) }
+                        vehicleMarkerFreshness.observeSnapshot(active, SystemClock.elapsedRealtime())
                         _uiState.value = _uiState.value.copy(activeVehicles = active, error = null)
                     }
                     .onFailure { error ->
@@ -140,29 +178,115 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
         // to publish vehicle locations. Do not disconnect it here: doing so tears down
         // the service's live channel and races with its next GPS broadcast. connect()
         // switches route channels itself when the route actually changes.
-        _uiState.value = _uiState.value.copy(passengerLocations = emptyList())
+        vehicleMarkerFreshness.clear()
+        _uiState.value = _uiState.value.copy(passengerLocations = emptyList(), activeVehicles = emptyList())
         realtimeJob = viewModelScope.launch {
-            try {
-                realtimeTransport.connect(routeId)
-                realtimeTransport.passengerEvents.collect { event ->
-                    if (_uiState.value.selectedRoute?.id != event.routeId) return@collect
-                    applyPassengerEvent(event.passengerId, event.routeId, event.location)
+            var attempt = 0
+            while (isActive && _uiState.value.selectedRoute?.id == routeId) {
+                try {
+                    withTimeout(BACKEND_TIMEOUT_MS) {
+                        realtimeTransport.connect(routeId, receivePassengerLocations = true)
+                    }
+                    val connected = withTimeoutOrNull(BACKEND_TIMEOUT_MS) {
+                        realtimeTransport.connectionState.first { it.routeId == routeId && it.subscribed }
+                    } ?: error("Realtime подписка не подтвердилась вовремя")
+                    refreshDriverSnapshots(routeId)
+
+                    coroutineScope {
+                        launch {
+                            realtimeTransport.passengerEvents.collect { event ->
+                                if (_uiState.value.selectedRoute?.id == event.routeId) {
+                                    applyPassengerEvent(event.passengerId, event.routeId, event.location)
+                                }
+                            }
+                        }
+                        var lastEpoch = connected.epoch
+                        var stableSinceElapsedMs = SystemClock.elapsedRealtime()
+                        while (isActive && _uiState.value.selectedRoute?.id == routeId) {
+                            val disconnected = realtimeTransport.connectionState.first {
+                                it.routeId != routeId || !it.subscribed
+                            }
+                            val recovered = withTimeoutOrNull(REALTIME_SDK_RECOVERY_GRACE_MS) {
+                                realtimeTransport.connectionState.first {
+                                    it.routeId == routeId && it.subscribed && it.epoch > lastEpoch
+                                }
+                            }
+                            if (recovered == null) {
+                                android.util.Log.w("SafarRealtime", "Driver channel did not recover for route $routeId")
+                                break
+                            }
+                            lastEpoch = recovered.epoch
+                            if (SystemClock.elapsedRealtime() - stableSinceElapsedMs >= REALTIME_STABLE_RESET_MS) {
+                                attempt = 0
+                            }
+                            stableSinceElapsedMs = SystemClock.elapsedRealtime()
+                            refreshDriverSnapshots(routeId)
+                            if (disconnected.routeId == null) break
+                        }
+                    }
+                    attempt += 1
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    android.util.Log.w("SafarRealtime", "Driver Realtime connection failed", error)
+                    _uiState.value = _uiState.value.copy(error = error.message ?: "Realtime недоступен")
+                    attempt += 1
                 }
-            } catch (error: CancellationException) { throw error }
-            catch (error: Exception) {
-                if (currentCoroutineContext().isActive) _uiState.value = _uiState.value.copy(error = error.message ?: "Realtime недоступен")
+                if (isActive && _uiState.value.selectedRoute?.id == routeId) {
+                    delay(RealtimeRetryPolicy.delayMs(attempt.coerceAtLeast(1), Random.nextDouble(0.75, 1.25)))
+                }
             }
+        }
+    }
+
+    private suspend fun refreshDriverSnapshots(routeId: String) {
+        try {
+            val passengers = withContext(Dispatchers.IO) {
+                withTimeout(BACKEND_TIMEOUT_MS) {
+                    realtimeTransport.getActivePassengerLocations(routeId)
+                }
+            }
+            if (_uiState.value.selectedRoute?.id == routeId) {
+                val previous = _uiState.value.passengerLocations.associateBy { it.passengerId }
+                val merged = passengers.map { passenger ->
+                    val old = previous[passenger.passengerId]
+                    if (old != null && old.timestampEpochMs > passenger.timestampEpochMs) {
+                        old.copy(receivedAtElapsedMs = SystemClock.elapsedRealtime())
+                    } else passenger
+                }
+                _uiState.value = _uiState.value.copy(passengerLocations = merged, error = null)
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            android.util.Log.w("SafarRealtime", "Passenger snapshot refresh failed", error)
+        }
+
+        try {
+            val vehicles = withContext(Dispatchers.IO) {
+                withTimeout(BACKEND_TIMEOUT_MS) { vehicleRepository.getVehiclesForRoute(routeId) }
+            }
+            if (_uiState.value.selectedRoute?.id == routeId) {
+                val active = vehicles.filter { it.active && it.currentLocation != null }.map { it.copy(active = true) }
+                vehicleMarkerFreshness.observeSnapshot(active, SystemClock.elapsedRealtime())
+                _uiState.value = _uiState.value.copy(activeVehicles = active)
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            android.util.Log.w("SafarRealtime", "Vehicle snapshot refresh failed", error)
         }
     }
 
     private fun applyPassengerEvent(passengerId: String, routeId: String, location: PassengerLocation?) {
         if (_uiState.value.selectedRoute?.id != routeId) return
         val current = _uiState.value.passengerLocations
-        if (location == null || !isPassengerFresh(location.receivedAtEpochMs)) {
+        if (location == null || !isPassengerFresh(location.receivedAtElapsedMs)) {
             _uiState.value = _uiState.value.copy(passengerLocations = current.filter { it.passengerId != passengerId })
             return
         }
         val updated = current.firstOrNull { it.passengerId == passengerId }
+        if (updated != null && updated.timestampEpochMs > location.timestampEpochMs) return
         _uiState.value = _uiState.value.copy(
             passengerLocations = if (updated == null) current + location else current.map { if (it.passengerId == passengerId) location else it },
             error = null,
@@ -173,77 +297,31 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
         staleSweepJob = viewModelScope.launch {
             while (isActive) {
                 delay(PASSENGER_STALE_SWEEP_INTERVAL_MS)
-                val fresh = _uiState.value.passengerLocations.filter { isPassengerFresh(it.receivedAtEpochMs) }
-                if (fresh.size != _uiState.value.passengerLocations.size) _uiState.value = _uiState.value.copy(passengerLocations = fresh)
+                val current = _uiState.value
+                val freshPassengers = current.passengerLocations.filter { isPassengerFresh(it.receivedAtElapsedMs) }
+                val freshVehicles = vehicleMarkerFreshness.retainFresh(
+                    current.activeVehicles,
+                    SystemClock.elapsedRealtime(),
+                )
+                if (freshPassengers.size != current.passengerLocations.size || freshVehicles.size != current.activeVehicles.size) {
+                    _uiState.value = current.copy(passengerLocations = freshPassengers, activeVehicles = freshVehicles)
+                }
             }
         }
     }
-
-    private fun isFresh(timestampEpochMs: Long?): Boolean = timestampEpochMs != null && timestampEpochMs > 0L && System.currentTimeMillis() - timestampEpochMs <= LOCATION_FRESHNESS_MS
 
     // Passenger broadcasts are transient and use local receive time for expiry,
     // so sender clock skew cannot keep an abandoned marker alive or hide a live one.
-    private fun isPassengerFresh(receivedAtEpochMs: Long): Boolean =
-        PassengerLocationVisibility.isFresh(receivedAtEpochMs)
-
-    /**
-     * Foreground-screen fallback for driver GPS.
-     *
-     * The foreground service remains the primary/background publisher. While the
-     * driver screen is visible, publish the same current position directly as a
-     * second path. This makes an active trip resilient if Android has stopped or
-     * delayed the foreground service.
-     */
-    fun publishDriverLocation(point: com.safar.app.domain.model.GeoPoint, headingDegrees: Float?, timestampEpochMs: Long) {
-        val ui = _uiState.value
-        if (ui.driver?.routeId == null) return
-        viewModelScope.launch {
-            runCatching {
-                withContext(Dispatchers.IO) {
-                    withTimeout(BACKEND_TIMEOUT_MS) {
-                        AppContainer.driverLocationRepository.submitLocation(
-                            latitude = point.latitude,
-                            longitude = point.longitude,
-                            recordedAtIso = Instant.ofEpochMilli(timestampEpochMs).toString(),
-                            headingDegrees = headingDegrees,
-                        )
-                    }
-                }
-            }.onSuccess { location ->
-                android.util.Log.d(
-                    "SafarDriverGPS",
-                    "Foreground GPS saved: vehicle=${location.vehicleId}, heading=${location.headingDegrees}",
-                )
-                // This foreground fallback used to write to the database only.
-                // Broadcast the same measured heading too, so passengers can rotate
-                // the vehicle marker immediately even if the foreground service is delayed.
-                viewModelScope.launch {
-                    runCatching {
-                        val driver = ui.driver
-                        val routeId = driver.routeId ?: return@launch
-                        val vehicleId = driver.vehicleId
-                        realtimeTransport.connect(routeId)
-                        realtimeTransport.sendDriverLocation(
-                            routeId = routeId,
-                            vehicleId = vehicleId,
-                            latitude = point.latitude,
-                            longitude = point.longitude,
-                            recordedAtIso = Instant.ofEpochMilli(timestampEpochMs).toString(),
-                            headingDegrees = location.headingDegrees ?: headingDegrees,
-                        )
-                    }.onFailure { error ->
-                        android.util.Log.w("SafarDriverGPS", "Foreground realtime heading broadcast failed", error)
-                    }
-                }
-            }.onFailure { error ->
-                android.util.Log.e("SafarDriverGPS", "Foreground screen GPS publish failed", error)
-            }
-        }
-    }
+    private fun isPassengerFresh(receivedAtElapsedMs: Long): Boolean =
+        PassengerLocationVisibility.isFresh(receivedAtElapsedMs, SystemClock.elapsedRealtime())
 
     fun startWork() {
         val ui = _uiState.value
         if (ui.actionInProgress) return
+        if (ui.driver?.verified != true) {
+            _uiState.value = ui.copy(error = "Профиль водителя ожидает подтверждения")
+            return
+        }
         if (ui.selectedRoute == null) { _uiState.value = ui.copy(error = "Сначала выберите маршрут"); return }
         if (ui.workSession?.status == WorkSessionStatus.ACTIVE || ui.workSession?.status == WorkSessionStatus.PAUSED) { _uiState.value = ui.copy(error = "Текущая рабочая сессия уже существует"); return }
         viewModelScope.launch {
@@ -254,8 +332,15 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }.onSuccess { session ->
                 _uiState.value = _uiState.value.copy(workSession = session, actionInProgress = false, error = null)
+                startSessionDistancePolling(session)
                 if (session.status == WorkSessionStatus.ACTIVE) {
-                    runCatching { DriverLocationService.start(getApplication()) }
+                    runCatching {
+                        DriverLocationService.start(
+                            getApplication(),
+                            ui.driver.userId,
+                            ui.selectedRoute.id,
+                        )
+                    }
                 }
             }.onFailure { error -> _uiState.value = _uiState.value.copy(actionInProgress = false, error = error.userMessage()) }
         }
@@ -264,6 +349,10 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
     fun pauseWork() = changeSession { id -> workSessionRepository.pause(id) }
 
     fun resumeWork() {
+        if (_uiState.value.driver?.verified != true) {
+            _uiState.value = _uiState.value.copy(error = "Профиль водителя ожидает подтверждения")
+            return
+        }
         val session = _uiState.value.workSession
         if (session?.status != WorkSessionStatus.PAUSED) { _uiState.value = _uiState.value.copy(error = "Нет приостановленной рабочей сессии"); return }
         val pausedAt = session.pauseTimeEpochMs
@@ -286,6 +375,10 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
     private fun changeSession(action: suspend (String) -> WorkSession) {
         val session = _uiState.value.workSession
         if (_uiState.value.actionInProgress) return
+        if (_uiState.value.driver?.verified != true) {
+            _uiState.value = _uiState.value.copy(error = "Профиль водителя ожидает подтверждения")
+            return
+        }
         if (session == null) { _uiState.value = _uiState.value.copy(error = "Текущей рабочей сессии нет"); return }
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(actionInProgress = true, error = null)
@@ -295,10 +388,12 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }.onSuccess { updatedSession ->
                 _uiState.value = _uiState.value.copy(workSession = updatedSession, actionInProgress = false, error = null)
+                startSessionDistancePolling(updatedSession)
                 // Never stop GPS when the Work Session changes. Tracking is owned
                 // by DriverLocationService and continues independently.
                 if (_uiState.value.driver?.routeId != null) {
-                    runCatching { DriverLocationService.start(getApplication()) }
+                    val driver = _uiState.value.driver
+                    runCatching { DriverLocationService.start(getApplication(), driver?.userId, driver?.routeId) }
                 }
             }.onFailure { error ->
                 val refreshed = runCatching {
@@ -307,8 +402,36 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }.getOrNull()
                 _uiState.value = _uiState.value.copy(workSession = refreshed, actionInProgress = false, error = error.userMessage())
+                startSessionDistancePolling(refreshed)
                 if (_uiState.value.driver?.routeId != null) {
-                    runCatching { DriverLocationService.start(getApplication()) }
+                    val driver = _uiState.value.driver
+                    runCatching { DriverLocationService.start(getApplication(), driver?.userId, driver?.routeId) }
+                }
+            }
+        }
+    }
+
+    /** The foreground service records accepted GPS movement on the server. Refresh the
+     * session row while it is active so the distance card follows that authoritative total. */
+    private fun startSessionDistancePolling(session: WorkSession?) {
+        sessionDistancePollingJob?.cancel()
+        if (session?.status != WorkSessionStatus.ACTIVE || _uiState.value.driver?.verified != true) return
+        val sessionId = session.id
+        sessionDistancePollingJob = viewModelScope.launch {
+            while (isActive && _uiState.value.workSession?.id == sessionId &&
+                _uiState.value.workSession?.status == WorkSessionStatus.ACTIVE
+            ) {
+                delay(5_000L)
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        withTimeout(BACKEND_TIMEOUT_MS) { workSessionRepository.getCurrent() }
+                    }
+                }.onSuccess { latest ->
+                    if (latest?.id == sessionId) {
+                        _uiState.value = _uiState.value.copy(workSession = latest)
+                    }
+                }.onFailure { error ->
+                    android.util.Log.w("SafarDriverSession", "distance refresh failed", error)
                 }
             }
         }
@@ -320,14 +443,16 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
         realtimeJob?.cancel()
         staleSweepJob?.cancel()
         vehiclePollingJob?.cancel()
-        // Do not disconnect the shared transport here; DriverLocationService may
-        // still be publishing driver coordinates through the same channel.
-        super.onCleared()
+        sessionDistancePollingJob?.cancel()
+        // DriverLocationService writes through PostgREST and does not own this
+        // route-scoped Realtime subscription. Release the channel with the screen VM.
+        realtimeTransport.disconnect()
     }
 
     private companion object {
         const val SIX_HOURS_MS = 6 * 60 * 60 * 1000L
-        const val LOCATION_FRESHNESS_MS = 60_000L
+        const val REALTIME_SDK_RECOVERY_GRACE_MS = 20_000L
+        const val REALTIME_STABLE_RESET_MS = 120_000L
         const val PASSENGER_STALE_SWEEP_INTERVAL_MS = 5_000L
         const val VEHICLE_POLL_INTERVAL_MS = 10_000L
         const val BACKEND_TIMEOUT_MS = 20_000L

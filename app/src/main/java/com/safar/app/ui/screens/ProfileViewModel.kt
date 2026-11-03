@@ -65,7 +65,7 @@ class ProfileViewModel : ViewModel() {
                             runCatching { routeRepository.getRoute(id) }.getOrNull()
                         }
                         val vehicle = driver?.vehicleId?.let { id ->
-                            runCatching { vehicleRepository.getAllVehicles().firstOrNull { it.id == id } }.getOrNull()
+                            runCatching { vehicleRepository.getVehiclesByIds(listOf(id)).firstOrNull() }.getOrNull()
                         }
                         ProfileLoadResult(user, driver, route, vehicle)
                     }

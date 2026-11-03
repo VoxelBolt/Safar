@@ -46,6 +46,6 @@ class PassengerLocationVisibilityTest {
         latitude = 40.28,
         longitude = 69.62,
         timestampEpochMs = receivedAt,
-        receivedAtEpochMs = receivedAt,
+        receivedAtElapsedMs = receivedAt,
     )
 }

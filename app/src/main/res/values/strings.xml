@@ -124,6 +124,7 @@
     <string name="ok">ОК</string>
     <string name="verified">Подтверждён</string>
     <string name="not_verified">Не подтверждён</string>
+    <string name="driver_pending_approval">Профиль ожидает подтверждения администрацией. Рабочая сессия и передача геопозиции пока недоступны.</string>
     <string name="notifications_info">Настройки уведомлений будут доступны в следующей версии MVP.</string>
     <string name="help_info">Если карта или данные не загружаются, проверьте интернет и нажмите «Повторить».</string>
     <string name="about_info">Safar — приложение для отслеживания городского транспорта.</string>
@@ -131,6 +132,8 @@
     <string name="statistics_empty_title">Недостаточно данных</string>
     <string name="statistics_empty_subtitle">Завершите рабочую сессию, чтобы появилась статистика.</string>
     <string name="statistics_sessions_count">Рабочих сессий: %1$d</string>
+    <string name="favorites_load_more">Загрузить ещё</string>
+    <string name="statistics_load_more">Загрузить ещё сессии</string>
     <string name="work_duration_format">%1$d ч %2$02d мин</string>
     <string name="distance_km_format">%.1f км</string>
     <string name="distance_m_format">%1$d м</string>
