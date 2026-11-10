@@ -22,6 +22,17 @@
     <string name="complete_required_fields">Ҳамаи майдонҳои ҳатмиро пур кунед</string>
     <string name="registration_failed">Бақайдгирӣ иҷро нашуд. Пайвасти интернетро санҷед ва дубора кӯшиш кунед.</string>
     <string name="registration_in_progress">Бақайдгирӣ...</string>
+    <string name="auth_mode_register">Бақайдгирӣ</string>
+    <string name="auth_mode_login">Воридшавӣ</string>
+    <string name="login_button">Ворид шудан</string>
+    <string name="login_in_progress">Воридшавӣ...</string>
+    <string name="login_subtitle">Ҳамон маълумотеро ворид кунед, ки ҳангоми бақайдгирӣ нишон дода будед</string>
+    <string name="passenger_login_title">Воридшавии мусофир</string>
+    <string name="driver_login_title">Воридшавии ронанда</string>
+    <string name="background_location_title">Ҷойгиршавӣ дар замина</string>
+    <string name="background_location_text">Барои он ки мусофирон маршруткаи шуморо ҳангоми пӯшида будани барнома ё хомӯш будани экран бинанд, барои ҷойгиршавӣ «Ҳамеша иҷозат додан»-ро интихоб кунед.</string>
+    <string name="background_location_allow">Иҷозат додан</string>
+    <string name="background_location_later">Ҳоло не</string>
 
     <string name="nav_map">Харита</string>
     <string name="nav_favorites">Интихобшуда</string>

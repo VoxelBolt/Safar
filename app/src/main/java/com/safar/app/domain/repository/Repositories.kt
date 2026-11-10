@@ -39,6 +39,8 @@ interface DriverRepository {
 interface RegistrationRepository {
     suspend fun ensureAnonymousSession()
     suspend fun registerPassenger(name: String, phone: String): User
+    suspend fun loginPassenger(name: String, phone: String): User
+    suspend fun loginDriver(name: String, phone: String, vehicleIdentifier: String): User
 }
 
 interface FavoriteRepository {

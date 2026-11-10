@@ -156,8 +156,21 @@ class ProfileViewModel : ViewModel() {
         load(isDriver)
     }
 
-    private fun Throwable.userMessage(): String =
-        message?.takeIf { it.isNotBlank() } ?: "Не удалось загрузить данные"
+    private fun Throwable.userMessage(): String {
+        val chain = generateSequence(this) { it.cause }
+            .take(6)
+            .mapNotNull { it.message }
+            .joinToString(" ")
+            .lowercase()
+        return when {
+            "safar_phone_taken" in chain || "users_phone_unique" in chain ->
+                "Этот номер телефона уже зарегистрирован."
+            "safar_invalid_phone" in chain ->
+                "Введите номер телефона полностью, например +992 93 123 45 67."
+            "safar_name_required" in chain -> "Введите имя."
+            else -> message?.takeIf { it.isNotBlank() } ?: "Не удалось загрузить данные"
+        }
+    }
 
     private companion object {
         const val PROFILE_LOAD_TIMEOUT_MS = 20_000L

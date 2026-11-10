@@ -329,6 +329,10 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     private fun switchRealtime(routeId: String) {
         realtimeJob?.cancel()
         passengerPublishJob?.cancel()
+        // Publishing goes through a REST RPC, not the Realtime socket. Start it
+        // right away so a waiting passenger stays visible to drivers even while
+        // the vehicle channel is still connecting or reconnecting.
+        startPassengerLocationPublishing(routeId)
         realtimeJob = viewModelScope.launch {
             var attempt = 0
             while (isActive && _uiState.value.selectedRoute?.id == routeId) {
@@ -394,6 +398,15 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                 val now = System.currentTimeMillis()
                 val state = _uiState.value
                 val point = state.passengerLocation
+                if (!state.locationPermissionRequired && locationJob?.isActive == true &&
+                    lastPassengerFixAtMs > 0L && now - lastPassengerFixAtMs >= PASSENGER_FIX_REFRESH_MS
+                ) {
+                    // The live stream is silent while the passenger stands still (2 m
+                    // minimum update distance plus the stabilizer deadband). A one-shot
+                    // fix keeps a passenger who waits at a stop broadcasting instead of
+                    // disappearing from drivers' maps 15 seconds after the last step.
+                    requestCurrentLocation(centerCamera = false)
+                }
                 if (!state.locationPermissionRequired && point != null && lastPassengerFixAtMs > 0L &&
                     state.passengerLocationAccuracyMeters?.let { it <= LOCATION_BROADCAST_MAX_ACCURACY_METERS } == true &&
                     now - lastPassengerFixAtMs in 0L..PASSENGER_FIX_MAX_AGE_MS) {
@@ -731,7 +744,10 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         const val STALE_SWEEP_INTERVAL_MS = 5_000L
         const val PASSENGER_BROADCAST_INTERVAL_MS = 5_000L
         const val PASSENGER_FIX_MAX_AGE_MS = 15_000L
-        const val LOCATION_BROADCAST_MAX_ACCURACY_METERS = 20.0
+        const val PASSENGER_FIX_REFRESH_MS = 8_000L
+        // Typical city and indoor fixes are 20-40 m; the old 20 m limit silently
+        // hid many waiting passengers from drivers.
+        const val LOCATION_BROADCAST_MAX_ACCURACY_METERS = 50.0
         const val REALTIME_SDK_RECOVERY_GRACE_MS = 20_000L
         const val REALTIME_STABLE_RESET_MS = 120_000L
     }

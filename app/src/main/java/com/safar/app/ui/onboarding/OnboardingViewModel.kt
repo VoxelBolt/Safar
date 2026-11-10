@@ -9,6 +9,7 @@ import com.safar.app.BuildConfig
 import com.safar.app.data.location.DriverLocationService
 import com.safar.app.di.AppContainer
 import com.safar.app.domain.model.Route
+import com.safar.app.domain.model.User
 import com.safar.app.domain.model.UserRole
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -96,6 +97,10 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
 
     fun setVehicleIdentifier(value: String) = update { copy(vehicleIdentifier = value) }
 
+    fun setAuthMode(mode: AuthMode) = update {
+        copy(authMode = mode, registrationError = false, registrationErrorMessage = null)
+    }
+
     fun completeOnboarding() {
         val current = _state.value
         if (current.role == null || current.registrationInProgress) return
@@ -105,7 +110,8 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
             current.phone.trim().isEmpty() -> "Введите номер телефона."
             current.role == UserRole.DRIVER && current.vehicleIdentifier.trim().isEmpty() ->
                 "Введите номер транспорта."
-            current.role == UserRole.DRIVER && current.selectedRouteId == null ->
+            current.authMode == AuthMode.REGISTER &&
+                current.role == UserRole.DRIVER && current.selectedRouteId == null ->
                 "Выберите номер маршрута."
             else -> null
         }
@@ -144,11 +150,24 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
                 withContext(Dispatchers.IO) {
                     withTimeout(BACKEND_TIMEOUT_MS) {
                         when (current.role) {
-                            UserRole.PASSENGER -> registrationRepository.registerPassenger(
-                                name = current.name.trim(),
-                                phone = current.phone.trim(),
-                            )
-                            UserRole.DRIVER -> {
+                            UserRole.PASSENGER -> if (current.authMode == AuthMode.LOGIN) {
+                                registrationRepository.loginPassenger(
+                                    name = current.name.trim(),
+                                    phone = current.phone.trim(),
+                                )
+                            } else {
+                                registrationRepository.registerPassenger(
+                                    name = current.name.trim(),
+                                    phone = current.phone.trim(),
+                                )
+                            }
+                            UserRole.DRIVER -> if (current.authMode == AuthMode.LOGIN) {
+                                registrationRepository.loginDriver(
+                                    name = current.name.trim(),
+                                    phone = current.phone.trim(),
+                                    vehicleIdentifier = current.vehicleIdentifier.trim(),
+                                )
+                            } else {
                                 val routeId = requireNotNull(current.selectedRouteId)
                                 driverRepository.registerDriver(
                                     name = current.name.trim(),
@@ -167,15 +186,19 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
                     copy(
                         registrationInProgress = false,
                         registrationError = true,
-                        registrationErrorMessage = registrationErrorMessage(error),
+                        registrationErrorMessage = OnboardingErrorMessages.message(error, current.authMode, current.role),
                     )
                 }
                 if (BuildConfig.DEBUG) {
                     Log.e(TAG, "Registration backend operation failed", error)
                 }
-            }.onSuccess {
+            }.onSuccess { value ->
+                // Login returns the stored profile: keep its saved name and phone locally.
+                val profile = value as? User
                 update {
                     copy(
+                        name = profile?.name ?: name,
+                        phone = profile?.phone ?: phone,
                         completed = true,
                         registrationInProgress = false,
                         registrationError = false,
@@ -183,41 +206,6 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
                     )
                 }
             }
-        }
-    }
-
-    private fun registrationErrorMessage(error: Throwable): String {
-        val chain = generateSequence(error) { it.cause }
-            .take(6)
-            .mapNotNull { it.message }
-            .joinToString(" ")
-            .lowercase()
-
-        return when {
-            "user role is already passenger" in chain ->
-                "Эта сессия уже зарегистрирована как пассажир. Для регистрации водителем нужно изменить роль аккаунта."
-            "users_phone_unique" in chain ||
-                ("duplicate key value violates unique constraint" in chain && "phone" in chain) ->
-                "Этот номер телефона уже зарегистрирован. Используйте другой номер."
-            "route must be selected" in chain ->
-                "Выберите номер маршрута."
-            "vehicle is already assigned" in chain ->
-                "Этот номер транспорта уже закреплён за другим водителем."
-            "vehicle could not be registered" in chain ->
-                "Не удалось зарегистрировать номер транспорта."
-            "authentication is required" in chain ||
-                "authenticated user does not exist" in chain ||
-                ("session" in chain && ("expired" in chain || "invalid" in chain)) ->
-                "Не удалось подтвердить сессию. Попробуйте ещё раз."
-            "timeout" in chain || "timed out" in chain ->
-                "Сервер отвечает слишком долго. Проверьте интернет и попробуйте ещё раз."
-            "unknownhost" in chain || "unable to resolve host" in chain ||
-                "no address associated with hostname" in chain ->
-                "Нет соединения с сервером. Проверьте интернет."
-            "permission denied" in chain || "row-level security" in chain ->
-                "Сервер отклонил запрос. Проверьте настройки доступа Safar."
-            else ->
-                "Не удалось зарегистрироваться. Проверьте интернет и попробуйте ещё раз."
         }
     }
 

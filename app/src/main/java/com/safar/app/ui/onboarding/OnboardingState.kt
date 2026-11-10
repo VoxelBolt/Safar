@@ -3,6 +3,12 @@ package com.safar.app.ui.onboarding
 import com.safar.app.domain.model.Route
 import com.safar.app.domain.model.UserRole
 
+/** Whether the onboarding form creates a new account or signs in to an existing one. */
+enum class AuthMode {
+    REGISTER,
+    LOGIN,
+}
+
 /** UI state for the stage-2 onboarding flow. */
 data class OnboardingState(
     val languageTag: String = "ru",
@@ -19,4 +25,6 @@ data class OnboardingState(
     val registrationInProgress: Boolean = false,
     val registrationError: Boolean = false,
     val registrationErrorMessage: String? = null,
+    // Transient form mode; a fresh form always starts with registration.
+    val authMode: AuthMode = AuthMode.REGISTER,
 )

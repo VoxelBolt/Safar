@@ -199,13 +199,17 @@ fun RegistrationScreen(
     routesLoading: Boolean = false,
     routesError: Boolean = false,
     onRouteSelected: (Route) -> Unit = {},
+    onAuthModeChange: (AuthMode) -> Unit = {},
     onContinue: () -> Unit,
 ) {
     var attempted by remember { mutableStateOf(false) }
+    val isLogin = state.authMode == AuthMode.LOGIN
     val nameValid = state.name.trim().isNotEmpty()
     val phoneValid = state.phone.trim().isNotEmpty()
+    // Login identifies a driver by name, phone and vehicle number; the route is
+    // chosen only when registering.
     val driverFieldsValid = role == UserRole.PASSENGER ||
-        (state.vehicleIdentifier.trim().isNotEmpty() && selectedRouteId != null)
+        (state.vehicleIdentifier.trim().isNotEmpty() && (isLogin || selectedRouteId != null))
     val formValid = nameValid && phoneValid && driverFieldsValid
 
     Column(
@@ -222,10 +226,11 @@ fun RegistrationScreen(
         ) {
             TopBackButton(onClick = onBack)
             Text(
-                text = if (role == UserRole.PASSENGER) {
-                    stringResource(R.string.passenger_registration_title)
-                } else {
-                    stringResource(R.string.driver_registration_title)
+                text = when {
+                    role == UserRole.PASSENGER && isLogin -> stringResource(R.string.passenger_login_title)
+                    role == UserRole.PASSENGER -> stringResource(R.string.passenger_registration_title)
+                    isLogin -> stringResource(R.string.driver_login_title)
+                    else -> stringResource(R.string.driver_registration_title)
                 },
                 modifier = Modifier.padding(start = 4.dp),
                 style = MaterialTheme.typography.titleLarge,
@@ -242,8 +247,21 @@ fun RegistrationScreen(
                 .padding(horizontal = 24.dp),
         ) {
             Spacer(Modifier.height(10.dp))
+            AuthModeSwitch(
+                authMode = state.authMode,
+                enabled = !state.registrationInProgress,
+                onAuthModeChange = { mode ->
+                    attempted = false
+                    onAuthModeChange(mode)
+                },
+            )
+            Spacer(Modifier.height(14.dp))
             Text(
-                text = stringResource(R.string.registration_subtitle),
+                text = if (isLogin) {
+                    stringResource(R.string.login_subtitle)
+                } else {
+                    stringResource(R.string.registration_subtitle)
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -278,74 +296,78 @@ fun RegistrationScreen(
                     keyboardType = KeyboardType.Text,
                 )
 
-                Spacer(Modifier.height(14.dp))
-                var routeMenuExpanded by remember { mutableStateOf(false) }
-                val selectedRoute = driverRoutes.firstOrNull { it.id == selectedRouteId }
-                Text(
-                    text = stringResource(R.string.driver_route_label),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = SafarNavy,
-                    modifier = Modifier.padding(bottom = 7.dp),
-                )
-                Box {
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .border(1.dp, if (attempted && selectedRoute == null) MaterialTheme.colorScheme.error else Color(0xFFE3E8F0), RoundedCornerShape(14.dp))
-                            .clickable(enabled = !routesLoading) { routeMenuExpanded = true },
-                        color = SafarWhite,
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 15.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                // The route is chosen only when registering; login does not change it.
+                if (!isLogin) {
+                    Spacer(Modifier.height(14.dp))
+                    var routeMenuExpanded by remember { mutableStateOf(false) }
+                    val selectedRoute = driverRoutes.firstOrNull { it.id == selectedRouteId }
+                    Text(
+                        text = stringResource(R.string.driver_route_label),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = SafarNavy,
+                        modifier = Modifier.padding(bottom = 7.dp),
+                    )
+                    Box {
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .border(1.dp, if (attempted && selectedRoute == null) MaterialTheme.colorScheme.error else Color(0xFFE3E8F0), RoundedCornerShape(14.dp))
+                                .clickable(enabled = !routesLoading) { routeMenuExpanded = true },
+                            color = SafarWhite,
                         ) {
-                            Text(
-                                text = selectedRoute?.number ?: if (routesLoading) stringResource(R.string.routes_loading) else stringResource(R.string.route_select_hint),
-                                modifier = Modifier.weight(1f),
-                                color = if (selectedRoute == null) MutedColor else SafarNavy,
-                            )
-                            Text("⌄", color = SafarBlue)
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 15.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = selectedRoute?.number ?: if (routesLoading) stringResource(R.string.routes_loading) else stringResource(R.string.route_select_hint),
+                                    modifier = Modifier.weight(1f),
+                                    color = if (selectedRoute == null) MutedColor else SafarNavy,
+                                )
+                                Text("⌄", color = SafarBlue)
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = routeMenuExpanded,
+                            onDismissRequest = { routeMenuExpanded = false },
+                        ) {
+                            driverRoutes.forEach { route ->
+                                DropdownMenuItem(
+                                    text = { Text(route.number) },
+                                    onClick = {
+                                        routeMenuExpanded = false
+                                        onRouteSelected(route)
+                                    },
+                                )
+                            }
                         }
                     }
-                    DropdownMenu(
-                        expanded = routeMenuExpanded,
-                        onDismissRequest = { routeMenuExpanded = false },
-                    ) {
-                        driverRoutes.forEach { route ->
-                            DropdownMenuItem(
-                                text = { Text(route.number) },
-                                onClick = {
-                                    routeMenuExpanded = false
-                                    onRouteSelected(route)
-                                },
-                            )
-                        }
+                    if (routesError) {
+                        Text(
+                            text = stringResource(R.string.routes_load_error),
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(start = 4.dp, top = 4.dp),
+                        )
+                    } else if (attempted && selectedRoute == null && !routesLoading) {
+                        Text(
+                            text = stringResource(R.string.required_field_error),
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(start = 4.dp, top = 4.dp),
+                        )
                     }
-                }
-                if (routesError) {
-                    Text(
-                        text = stringResource(R.string.routes_load_error),
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(start = 4.dp, top = 4.dp),
-                    )
-                } else if (attempted && selectedRoute == null && !routesLoading) {
-                    Text(
-                        text = stringResource(R.string.required_field_error),
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(start = 4.dp, top = 4.dp),
-                    )
                 }
             }
 
             Spacer(Modifier.height(26.dp))
             PrimaryButton(
-                text = if (state.registrationInProgress) {
-                    stringResource(R.string.registration_in_progress)
-                } else {
-                    stringResource(R.string.continue_button)
+                text = when {
+                    state.registrationInProgress && isLogin -> stringResource(R.string.login_in_progress)
+                    state.registrationInProgress -> stringResource(R.string.registration_in_progress)
+                    isLogin -> stringResource(R.string.login_button)
+                    else -> stringResource(R.string.continue_button)
                 },
                 enabled = !state.registrationInProgress,
                 onClick = {
@@ -563,6 +585,63 @@ private fun TopBackButton(onClick: () -> Unit) {
             text = "‹",
             style = MaterialTheme.typography.headlineMedium,
             color = SafarNavy,
+        )
+    }
+}
+
+@Composable
+private fun AuthModeSwitch(
+    authMode: AuthMode,
+    enabled: Boolean,
+    onAuthModeChange: (AuthMode) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xFFF1F4F9))
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        AuthModeOption(
+            text = stringResource(R.string.auth_mode_register),
+            selected = authMode == AuthMode.REGISTER,
+            enabled = enabled,
+            onClick = { onAuthModeChange(AuthMode.REGISTER) },
+            modifier = Modifier.weight(1f),
+        )
+        AuthModeOption(
+            text = stringResource(R.string.auth_mode_login),
+            selected = authMode == AuthMode.LOGIN,
+            enabled = enabled,
+            onClick = { onAuthModeChange(AuthMode.LOGIN) },
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+@Composable
+private fun AuthModeOption(
+    text: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(11.dp))
+            .background(if (selected) SafarWhite else Color.Transparent)
+            .clickable(enabled = enabled && !selected, onClick = onClick)
+            .padding(vertical = 10.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            color = if (selected) SafarNavy else MutedColor,
+            textAlign = TextAlign.Center,
         )
     }
 }
