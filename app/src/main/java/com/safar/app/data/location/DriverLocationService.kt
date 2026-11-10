@@ -13,6 +13,7 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.safar.app.R
@@ -77,6 +78,11 @@ class DriverLocationService : Service() {
         }
     }
 
+    private val wakeLockGuard = Any()
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wakeLockEnabled = false
+    @Volatile private var lastStillHereCheckAtMs = 0L
+
     override fun onCreate() {
         super.onCreate()
         restoreExpectedDriverIdentity()
@@ -125,10 +131,16 @@ class DriverLocationService : Service() {
                 if (networkAvailable) "Геопозиция передаётся пассажирам"
                 else "Нет интернета — отправка приостановлена"
             )
-        } catch (_: SecurityException) {
+        } catch (error: Exception) {
+            // Android 12+ may refuse to promote a service that the system restarted
+            // in the background (ForegroundServiceStartNotAllowedException is an
+            // IllegalStateException, not a SecurityException). Stop cleanly instead
+            // of crashing; the driver screen restarts tracking when it is opened.
+            android.util.Log.e(TAG, "Could not keep DriverLocationService in the foreground", error)
             stopSelf()
             return START_NOT_STICKY
         }
+        enableWakeLock()
         startPublishingIfNeeded()
         return START_STICKY
     }
@@ -209,13 +221,16 @@ class DriverLocationService : Service() {
             }
         }
 
-        // Heartbeat the last stabilized coordinate. Requesting another one-shot
-        // fix here mixed fresh fused updates with cached GPS/network fixes and
-        // let source changes inflate the session distance while standing still.
+        // Heartbeat the last stabilized coordinate. One-shot fixes are used only
+        // to confirm that a parked phone is still at that point; their
+        // coordinates are never published, because mixing them with the fused
+        // stream let source changes inflate the session distance.
         publishingJob = scope.launch {
             while (currentCoroutineContext().isActive && hasLocationPermission()) {
+                refreshWakeLock()
                 try {
                     if (networkAvailable) {
+                        requestStillHereFixIfNeeded()
                         publishLastAcceptedLocation()
                         if (lastAcceptedLocation != null) {
                             updateNotification("Геопозиция передаётся пассажирам")
@@ -472,6 +487,7 @@ class DriverLocationService : Service() {
     }
 
     private fun stopPublishing() {
+        disableWakeLock()
         publishingJob?.cancel()
         publishingJob = null
         locationStreamJob?.cancel()
@@ -479,6 +495,83 @@ class DriverLocationService : Service() {
         headingJob?.cancel()
         headingJob = null
         latestHeadingDegrees = null
+    }
+
+    private fun requestStillHereFixIfNeeded() {
+        val latest = lastAcceptedLocation ?: return
+        val now = System.currentTimeMillis()
+        if (now - latest.timestampEpochMs < STILL_HERE_CHECK_AFTER_MS) return
+        if (now - lastStillHereCheckAtMs < STILL_HERE_CHECK_AFTER_MS) return
+        lastStillHereCheckAtMs = now
+        runCatching {
+            locationProvider.currentLocationSample { sample ->
+                if (sample != null) scope.launch { confirmStillHere(sample) }
+            }
+        }.onFailure { android.util.Log.w(TAG, "Still-here location check failed", it) }
+    }
+
+    /**
+     * Android delivers no updates while the minibus is parked (2 m minimum
+     * update distance), so the heartbeat used to stop 20 seconds after the last
+     * movement and the vehicle vanished from passengers' maps a minute later. A
+     * fresh one-shot fix close to the last accepted point proves the phone is
+     * still there: only the timestamp is refreshed, so the published coordinates
+     * and the trip distance stay unchanged. Real movement keeps coming through
+     * the continuous stream.
+     */
+    private suspend fun confirmStillHere(sample: LocationSample) {
+        locationPublishMutex.withLock {
+            val latest = lastAcceptedLocation ?: return
+            if (sample.timestampEpochMs <= latest.timestampEpochMs) return
+            if (System.currentTimeMillis() - sample.timestampEpochMs > MAX_HEARTBEAT_FIX_AGE_MS) return
+            val distance = FloatArray(1)
+            android.location.Location.distanceBetween(
+                latest.point.latitude,
+                latest.point.longitude,
+                sample.point.latitude,
+                sample.point.longitude,
+                distance,
+            )
+            val radius = (sample.accuracyMeters ?: 0.0)
+                .coerceIn(STILL_HERE_RADIUS_METERS, STILL_HERE_MAX_RADIUS_METERS)
+            if (distance[0].toDouble() <= radius) {
+                lastAcceptedLocation = latest.copy(timestampEpochMs = sample.timestampEpochMs)
+            }
+        }
+    }
+
+    /**
+     * A partial wake lock keeps the 10 s heartbeat running while the screen is
+     * off. Without it a parked minibus produces no GPS callbacks that would wake
+     * the phone, the heartbeat stalls and passengers stop seeing the vehicle
+     * after the one-minute freshness window. Every heartbeat renews the timeout,
+     * so the lock also expires by itself if the service dies unexpectedly.
+     */
+    private fun enableWakeLock() {
+        synchronized(wakeLockGuard) { wakeLockEnabled = true }
+        refreshWakeLock()
+    }
+
+    private fun refreshWakeLock() {
+        synchronized(wakeLockGuard) {
+            if (!wakeLockEnabled) return
+            val lock = wakeLock ?: runCatching {
+                (getSystemService(Context.POWER_SERVICE) as PowerManager)
+                    .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG)
+                    .apply { setReferenceCounted(false) }
+            }.getOrNull()?.also { wakeLock = it } ?: return
+            runCatching { lock.acquire(WAKE_LOCK_TIMEOUT_MS) }
+                .onFailure { android.util.Log.w(TAG, "Could not acquire the tracking wake lock", it) }
+        }
+    }
+
+    private fun disableWakeLock() {
+        synchronized(wakeLockGuard) {
+            wakeLockEnabled = false
+            val lock = wakeLock ?: return
+            wakeLock = null
+            runCatching { if (lock.isHeld) lock.release() }
+        }
     }
 
     override fun onDestroy() {
@@ -505,6 +598,11 @@ class DriverLocationService : Service() {
         private const val MAX_REUSABLE_FIX_AGE_MS = 3 * 60 * 1_000L
         private const val MAX_HEARTBEAT_FIX_AGE_MS = 20_000L
         private const val MAX_BATCHED_LOCATION_FIXES = 100
+        private const val WAKE_LOCK_TAG = "Safar:DriverLocation"
+        private const val WAKE_LOCK_TIMEOUT_MS = 10 * 60 * 1_000L
+        private const val STILL_HERE_CHECK_AFTER_MS = 8_000L
+        private const val STILL_HERE_RADIUS_METERS = 25.0
+        private const val STILL_HERE_MAX_RADIUS_METERS = 50.0
         private const val TAG = "SafarDriverGPS"
         fun start(context: Context, driverId: String? = null, routeId: String? = null) {
             val hasPermission =

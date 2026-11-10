@@ -80,6 +80,7 @@ fun SafarNavHost(
                 onNameChange = viewModel::setName,
                 onPhoneChange = viewModel::setPhone,
                 onVehicleChange = {},
+                onAuthModeChange = viewModel::setAuthMode,
                 onContinue = {
                     viewModel.completeOnboarding()
                 },
@@ -102,6 +103,7 @@ fun SafarNavHost(
                 routesLoading = state.routesLoading,
                 routesError = state.routesError,
                 onRouteSelected = { route -> viewModel.setSelectedRoute(route.id) },
+                onAuthModeChange = viewModel::setAuthMode,
                 onContinue = {
                     viewModel.completeOnboarding()
                 },

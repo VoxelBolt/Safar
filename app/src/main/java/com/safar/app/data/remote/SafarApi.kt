@@ -26,6 +26,8 @@ interface SafarApi {
 
     suspend fun registerPassenger(name: String, phone: String): User
     suspend fun registerDriver(name: String, phone: String, vehicleIdentifier: String, routeId: String): DriverApplication
+    suspend fun loginPassenger(name: String, phone: String): User
+    suspend fun loginDriver(name: String, phone: String, vehicleIdentifier: String): User
     suspend fun assignDriverRoute(routeId: String): Driver
 
     suspend fun getRoutes(): List<Route>

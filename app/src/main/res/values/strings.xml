@@ -23,6 +23,17 @@
     <string name="complete_required_fields">Заполните все обязательные поля</string>
     <string name="registration_failed">Не удалось зарегистрироваться. Проверьте интернет-соединение и попробуйте снова.</string>
     <string name="registration_in_progress">Регистрация...</string>
+    <string name="auth_mode_register">Регистрация</string>
+    <string name="auth_mode_login">Вход</string>
+    <string name="login_button">Войти</string>
+    <string name="login_in_progress">Вход...</string>
+    <string name="login_subtitle">Введите те же данные, что указывали при регистрации</string>
+    <string name="passenger_login_title">Вход пассажира</string>
+    <string name="driver_login_title">Вход водителя</string>
+    <string name="background_location_title">Геолокация в фоне</string>
+    <string name="background_location_text">Чтобы пассажиры видели вашу маршрутку, когда приложение свёрнуто или экран выключен, выберите для геолокации вариант «Разрешить всегда».</string>
+    <string name="background_location_allow">Разрешить</string>
+    <string name="background_location_later">Не сейчас</string>
 
     <string name="nav_map">Карта</string>
     <string name="nav_favorites">Избранные</string>

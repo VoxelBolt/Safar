@@ -11,4 +11,10 @@ class RegistrationRepositoryImpl(
 
     override suspend fun registerPassenger(name: String, phone: String): User =
         api.registerPassenger(name, phone)
+
+    override suspend fun loginPassenger(name: String, phone: String): User =
+        api.loginPassenger(name, phone)
+
+    override suspend fun loginDriver(name: String, phone: String, vehicleIdentifier: String): User =
+        api.loginDriver(name, phone, vehicleIdentifier)
 }

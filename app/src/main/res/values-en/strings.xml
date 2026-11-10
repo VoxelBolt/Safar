@@ -22,6 +22,17 @@
     <string name="complete_required_fields">Complete all required fields</string>
     <string name="registration_failed">Registration failed. Check your internet connection and try again.</string>
     <string name="registration_in_progress">Registering...</string>
+    <string name="auth_mode_register">Sign up</string>
+    <string name="auth_mode_login">Log in</string>
+    <string name="login_button">Log in</string>
+    <string name="login_in_progress">Logging in...</string>
+    <string name="login_subtitle">Enter the same details you used to sign up</string>
+    <string name="passenger_login_title">Passenger login</string>
+    <string name="driver_login_title">Driver login</string>
+    <string name="background_location_title">Background location</string>
+    <string name="background_location_text">To keep your minibus visible to passengers while the app is minimized or the screen is off, set location access to “Allow all the time”.</string>
+    <string name="background_location_allow">Allow</string>
+    <string name="background_location_later">Not now</string>
 
     <string name="nav_map">Map</string>
     <string name="nav_favorites">Favorites</string>

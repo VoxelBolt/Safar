@@ -106,6 +106,67 @@ class SupabaseSafarApi(
         } ?: error("Driver registration returned no unique application.")
     }
 
+    override suspend fun loginPassenger(name: String, phone: String): User =
+        retryLoginOnFreshSession {
+            ensureAnonymousSession()
+            val authUserId = requireNotNull(client.auth.currentUserOrNull()?.id)
+            client.postgrest.rpc(
+                "login_passenger",
+                buildJsonObject {
+                    put("p_name", name)
+                    put("p_phone", phone)
+                },
+            ).decodeAs<UserDto>().toDomain().also { user ->
+                check(user.id == authUserId) {
+                    "Passenger login returned an unexpected user id."
+                }
+                check(user.role == UserRole.PASSENGER) {
+                    "Passenger login returned an unexpected role."
+                }
+            }
+        }
+
+    override suspend fun loginDriver(name: String, phone: String, vehicleIdentifier: String): User =
+        retryLoginOnFreshSession {
+            ensureAnonymousSession()
+            val authUserId = requireNotNull(client.auth.currentUserOrNull()?.id)
+            client.postgrest.rpc(
+                "login_driver",
+                buildJsonObject {
+                    put("p_name", name)
+                    put("p_phone", phone)
+                    put("p_vehicle_identifier", vehicleIdentifier)
+                },
+            ).decodeAs<UserDto>().toDomain().also { user ->
+                check(user.id == authUserId) {
+                    "Driver login returned an unexpected user id."
+                }
+                check(user.role == UserRole.DRIVER) {
+                    "Driver login returned an unexpected role."
+                }
+            }
+        }
+
+    /**
+     * Login moves an existing profile onto this device's anonymous auth user.
+     * If that auth user already owns another profile the server refuses to
+     * overwrite it, so start one fresh anonymous session and retry once.
+     */
+    private suspend fun <T> retryLoginOnFreshSession(block: suspend () -> T): T =
+        try {
+            block()
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            val sessionOccupied = generateSequence<Throwable>(error) { it.cause }
+                .take(6)
+                .any { it.message?.contains("SAFAR_SESSION_HAS_PROFILE", ignoreCase = true) == true }
+            if (!sessionOccupied) throw error
+            runCatching { client.auth.signOut() }
+            ensureAnonymousSession()
+            block()
+        }
+
     override suspend fun assignDriverRoute(routeId: String): Driver {
         ensureAnonymousSession()
         val authUserId = requireNotNull(client.auth.currentUserOrNull()?.id)

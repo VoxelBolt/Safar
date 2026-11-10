@@ -67,6 +67,7 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
     private var realtimeJob: Job? = null
     private var staleSweepJob: Job? = null
     private var vehiclePollingJob: Job? = null
+    private var passengerPollingJob: Job? = null
     private var sessionDistancePollingJob: Job? = null
 
     init {
@@ -172,6 +173,22 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /**
+     * Waiting passengers normally arrive through Realtime broadcasts. Poll the
+     * server snapshot as well, so the counter stays correct when a broadcast is
+     * missed or the Realtime socket is reconnecting.
+     */
+    private fun startPassengerPolling(routeId: String) {
+        passengerPollingJob?.cancel()
+        passengerPollingJob = viewModelScope.launch {
+            while (isActive && _uiState.value.selectedRoute?.id == routeId) {
+                delay(PASSENGER_POLL_INTERVAL_MS)
+                if (_uiState.value.selectedRoute?.id != routeId) break
+                refreshPassengerSnapshot(routeId)
+            }
+        }
+    }
+
     private fun switchPassengerRealtime(routeId: String) {
         realtimeJob?.cancel()
         // RealtimeTransport is a shared singleton also used by DriverLocationService
@@ -180,6 +197,7 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
         // switches route channels itself when the route actually changes.
         vehicleMarkerFreshness.clear()
         _uiState.value = _uiState.value.copy(passengerLocations = emptyList(), activeVehicles = emptyList())
+        startPassengerPolling(routeId)
         realtimeJob = viewModelScope.launch {
             var attempt = 0
             while (isActive && _uiState.value.selectedRoute?.id == routeId) {
@@ -240,6 +258,11 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private suspend fun refreshDriverSnapshots(routeId: String) {
+        refreshPassengerSnapshot(routeId)
+        refreshVehicleSnapshot(routeId)
+    }
+
+    private suspend fun refreshPassengerSnapshot(routeId: String) {
         try {
             val passengers = withContext(Dispatchers.IO) {
                 withTimeout(BACKEND_TIMEOUT_MS) {
@@ -247,21 +270,33 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
             if (_uiState.value.selectedRoute?.id == routeId) {
-                val previous = _uiState.value.passengerLocations.associateBy { it.passengerId }
+                val current = _uiState.value.passengerLocations
+                val previous = current.associateBy { it.passengerId }
+                // Keep the local copy when the snapshot has nothing newer, so its
+                // stale timer keeps counting from the last real update instead of
+                // restarting on every poll.
                 val merged = passengers.map { passenger ->
                     val old = previous[passenger.passengerId]
-                    if (old != null && old.timestampEpochMs > passenger.timestampEpochMs) {
-                        old.copy(receivedAtElapsedMs = SystemClock.elapsedRealtime())
-                    } else passenger
+                    if (old != null && old.timestampEpochMs >= passenger.timestampEpochMs) old else passenger
                 }
-                _uiState.value = _uiState.value.copy(passengerLocations = merged, error = null)
+                // A broadcast can arrive right after the snapshot was read; keep such
+                // very recent markers instead of making the counter blink.
+                val snapshotIds = passengers.map { it.passengerId }.toSet()
+                val nowElapsed = SystemClock.elapsedRealtime()
+                val recentLocalOnly = current.filter { local ->
+                    local.passengerId !in snapshotIds &&
+                        nowElapsed - local.receivedAtElapsedMs in 0L..PASSENGER_SNAPSHOT_GRACE_MS
+                }
+                _uiState.value = _uiState.value.copy(passengerLocations = merged + recentLocalOnly, error = null)
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
             android.util.Log.w("SafarRealtime", "Passenger snapshot refresh failed", error)
         }
+    }
 
+    private suspend fun refreshVehicleSnapshot(routeId: String) {
         try {
             val vehicles = withContext(Dispatchers.IO) {
                 withTimeout(BACKEND_TIMEOUT_MS) { vehicleRepository.getVehiclesForRoute(routeId) }
@@ -443,6 +478,7 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
         realtimeJob?.cancel()
         staleSweepJob?.cancel()
         vehiclePollingJob?.cancel()
+        passengerPollingJob?.cancel()
         sessionDistancePollingJob?.cancel()
         // DriverLocationService writes through PostgREST and does not own this
         // route-scoped Realtime subscription. Release the channel with the screen VM.
@@ -455,6 +491,8 @@ class DriverViewModel(application: Application) : AndroidViewModel(application) 
         const val REALTIME_STABLE_RESET_MS = 120_000L
         const val PASSENGER_STALE_SWEEP_INTERVAL_MS = 5_000L
         const val VEHICLE_POLL_INTERVAL_MS = 10_000L
+        const val PASSENGER_POLL_INTERVAL_MS = 15_000L
+        const val PASSENGER_SNAPSHOT_GRACE_MS = 10_000L
         const val BACKEND_TIMEOUT_MS = 20_000L
     }
 }
