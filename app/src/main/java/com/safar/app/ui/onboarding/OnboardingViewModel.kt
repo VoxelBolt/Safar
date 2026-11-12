@@ -96,6 +96,10 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
 
     fun setVehicleIdentifier(value: String) = update { copy(vehicleIdentifier = value) }
 
+    fun setLoginMode(value: Boolean) = update {
+        copy(isLoginMode = value, registrationError = false, registrationErrorMessage = null)
+    }
+
     fun completeOnboarding() {
         val current = _state.value
         if (current.role == null || current.registrationInProgress) return
@@ -105,7 +109,7 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
             current.phone.trim().isEmpty() -> "Введите номер телефона."
             current.role == UserRole.DRIVER && current.vehicleIdentifier.trim().isEmpty() ->
                 "Введите номер транспорта."
-            current.role == UserRole.DRIVER && current.selectedRouteId == null ->
+            current.role == UserRole.DRIVER && !current.isLoginMode && current.selectedRouteId == null ->
                 "Выберите номер маршрута."
             else -> null
         }
@@ -143,20 +147,41 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
             val result = runCatching {
                 withContext(Dispatchers.IO) {
                     withTimeout(BACKEND_TIMEOUT_MS) {
-                        when (current.role) {
-                            UserRole.PASSENGER -> registrationRepository.registerPassenger(
-                                name = current.name.trim(),
-                                phone = current.phone.trim(),
-                            )
-                            UserRole.DRIVER -> {
-                                val routeId = requireNotNull(current.selectedRouteId)
-                                driverRepository.registerDriver(
-                                    name = current.name.trim(),
-                                    phone = current.phone.trim(),
-                                    vehicleIdentifier = current.vehicleIdentifier.trim(),
-                                    routeId = routeId,
-                                )
+                        val name = current.name.trim()
+                        val phone = current.phone.trim()
+                        val vehicle = current.vehicleIdentifier.trim()
+                        val action: suspend () -> Any = {
+                            when (current.role) {
+                                UserRole.PASSENGER -> if (current.isLoginMode) {
+                                    registrationRepository.loginPassenger(name = name, phone = phone)
+                                } else {
+                                    registrationRepository.registerPassenger(name = name, phone = phone)
+                                }
+                                UserRole.DRIVER -> if (current.isLoginMode) {
+                                    driverRepository.loginDriver(
+                                        name = name,
+                                        phone = phone,
+                                        vehicleIdentifier = vehicle,
+                                    )
+                                } else {
+                                    driverRepository.registerDriver(
+                                        name = name,
+                                        phone = phone,
+                                        vehicleIdentifier = vehicle,
+                                        routeId = requireNotNull(current.selectedRouteId),
+                                    )
+                                }
                             }
+                        }
+                        try {
+                            action()
+                        } catch (error: Throwable) {
+                            // The anonymous session on this device already owns another
+                            // profile: start a fresh session and try exactly once more.
+                            if (!errorChain(error).contains("safar_session_has_profile")) throw error
+                            AppContainer.userRepository.signOut()
+                            registrationRepository.ensureAnonymousSession()
+                            action()
                         }
                     }
                 }
@@ -186,14 +211,45 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    private fun registrationErrorMessage(error: Throwable): String {
-        val chain = generateSequence(error) { it.cause }
+    private fun errorChain(error: Throwable): String =
+        generateSequence(error) { it.cause }
             .take(6)
             .mapNotNull { it.message }
             .joinToString(" ")
             .lowercase()
 
+    private fun registrationErrorMessage(error: Throwable): String {
+        val chain = errorChain(error)
+        val mismatch = Regex("safar_login_mismatch:([a-z,]+)").find(chain)?.groupValues?.get(1)
+        if (mismatch != null) {
+            val fields = mismatch.split(',').mapNotNull { field ->
+                when (field.trim()) {
+                    "name" -> "имя"
+                    "phone" -> "номер телефона"
+                    "vehicle" -> "номер транспорта"
+                    else -> null
+                }
+            }
+            if (fields.isNotEmpty()) return "Неверно указано: ${fields.joinToString(", ")}."
+        }
+
         return when {
+            "safar_phone_taken" in chain ->
+                "Этот номер телефона уже зарегистрирован. Если это ваш аккаунт — выберите «Вход»."
+            "safar_vehicle_taken" in chain ->
+                "Этот номер транспорта уже зарегистрирован другим водителем."
+            "safar_login_not_found" in chain ->
+                "Аккаунт с такими данными не найден. Проверьте номер телефона или зарегистрируйтесь."
+            "safar_login_role_mismatch" in chain ->
+                if (_state.value.role == UserRole.DRIVER) {
+                    "Этот номер зарегистрирован как пассажир. Войдите через интерфейс пассажира."
+                } else {
+                    "Этот номер зарегистрирован как водитель. Войдите через интерфейс водителя."
+                }
+            "safar_session_has_profile" in chain ->
+                "Не удалось начать новую сессию. Попробуйте ещё раз."
+            "could not find the function" in chain || "pgrst202" in chain ->
+                "Сервер ещё не обновлён. Обратитесь к команде Safar."
             "user role is already passenger" in chain ->
                 "Эта сессия уже зарегистрирована как пассажир. Для регистрации водителем нужно изменить роль аккаунта."
             "users_phone_unique" in chain ||

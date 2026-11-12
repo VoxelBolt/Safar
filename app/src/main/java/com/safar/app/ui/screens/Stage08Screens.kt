@@ -53,6 +53,11 @@ import java.util.Locale
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.safar.app.data.location.GpsDiagnosticLog
+import android.Manifest
+import android.os.Build
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.core.app.ActivityCompat
+import androidx.core.app.NotificationManagerCompat
 
 @Composable
 fun PassengerFavoritesRealScreen(
@@ -135,12 +140,43 @@ fun PassengerProfileRealScreen(
     var editOpen by remember { mutableStateOf(false) }
     var languageOpen by remember { mutableStateOf(false) }
     var infoTitle by remember { mutableStateOf<String?>(null) }
-    val notificationsInfo = stringResource(R.string.notifications_info)
+    val notificationsEnabledText = stringResource(R.string.notifications_enabled)
+    val notificationsDeniedText = stringResource(R.string.notifications_denied)
     val driverVerificationInfo = stringResource(R.string.driver_verification_info)
     val helpInfo = stringResource(R.string.help_info)
     val aboutInfo = stringResource(R.string.about_info)
     val context = LocalContext.current
     var diagnosticEnabled by remember { mutableStateOf(GpsDiagnosticLog.isEnabled(context)) }
+    var notificationsDenied by remember { mutableStateOf(false) }
+    var notificationPermissionAsked by rememberSaveable { mutableStateOf(false) }
+    // Profile -> Notifications asks Android for POST_NOTIFICATIONS (Android 13+)
+    // for both passengers and drivers instead of only showing a placeholder.
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        notificationsDenied = !granted
+        infoTitle = if (granted) notificationsEnabledText else notificationsDeniedText
+    }
+    fun onNotificationsClick() {
+        if (notificationsGranted(context)) {
+            notificationsDenied = false
+            infoTitle = notificationsEnabledText
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val activity = context.findActivity()
+            val canAskAgain = !notificationPermissionAsked || (activity != null &&
+                ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.POST_NOTIFICATIONS))
+            notificationPermissionAsked = true
+            if (canAskAgain) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                return
+            }
+        }
+        // Permission permanently denied or notifications disabled for the app.
+        notificationsDenied = true
+        openNotificationSettings(context)
+    }
     val exportDiagnostics = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri != null) runCatching {
             context.contentResolver.openOutputStream(uri)?.use { output -> GpsDiagnosticLog.copyTo(context, output) }
@@ -206,7 +242,7 @@ fun PassengerProfileRealScreen(
                 )
                 ProfileAction(
                     stringResource(R.string.notifications),
-                    onClick = { infoTitle = notificationsInfo },
+                    onClick = { onNotificationsClick() },
                 )
                 ProfileAction(
                     stringResource(R.string.language_label),
@@ -559,3 +595,24 @@ private fun languageName(tag: String): String = when (tag.lowercase()) {
 }
 
 private fun infoTextFor(title: String): String = title
+
+private fun notificationsGranted(context: android.content.Context): Boolean {
+    val runtimeGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+        androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+        android.content.pm.PackageManager.PERMISSION_GRANTED
+    return runtimeGranted && NotificationManagerCompat.from(context).areNotificationsEnabled()
+}
+
+private fun openNotificationSettings(context: android.content.Context) {
+    val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+    } else {
+        android.content.Intent(
+            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            android.net.Uri.fromParts("package", context.packageName, null),
+        )
+    }
+    runCatching { context.startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        .onFailure { openAppSettings(context) }
+}

@@ -96,6 +96,7 @@ import com.safar.app.R
 import com.safar.app.data.location.AndroidLocationProvider
 import com.safar.app.data.location.DriverLocationService
 import com.safar.app.domain.model.GeoPoint
+import kotlin.math.roundToInt
 import com.safar.app.domain.model.PassengerLocation
 import com.safar.app.domain.model.Route
 import com.safar.app.domain.model.UserRole
@@ -206,11 +207,29 @@ private fun PassengerMapScreen(
 ) {
     val ui by viewModel.uiState.collectAsState()
     var pickerOpen by remember { mutableStateOf(false) }
+    // Vehicle whose info card is open after tapping its icon on the map.
+    var selectedVehicleId by remember { mutableStateOf<String?>(null) }
 
     // Keep the native MapLibre view composed while route search is open.
     // Disposing and immediately recreating MapView on every route selection can
     // race its native renderer/style lifecycle and leave a blank map until the
     // user triggers another recomposition by changing tabs or selecting again.
+    val selectedVehicle = selectedVehicleId?.let { id -> ui.activeVehicles.firstOrNull { it.id == id } }
+    if (selectedVehicleId != null && selectedVehicle == null) {
+        // The vehicle went offline while its card was open.
+        selectedVehicleId = null
+    }
+    if (selectedVehicle != null) {
+        VehicleInfoDialog(
+            vehicle = selectedVehicle,
+            routeNumber = ui.selectedRoute?.number,
+            passengerPoint = ui.passengerLocation,
+            isFavorite = isFavorite(selectedVehicle.id),
+            onToggleFavorite = { onToggleFavorite(selectedVehicle) },
+            onDismiss = { selectedVehicleId = null },
+        )
+    }
+
     Box(modifier = modifier.fillMaxSize()) {
     Column(modifier = Modifier.fillMaxSize()) {
         Box(
@@ -236,8 +255,37 @@ private fun PassengerMapScreen(
                 },
                 passengerLocations = emptyList(),
                 routeOpacity = 0.78f,
+                boardedVehicleId = ui.boardedVehicleId,
+                onVehicleClick = { vehicleId -> selectedVehicleId = vehicleId },
                 modifier = Modifier.fillMaxSize(),
             )
+
+            val boardedVehicle = ui.boardedVehicleId?.let { id -> ui.activeVehicles.firstOrNull { it.id == id } }
+            if (boardedVehicle != null) {
+                Surface(
+                    onClick = { selectedVehicleId = boardedVehicle.id },
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 76.dp, start = 16.dp, end = 16.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    color = SafarBlue,
+                    shadowElevation = 4.dp,
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                        Text(
+                            stringResource(R.string.in_vehicle_title),
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            stringResource(R.string.in_vehicle_subtitle, boardedVehicle.identifier),
+                            color = Color.White,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            }
 
             val passengerDarkMode = LocalSafarDarkMode.current
             val setPassengerDarkMode = LocalSetSafarDarkMode.current
@@ -780,6 +828,54 @@ private fun ProfileMenuCard(rows: List<ProfileRow>) {
 }
 
 @Composable
+private fun VehicleInfoDialog(
+    vehicle: Vehicle,
+    routeNumber: String?,
+    passengerPoint: GeoPoint?,
+    isFavorite: Boolean,
+    onToggleFavorite: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val distanceMeters = passengerPoint?.let { point ->
+        vehicle.currentLocation?.let { location ->
+            NearestVehicleCalculator.distanceMeters(point, GeoPoint(location.latitude, location.longitude))
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.vehicle_info_title, vehicle.identifier)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (!routeNumber.isNullOrBlank()) {
+                    Text(stringResource(R.string.vehicle_info_route, routeNumber))
+                }
+                Text(stringResource(R.string.vehicle_info_active), color = SafarBlue, fontWeight = FontWeight.SemiBold)
+                if (distanceMeters != null) {
+                    val distanceText = if (distanceMeters < 1_000.0) {
+                        "${distanceMeters.roundToInt()} м"
+                    } else {
+                        String.format(java.util.Locale.US, "%.1f км", distanceMeters / 1_000.0)
+                    }
+                    Text(stringResource(R.string.vehicle_info_distance, distanceText))
+                    Text(stringResource(R.string.vehicle_info_eta, NearestVehicleCalculator.etaMinutes(distanceMeters)))
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onToggleFavorite) {
+                Text(
+                    if (isFavorite) stringResource(R.string.remove_from_favorites)
+                    else stringResource(R.string.add_to_favorites)
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) }
+        },
+    )
+}
+
+@Composable
 fun DriverMainScreen(state: OnboardingState, onLanguageSelected: (String) -> Unit, onLogout: () -> Unit) {
     var tab by remember { mutableStateOf(DriverTab.HOME) }
     val driverViewModel: DriverViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
@@ -787,12 +883,46 @@ fun DriverMainScreen(state: OnboardingState, onLanguageSelected: (String) -> Uni
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var foregroundLocationGranted by remember { mutableStateOf(hasForegroundLocationPermission(context)) }
-    var notificationPermissionRequested by rememberSaveable { mutableStateOf(false) }
+    var backgroundLocationGranted by remember { mutableStateOf(hasBackgroundLocationPermission(context)) }
+    // Location permissions are requested automatically as soon as the driver
+    // reaches the main screen (right after registration/login), without an
+    // extra button. rememberSaveable prevents repeated prompts on rotation.
+    var foregroundPermissionAsked by rememberSaveable { mutableStateOf(false) }
+    var backgroundPermissionAsked by rememberSaveable { mutableStateOf(false) }
+    var backgroundRationaleOpen by rememberSaveable { mutableStateOf(false) }
     // Driver GPS tracking is independent from the Work Session timer. A driver
     // with location permission and an assigned route stays visible to passengers
     // even after Pause/Finish.
     val trackingReady = foregroundLocationGranted &&
         ui.driver?.routeId != null
+
+    val backgroundLocationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        backgroundLocationGranted = granted || hasBackgroundLocationPermission(context)
+        if (trackingReady && hasForegroundLocationPermission(context)) {
+            runCatching { DriverLocationService.start(context, ui.driver?.userId, ui.driver?.routeId) }
+        }
+    }
+
+    fun askForBackgroundLocation() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        if (hasBackgroundLocationPermission(context)) {
+            backgroundLocationGranted = true
+            return
+        }
+        val activity = context.findActivity()
+        val canAskAgain = !backgroundPermissionAsked || (activity != null &&
+            androidx.core.app.ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.ACCESS_BACKGROUND_LOCATION))
+        backgroundPermissionAsked = true
+        if (canAskAgain) {
+            // On Android 11+ the system opens the location settings page where
+            // the driver selects "Allow all the time".
+            backgroundLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+        } else {
+            openAppSettings(context)
+        }
+    }
 
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -800,16 +930,41 @@ fun DriverMainScreen(state: OnboardingState, onLanguageSelected: (String) -> Uni
         foregroundLocationGranted = result[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
             result[Manifest.permission.ACCESS_COARSE_LOCATION] == true ||
             hasForegroundLocationPermission(context)
-        // GPS publishing starts as soon as the driver has permission and an assigned route; it is not tied to the timer.
+        // Background access can only be requested after foreground access.
+        // Continue the flow immediately so tracking survives app close.
+        if (foregroundLocationGranted &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+            !hasBackgroundLocationPermission(context) &&
+            !backgroundPermissionAsked
+        ) {
+            backgroundRationaleOpen = true
+        }
     }
-    val notificationPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { /* Location sharing continues even if notification permission is denied. */ }
+
+    LaunchedEffect(Unit) {
+        if (!hasForegroundLocationPermission(context)) {
+            if (!foregroundPermissionAsked) {
+                foregroundPermissionAsked = true
+                locationPermissionLauncher.launch(
+                    arrayOf(
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION,
+                    )
+                )
+            }
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+            !hasBackgroundLocationPermission(context) &&
+            !backgroundPermissionAsked
+        ) {
+            backgroundRationaleOpen = true
+        }
+    }
 
     androidx.compose.runtime.DisposableEffect(lifecycleOwner, trackingReady) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 foregroundLocationGranted = hasForegroundLocationPermission(context)
+                backgroundLocationGranted = hasBackgroundLocationPermission(context)
                 // Re-issue the start command every time the driver screen becomes
                 // visible. If Android restarted/killed the FGS while the Compose
                 // state stayed unchanged, the old LaunchedEffect would not fire
@@ -823,28 +978,56 @@ fun DriverMainScreen(state: OnboardingState, onLanguageSelected: (String) -> Uni
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    // Fallback when the automatic request was dismissed or denied.
     fun requestDriverTrackingPermission() {
         if (!foregroundLocationGranted) {
-            locationPermissionLauncher.launch(
-                arrayOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION,
+            val activity = context.findActivity()
+            val canAskAgain = !foregroundPermissionAsked || (activity != null &&
+                androidx.core.app.ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.ACCESS_FINE_LOCATION))
+            foregroundPermissionAsked = true
+            if (canAskAgain) {
+                locationPermissionLauncher.launch(
+                    arrayOf(
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION,
+                    )
                 )
-            )
+            } else {
+                openAppSettings(context)
+            }
+        } else if (!backgroundLocationGranted) {
+            backgroundRationaleOpen = true
         }
     }
 
     LaunchedEffect(trackingReady) {
+        // Notification permission is requested only from Profile -> Notifications.
         if (trackingReady) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                !notificationPermissionRequested &&
-                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-            ) {
-                notificationPermissionRequested = true
-                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
             runCatching { DriverLocationService.start(context, ui.driver?.userId, ui.driver?.routeId) }
         }
+    }
+
+    if (backgroundRationaleOpen) {
+        AlertDialog(
+            onDismissRequest = {
+                backgroundRationaleOpen = false
+                backgroundPermissionAsked = true
+            },
+            title = { Text(stringResource(R.string.background_location_title)) },
+            text = { Text(stringResource(R.string.background_location_message)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    backgroundRationaleOpen = false
+                    askForBackgroundLocation()
+                }) { Text(stringResource(R.string.background_location_allow)) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    backgroundRationaleOpen = false
+                    backgroundPermissionAsked = true
+                }) { Text(stringResource(R.string.background_location_later)) }
+            },
+        )
     }
 
     Scaffold(
@@ -870,6 +1053,7 @@ fun DriverMainScreen(state: OnboardingState, onLanguageSelected: (String) -> Uni
                 onResumeWork = driverViewModel::resumeWork,
                 onFinishWork = driverViewModel::finishWork,
                 foregroundLocationGranted = foregroundLocationGranted,
+                backgroundLocationGranted = backgroundLocationGranted,
                 onRequestTrackingPermission = ::requestDriverTrackingPermission,
                 modifier = Modifier.padding(padding),
             )
@@ -896,6 +1080,43 @@ private fun russianPeopleWord(count: Int): String {
     }
 }
 
+/** A passenger this close to a vehicle is treated as being on board. */
+internal const val ON_BOARD_DISTANCE_METERS = 30.0
+
+private fun passengersNotOnBoard(
+    driverPoint: GeoPoint?,
+    passengers: List<PassengerLocation>,
+): List<PassengerLocation> {
+    if (driverPoint == null) return passengers
+    return passengers.filter { passenger ->
+        distanceBetweenMeters(driverPoint, GeoPoint(passenger.latitude, passenger.longitude)) > ON_BOARD_DISTANCE_METERS
+    }
+}
+
+private fun passengersWaitingForDriver(
+    driverPoint: GeoPoint?,
+    passengers: List<PassengerLocation>,
+    activeVehicles: List<Vehicle>,
+    ownVehicleId: String?,
+): List<PassengerLocation> {
+    val candidates = passengersNotOnBoard(driverPoint, passengers)
+    if (driverPoint == null) return candidates
+    val otherVehicles = activeVehicles
+        .filter { it.id != ownVehicleId }
+        .mapNotNull { vehicle -> vehicle.currentLocation?.let { GeoPoint(it.latitude, it.longitude) } }
+        // Our own vehicle can appear in the shared snapshot; ignore it.
+        .filter { distanceBetweenMeters(it, driverPoint) > 12.0 }
+    return candidates.filter { passenger ->
+        val passengerPoint = GeoPoint(passenger.latitude, passenger.longitude)
+        val ownDistance = distanceBetweenMeters(driverPoint, passengerPoint)
+        otherVehicles.none { other ->
+            val otherDistance = distanceBetweenMeters(other, passengerPoint)
+            // Passenger already inside another vehicle, or another vehicle is closer.
+            otherDistance <= ON_BOARD_DISTANCE_METERS || otherDistance < ownDistance
+        }
+    }
+}
+
 private fun distanceBetweenMeters(a: GeoPoint, b: GeoPoint): Double {
     val earthRadius = 6_371_000.0
     val dLat = Math.toRadians(b.latitude - a.latitude)
@@ -918,6 +1139,7 @@ private fun DriverHomeScreen(
     onResumeWork: () -> Unit,
     onFinishWork: () -> Unit,
     foregroundLocationGranted: Boolean,
+    backgroundLocationGranted: Boolean,
     onRequestTrackingPermission: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1061,6 +1283,18 @@ private fun DriverHomeScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
     ) {
+        // Passengers that have boarded this vehicle are within a few meters of
+        // the driver: hide them so no passenger icon sits on top of the driver's
+        // own marker. Boarded passengers also stop publishing on their side.
+        val visiblePassengers = remember(ui.passengerLocations, driverLocation) {
+            passengersNotOnBoard(driverLocation, ui.passengerLocations)
+        }
+        // The "waiting for you" counter only includes passengers for whom this
+        // driver is the nearest active vehicle on the route.
+        val waitingPassengers = remember(ui.passengerLocations, ui.activeVehicles, driverLocation, ui.driver?.vehicleId) {
+            passengersWaitingForDriver(driverLocation, ui.passengerLocations, ui.activeVehicles, ui.driver?.vehicleId)
+        }
+
         // The map is the primary surface of the driver home screen. There is
         // intentionally no parent verticalScroll here, so drag gestures reach
         // MapLibre instead of scrolling the whole page.
@@ -1092,7 +1326,7 @@ private fun DriverHomeScreen(
                         } ?: true)
                 }
                 .mapNotNull { vehicle -> vehicle.currentLocation?.let { vehicle to it } },
-            passengerLocations = ui.passengerLocations,
+            passengerLocations = visiblePassengers,
             focusPoint = passengerFocusPoint,
             focusPointRequestId = passengerFocusRequestId,
             routeOpacity = 0.78f,
@@ -1127,15 +1361,15 @@ private fun DriverHomeScreen(
             )
         }
 
-        if (ui.passengerLocations.isNotEmpty()) {
+        if (waitingPassengers.isNotEmpty()) {
             Surface(
                 onClick = {
                     val origin = driverLocation
                     val nearestPassenger = origin?.let { driverPoint ->
-                        ui.passengerLocations.minByOrNull { passenger ->
+                        waitingPassengers.minByOrNull { passenger ->
                             distanceBetweenMeters(driverPoint, GeoPoint(passenger.latitude, passenger.longitude))
                         }
-                    }
+                    } ?: waitingPassengers.firstOrNull()
                     if (nearestPassenger != null) {
                         passengerFocusPoint = GeoPoint(nearestPassenger.latitude, nearestPassenger.longitude)
                         passengerFocusRequestId += 1L
@@ -1151,7 +1385,7 @@ private fun DriverHomeScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = "Ожидают вас: ${ui.passengerLocations.size} ${russianPeopleWord(ui.passengerLocations.size)}",
+                        text = "Ожидают вас: ${waitingPassengers.size} ${russianPeopleWord(waitingPassengers.size)}",
                         color = MaterialTheme.colorScheme.onSurface,
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.SemiBold,
@@ -1213,7 +1447,7 @@ private fun DriverHomeScreen(
             }
         }
 
-        if (!foregroundLocationGranted) {
+        if (!foregroundLocationGranted || !backgroundLocationGranted) {
             Surface(
                 modifier = Modifier
                     .align(Alignment.TopStart)
@@ -1232,7 +1466,8 @@ private fun DriverHomeScreen(
                     SafarGlyph(Glyph.PIN, Muted, 20.dp)
                     Spacer(Modifier.width(7.dp))
                     Text(
-                        stringResource(R.string.location_permission_needed),
+                        if (!foregroundLocationGranted) stringResource(R.string.location_permission_needed)
+                        else stringResource(R.string.background_location_needed),
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
@@ -1369,6 +1604,27 @@ private fun StatMini(label: String, value: String, modifier: Modifier) {
     }
 }
 
+
+internal fun hasBackgroundLocationPermission(context: android.content.Context): Boolean =
+    Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+internal tailrec fun android.content.Context.findActivity(): android.app.Activity? = when (this) {
+    is android.app.Activity -> this
+    is android.content.ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
+internal fun openAppSettings(context: android.content.Context) {
+    runCatching {
+        context.startActivity(
+            android.content.Intent(
+                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                android.net.Uri.fromParts("package", context.packageName, null),
+            ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    }
+}
 
 private fun hasForegroundLocationPermission(context: android.content.Context): Boolean =
     ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||

@@ -199,13 +199,15 @@ fun RegistrationScreen(
     routesLoading: Boolean = false,
     routesError: Boolean = false,
     onRouteSelected: (Route) -> Unit = {},
+    isLoginMode: Boolean = false,
+    onLoginModeChange: (Boolean) -> Unit = {},
     onContinue: () -> Unit,
 ) {
     var attempted by remember { mutableStateOf(false) }
     val nameValid = state.name.trim().isNotEmpty()
     val phoneValid = state.phone.trim().isNotEmpty()
     val driverFieldsValid = role == UserRole.PASSENGER ||
-        (state.vehicleIdentifier.trim().isNotEmpty() && selectedRouteId != null)
+        (state.vehicleIdentifier.trim().isNotEmpty() && (isLoginMode || selectedRouteId != null))
     val formValid = nameValid && phoneValid && driverFieldsValid
 
     Column(
@@ -242,8 +244,46 @@ fun RegistrationScreen(
                 .padding(horizontal = 24.dp),
         ) {
             Spacer(Modifier.height(10.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFFF0F3F8))
+                    .padding(4.dp),
+            ) {
+                listOf(false to R.string.auth_mode_register, true to R.string.auth_mode_login)
+                    .forEach { (loginTab, labelRes) ->
+                        val selected = isLoginMode == loginTab
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(11.dp))
+                                .clickable(enabled = !state.registrationInProgress) {
+                                    if (!selected) {
+                                        attempted = false
+                                        onLoginModeChange(loginTab)
+                                    }
+                                },
+                            color = if (selected) SafarWhite else Color.Transparent,
+                            shadowElevation = if (selected) 1.dp else 0.dp,
+                        ) {
+                            Text(
+                                text = stringResource(labelRes),
+                                modifier = Modifier.padding(vertical = 10.dp),
+                                textAlign = TextAlign.Center,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                color = if (selected) SafarNavy else MutedColor,
+                            )
+                        }
+                    }
+            }
+            Spacer(Modifier.height(14.dp))
             Text(
-                text = stringResource(R.string.registration_subtitle),
+                text = if (isLoginMode) {
+                    stringResource(R.string.login_subtitle)
+                } else {
+                    stringResource(R.string.registration_subtitle)
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -278,6 +318,9 @@ fun RegistrationScreen(
                     keyboardType = KeyboardType.Text,
                 )
 
+            }
+
+            if (role == UserRole.DRIVER && !isLoginMode) {
                 Spacer(Modifier.height(14.dp))
                 var routeMenuExpanded by remember { mutableStateOf(false) }
                 val selectedRoute = driverRoutes.firstOrNull { it.id == selectedRouteId }
@@ -342,10 +385,11 @@ fun RegistrationScreen(
 
             Spacer(Modifier.height(26.dp))
             PrimaryButton(
-                text = if (state.registrationInProgress) {
-                    stringResource(R.string.registration_in_progress)
-                } else {
-                    stringResource(R.string.continue_button)
+                text = when {
+                    state.registrationInProgress && isLoginMode -> stringResource(R.string.login_in_progress)
+                    state.registrationInProgress -> stringResource(R.string.registration_in_progress)
+                    isLoginMode -> stringResource(R.string.login_button)
+                    else -> stringResource(R.string.continue_button)
                 },
                 enabled = !state.registrationInProgress,
                 onClick = {

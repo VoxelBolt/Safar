@@ -33,12 +33,14 @@ interface DriverRepository {
     suspend fun getDriver(): Driver?
     suspend fun getDriverApplication(): DriverApplication?
     suspend fun registerDriver(name: String, phone: String, vehicleIdentifier: String, routeId: String): DriverApplication
+    suspend fun loginDriver(name: String, phone: String, vehicleIdentifier: String): User
     suspend fun assignRoute(routeId: String): Driver
 }
 
 interface RegistrationRepository {
     suspend fun ensureAnonymousSession()
     suspend fun registerPassenger(name: String, phone: String): User
+    suspend fun loginPassenger(name: String, phone: String): User
 }
 
 interface FavoriteRepository {
