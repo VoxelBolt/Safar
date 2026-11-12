@@ -59,6 +59,11 @@ data class PassengerMapUiState(
     val loadingVehicles: Boolean = false,
     val error: String? = null,
     val locationPermissionRequired: Boolean = true,
+    // Vehicle the passenger is currently riding in (detected by proximity).
+    // While set, the map shows one "you are in this vehicle" marker instead of
+    // the vehicle icon + the passenger's blue dot, and the passenger stops
+    // publishing a waiting location to drivers.
+    val boardedVehicleId: String? = null,
 )
 
 class PassengerMapViewModel(application: Application) : AndroidViewModel(application) {
@@ -77,6 +82,9 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
     private var realtimeJob: Job? = null
     private var passengerPublishJob: Job? = null
     @Volatile private var lastPassengerFixAtMs: Long = 0L
+    private var boardingCandidateId: String? = null
+    private var boardingCandidateSinceMs: Long = 0L
+    private var boardingCandidateHits: Int = 0
     private var staleSweepJob: Job? = null
     private var headingJob: Job? = null
     private var locateRequestJob: Job? = null
@@ -250,7 +258,9 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
             nearestVehicleRequestId = 0L,
             nearestVehicleTrackingEnabled = true,
             error = null,
+            boardedVehicleId = null,
         )
+        resetBoardingCandidate()
         vehicleMarkerFreshness.clear()
         loadVehicles(route)
         startVehicleLocationPolling(route.id)
@@ -394,7 +404,8 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                 val now = System.currentTimeMillis()
                 val state = _uiState.value
                 val point = state.passengerLocation
-                if (!state.locationPermissionRequired && point != null && lastPassengerFixAtMs > 0L &&
+                if (state.boardedVehicleId == null &&
+                    !state.locationPermissionRequired && point != null && lastPassengerFixAtMs > 0L &&
                     state.passengerLocationAccuracyMeters?.let { it <= LOCATION_BROADCAST_MAX_ACCURACY_METERS } == true &&
                     now - lastPassengerFixAtMs in 0L..PASSENGER_FIX_MAX_AGE_MS) {
                     runCatching {
@@ -637,6 +648,7 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
                         passengerLocationAccuracyMeters = sample.accuracyMeters,
                     )
                     if (_uiState.value.nearestVehicleTrackingEnabled) updateNearestVehicle(point, _uiState.value.activeVehicles)
+                    updateBoardingState(point, sample.accuracyMeters)
                 }
             } catch (error: CancellationException) {
                 throw error
@@ -710,6 +722,68 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    /**
+     * Detects that the passenger is riding in a vehicle: the passenger's GPS
+     * fix stays within [BOARD_DISTANCE_METERS] of the same active vehicle for
+     * several consecutive fixes over [BOARD_CONFIRM_MS]. Leaving is detected
+     * with a larger hysteresis distance so GPS jitter does not flicker the UI.
+     */
+    private fun updateBoardingState(point: GeoPoint, accuracyMeters: Double?) {
+        val state = _uiState.value
+        val vehicles = state.activeVehicles
+        val boardedId = state.boardedVehicleId
+        if (boardedId != null) {
+            val boardedLocation = vehicles.firstOrNull { it.id == boardedId }?.currentLocation
+            if (boardedLocation == null ||
+                distanceMeters(point, boardedLocation.latitude, boardedLocation.longitude) > LEAVE_DISTANCE_METERS
+            ) {
+                _uiState.value = state.copy(boardedVehicleId = null)
+                resetBoardingCandidate()
+            }
+            return
+        }
+        if (accuracyMeters != null && accuracyMeters > BOARD_MAX_ACCURACY_METERS) {
+            resetBoardingCandidate()
+            return
+        }
+        val closest = vehicles
+            .mapNotNull { vehicle ->
+                vehicle.currentLocation?.let { vehicle.id to distanceMeters(point, it.latitude, it.longitude) }
+            }
+            .minByOrNull { it.second }
+        if (closest == null || closest.second > BOARD_DISTANCE_METERS) {
+            resetBoardingCandidate()
+            return
+        }
+        val now = SystemClock.elapsedRealtime()
+        if (boardingCandidateId != closest.first) {
+            boardingCandidateId = closest.first
+            boardingCandidateSinceMs = now
+            boardingCandidateHits = 1
+            return
+        }
+        boardingCandidateHits += 1
+        if (boardingCandidateHits >= BOARD_MIN_FIXES && now - boardingCandidateSinceMs >= BOARD_CONFIRM_MS) {
+            _uiState.value = state.copy(boardedVehicleId = closest.first)
+            // Remove the waiting marker so drivers no longer see this passenger.
+            state.selectedRoute?.id?.let { routeId ->
+                viewModelScope.launch { runCatching { realtimeTransport.removePassengerLocation(routeId) } }
+            }
+        }
+    }
+
+    private fun resetBoardingCandidate() {
+        boardingCandidateId = null
+        boardingCandidateSinceMs = 0L
+        boardingCandidateHits = 0
+    }
+
+    private fun distanceMeters(point: GeoPoint, latitude: Double, longitude: Double): Double {
+        val result = FloatArray(1)
+        android.location.Location.distanceBetween(point.latitude, point.longitude, latitude, longitude, result)
+        return result[0].toDouble()
+    }
+
     override fun onCleared() {
         passengerPublishJob?.cancel()
         nearestVehicleRequestJob?.cancel()
@@ -734,5 +808,10 @@ class PassengerMapViewModel(application: Application) : AndroidViewModel(applica
         const val LOCATION_BROADCAST_MAX_ACCURACY_METERS = 20.0
         const val REALTIME_SDK_RECOVERY_GRACE_MS = 20_000L
         const val REALTIME_STABLE_RESET_MS = 120_000L
+        const val BOARD_DISTANCE_METERS = 30.0
+        const val LEAVE_DISTANCE_METERS = 70.0
+        const val BOARD_MAX_ACCURACY_METERS = 35.0
+        const val BOARD_MIN_FIXES = 3
+        const val BOARD_CONFIRM_MS = 20_000L
     }
 }

@@ -112,6 +112,9 @@ private const val PASSENGER_MARKER_IMAGE_ID = "safar-passenger-marker-image"
 private const val VEHICLES_LAYER_ID = "safar-vehicles-layer"
 private const val VEHICLE_MARKER_IMAGE_ID = "safar-bus-marker-image"
 private const val VEHICLE_HEADING_PROPERTY = "heading_degrees"
+private const val BOARDED_VEHICLE_SOURCE_ID = "safar-boarded-vehicle-source"
+private const val BOARDED_VEHICLE_LAYER_ID = "safar-boarded-vehicle-layer"
+private const val BOARDED_VEHICLE_IMAGE_ID = "safar-boarded-vehicle-image"
 private const val VEHICLE_LABEL_LAYER_ID = "safar-vehicle-label-layer"
 
 private const val DEFAULT_LATITUDE = 40.2829
@@ -140,6 +143,11 @@ internal fun PassengerMapView(
     focusPoint: GeoPoint? = null,
     focusPointRequestId: Long = 0L,
     routeOpacity: Float = 0.78f,
+    // When set, this vehicle and the user's blue dot are replaced by a single
+    // "you are riding in this vehicle" marker.
+    boardedVehicleId: String? = null,
+    // Called with the vehicle id when the user taps a vehicle icon.
+    onVehicleClick: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     var mapStarted by remember { mutableStateOf(false) }
@@ -163,6 +171,9 @@ internal fun PassengerMapView(
     var accuracyCircleNeeded by remember { mutableStateOf(false) }
     val latestPassengerLocation by rememberUpdatedState(passengerLocation)
     val latestLocationAccuracy by rememberUpdatedState(locationAccuracyMeters)
+    val latestOnVehicleClick by rememberUpdatedState(onVehicleClick)
+    // The blue user marker is hidden while the passenger rides in a vehicle.
+    val markerLocation = if (boardedVehicleId != null) null else passengerLocation
     val accuracyCircleProgress by animateFloatAsState(
         targetValue = if (accuracyCircleNeeded) 1f else 0f,
         animationSpec = tween(durationMillis = 450, easing = FastOutSlowInEasing),
@@ -324,6 +335,29 @@ internal fun PassengerMapView(
                                 followingUser = false
                             }
                         }
+                        loadedMap.addOnMapClickListener { latLng ->
+                            val callback = latestOnVehicleClick ?: return@addOnMapClickListener false
+                            val screenPoint = loadedMap.projection.toScreenLocation(latLng)
+                            val touchRadius = 28f * resources.displayMetrics.density
+                            val area = android.graphics.RectF(
+                                screenPoint.x - touchRadius,
+                                screenPoint.y - touchRadius,
+                                screenPoint.x + touchRadius,
+                                screenPoint.y + touchRadius,
+                            )
+                            val vehicleId = runCatching {
+                                loadedMap.queryRenderedFeatures(area, VEHICLES_LAYER_ID, BOARDED_VEHICLE_LAYER_ID)
+                            }.getOrDefault(emptyList())
+                                .firstNotNullOfOrNull { feature ->
+                                    if (feature.hasProperty("vehicle_id")) feature.getStringProperty("vehicle_id") else null
+                                }
+                            if (vehicleId != null) {
+                                callback(vehicleId)
+                                true
+                            } else {
+                                false
+                            }
+                        }
                         loadedMap.setMaxZoomPreference(MAX_MAP_ZOOM)
                         loadedMap.uiSettings.isCompassEnabled = false
                         loadedMap.uiSettings.isScrollGesturesEnabled = true
@@ -381,24 +415,24 @@ internal fun PassengerMapView(
         }
     }
 
-    LaunchedEffect(styleReady, passengerLocation) {
+    LaunchedEffect(styleReady, markerLocation) {
         if (!styleReady) return@LaunchedEffect
-        map?.style?.let { style -> updateUserLocation(style, passengerLocation) }
+        map?.style?.let { style -> updateUserLocation(style, markerLocation) }
     }
 
-    LaunchedEffect(map, passengerLocation, locationAccuracyMeters) {
+    LaunchedEffect(map, markerLocation, locationAccuracyMeters) {
         val loadedMap = map ?: return@LaunchedEffect
         accuracyCircleNeeded = shouldShowAccuracyCircle(
             map = loadedMap,
             mapView = mapView,
-            point = passengerLocation,
+            point = markerLocation,
             accuracyMeters = locationAccuracyMeters,
         )
     }
 
     LaunchedEffect(
         styleReady,
-        passengerLocation,
+        markerLocation,
         locationAccuracyMeters,
         accuracyCircleProgress,
         cameraIdleRevision,
@@ -409,7 +443,7 @@ internal fun PassengerMapView(
                 style = style,
                 map = map,
                 mapView = mapView,
-                point = passengerLocation,
+                point = markerLocation,
                 accuracyMeters = locationAccuracyMeters,
                 expansion = accuracyCircleProgress,
             )
@@ -426,9 +460,9 @@ internal fun PassengerMapView(
         }
     }
 
-    LaunchedEffect(styleReady, passengerLocation, headingDegrees) {
+    LaunchedEffect(styleReady, markerLocation, headingDegrees) {
         if (!styleReady) return@LaunchedEffect
-        map?.style?.let { style -> updateHeadingSector(style, passengerLocation, headingDegrees) }
+        map?.style?.let { style -> updateHeadingSector(style, markerLocation, headingDegrees) }
     }
 
     LaunchedEffect(styleReady, passengerLocations, route?.id) {
@@ -436,12 +470,19 @@ internal fun PassengerMapView(
         map?.style?.let { style -> updatePassengerLocations(style, passengerLocations, route?.id) }
     }
 
-    LaunchedEffect(styleReady, stabilizedVehicleLocations, nearestVehicle) {
+    LaunchedEffect(styleReady, stabilizedVehicleLocations, nearestVehicle, boardedVehicleId) {
         if (!styleReady) return@LaunchedEffect
         map?.style?.let { style ->
             val visibleVehicles = displayVehicleLocations(stabilizedVehicleLocations, nearestVehicle)
-            updateVehicles(style, visibleVehicles)
-            updateVehicleHeadingSectors(style, visibleVehicles)
+            val boarded = boardedVehicleId?.let { id ->
+                visibleVehicles.firstOrNull { it.first.id == id }
+                    ?: stabilizedVehicleLocations.firstOrNull { it.first.id == id }
+            }
+            val otherVehicles = if (boardedVehicleId == null) visibleVehicles
+            else visibleVehicles.filterNot { it.first.id == boardedVehicleId }
+            updateVehicles(style, otherVehicles)
+            updateVehicleHeadingSectors(style, otherVehicles)
+            updateBoardedVehicle(style, boarded)
         }
     }
 
@@ -597,6 +638,9 @@ private fun setupMapLayers(style: Style, context: Context) {
     if (style.getSource(ROUTE_STATION_SOURCE_ID) == null) {
         style.addSource(GeoJsonSource(ROUTE_STATION_SOURCE_ID, FeatureCollection.fromFeatures(emptyArray<Feature>())))
     }
+    if (style.getSource(BOARDED_VEHICLE_SOURCE_ID) == null) {
+        style.addSource(GeoJsonSource(BOARDED_VEHICLE_SOURCE_ID, FeatureCollection.fromFeatures(emptyArray<Feature>())))
+    }
 
     if (style.getLayer(ROUTE_CASING_LAYER_ID) == null) {
         style.addLayer(
@@ -662,6 +706,22 @@ private fun setupMapLayers(style: Style, context: Context) {
             // screen space so the phone's compass bearing remains visually aligned
             // regardless of the map camera's own rotation.
             iconRotate(Expression.get(VEHICLE_HEADING_PROPERTY)),
+            iconRotationAlignment("viewport"),
+        )
+    )
+
+    if (style.getImage(BOARDED_VEHICLE_IMAGE_ID) == null) {
+        style.getImage(VEHICLE_MARKER_IMAGE_ID)?.let { busBitmap ->
+            style.addImage(BOARDED_VEHICLE_IMAGE_ID, createBoardedVehicleBitmap(busBitmap))
+        }
+    }
+    style.getLayer(BOARDED_VEHICLE_LAYER_ID)?.let { style.removeLayer(BOARDED_VEHICLE_LAYER_ID) }
+    style.addLayer(
+        SymbolLayer(BOARDED_VEHICLE_LAYER_ID, BOARDED_VEHICLE_SOURCE_ID).withProperties(
+            iconImage(BOARDED_VEHICLE_IMAGE_ID),
+            iconSize(0.5f),
+            iconAllowOverlap(true),
+            iconIgnorePlacement(true),
             iconRotationAlignment("viewport"),
         )
     )
@@ -995,6 +1055,45 @@ private fun updateVehicleHeadingSectors(
         }
     }
     source.setGeoJson(FeatureCollection.fromFeatures(features.toTypedArray()))
+}
+
+private fun updateBoardedVehicle(style: Style, boarded: Pair<Vehicle, VehicleLocation>?) {
+    val source = style.getSourceAs<GeoJsonSource>(BOARDED_VEHICLE_SOURCE_ID) ?: return
+    if (boarded == null) {
+        source.setGeoJson(FeatureCollection.fromFeatures(emptyArray<Feature>()))
+        return
+    }
+    val (vehicle, location) = boarded
+    source.setGeoJson(
+        FeatureCollection.fromFeature(
+            Feature.fromGeometry(Point.fromLngLat(location.longitude, location.latitude)).apply {
+                addStringProperty("vehicle_id", vehicle.id)
+                addStringProperty("identifier", vehicle.identifier)
+            }
+        )
+    )
+}
+
+/** Blue round badge with a white ring and the bus marker inside it. */
+private fun createBoardedVehicleBitmap(busBitmap: Bitmap): Bitmap {
+    val size = 160
+    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bitmap)
+    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    val center = size / 2f
+    paint.color = android.graphics.Color.argb(70, 30, 120, 255)
+    canvas.drawCircle(center, center, center - 2f, paint)
+    paint.color = android.graphics.Color.WHITE
+    canvas.drawCircle(center, center, center - 18f, paint)
+    paint.color = SafarBlue.toArgb()
+    canvas.drawCircle(center, center, center - 26f, paint)
+    val inner = (size - 64).toFloat()
+    val scale = minOf(inner / busBitmap.width, inner / busBitmap.height)
+    val w = busBitmap.width * scale
+    val h = busBitmap.height * scale
+    val dst = android.graphics.RectF(center - w / 2f, center - h / 2f, center + w / 2f, center + h / 2f)
+    canvas.drawBitmap(busBitmap, null, dst, android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG))
+    return bitmap
 }
 
 private fun updateVehicles(

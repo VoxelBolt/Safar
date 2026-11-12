@@ -141,4 +141,30 @@
     <string name="location_stale">Геопозиция устарела</string>
 
     <string name="passengers_waiting">Ждут маршрут %1$s: %2$d</string>
+    <!-- Permissions -->
+    <string name="background_location_title">Отслеживание в фоне</string>
+    <string name="background_location_message">Чтобы пассажиры видели вашу маршрутку, даже когда приложение свёрнуто или закрыто, выберите «Разрешить всегда» для геолокации Safar.</string>
+    <string name="background_location_allow">Разрешить</string>
+    <string name="background_location_later">Позже</string>
+    <string name="background_location_needed">Разрешите геолокацию «Всегда» для фонового отслеживания</string>
+    <string name="open_settings">Открыть настройки</string>
+    <string name="notifications_enabled">Уведомления включены.</string>
+    <string name="notifications_denied">Уведомления выключены. Их можно включить в настройках Android.</string>
+    <!-- Vehicle info on the passenger map -->
+    <string name="vehicle_info_title">Маршрутка %1$s</string>
+    <string name="vehicle_info_route">Маршрут: %1$s</string>
+    <string name="vehicle_info_distance">До вас: %1$s</string>
+    <string name="vehicle_info_eta">Прибудет примерно через %1$d мин</string>
+    <string name="vehicle_info_active">Активен сейчас</string>
+    <string name="add_to_favorites">Добавить в избранное</string>
+    <string name="remove_from_favorites">Убрать из избранного</string>
+    <string name="close">Закрыть</string>
+    <string name="in_vehicle_title">Вы едете в этой маршрутке</string>
+    <string name="in_vehicle_subtitle">Маршрутка %1$s</string>
+    <!-- Login -->
+    <string name="auth_mode_register">Регистрация</string>
+    <string name="auth_mode_login">Вход</string>
+    <string name="login_subtitle">Введите данные, с которыми вы регистрировались</string>
+    <string name="login_button">Войти</string>
+    <string name="login_in_progress">Вход…</string>
 </resources>

@@ -141,4 +141,30 @@
     <string name="driver_location_description">Иҷозати ҷойгиршавиро диҳед, то мусофирон нақлиёти шуморо дар харита бинанд. Пас аз додани иҷозат интиқоли ҷойгиршавӣ худкор оғоз мешавад.</string>
     <string name="allow_location">Иҷозат додан</string>
     <string name="driver_route_load_error">Масирҳоро бор кардан нашуд.</string>
+    <!-- Permissions -->
+    <string name="background_location_title">Пайгирӣ дар замина</string>
+    <string name="background_location_message">Барои он ки мусофирон маршруткаи шуморо ҳангоми пӯшида будани барнома бинанд, барои геолокатсияи Safar «Ҳамеша иҷозат додан»-ро интихоб кунед.</string>
+    <string name="background_location_allow">Иҷозат додан</string>
+    <string name="background_location_later">Баъдтар</string>
+    <string name="background_location_needed">Барои пайгирӣ дар замина геолокатсияро «Ҳамеша» иҷозат диҳед</string>
+    <string name="open_settings">Кушодани танзимот</string>
+    <string name="notifications_enabled">Огоҳиномаҳо фаъоланд.</string>
+    <string name="notifications_denied">Огоҳиномаҳо хомӯшанд. Онҳоро дар танзимоти Android фаъол кардан мумкин аст.</string>
+    <!-- Vehicle info on the passenger map -->
+    <string name="vehicle_info_title">Маршрутка %1$s</string>
+    <string name="vehicle_info_route">Хатсайр: %1$s</string>
+    <string name="vehicle_info_distance">То шумо: %1$s</string>
+    <string name="vehicle_info_eta">Тақрибан баъд аз %1$d дақ мерасад</string>
+    <string name="vehicle_info_active">Ҳоло фаъол</string>
+    <string name="add_to_favorites">Илова ба интихобшудаҳо</string>
+    <string name="remove_from_favorites">Хориҷ аз интихобшудаҳо</string>
+    <string name="close">Пӯшидан</string>
+    <string name="in_vehicle_title">Шумо дар ҳамин маршрутка ҳастед</string>
+    <string name="in_vehicle_subtitle">Маршрутка %1$s</string>
+    <!-- Login -->
+    <string name="auth_mode_register">Бақайдгирӣ</string>
+    <string name="auth_mode_login">Воридшавӣ</string>
+    <string name="login_subtitle">Маълумотеро, ки бо он ба қайд гирифта шудаед, ворид кунед</string>
+    <string name="login_button">Ворид шудан</string>
+    <string name="login_in_progress">Ворид шуда истодааст…</string>
 </resources>

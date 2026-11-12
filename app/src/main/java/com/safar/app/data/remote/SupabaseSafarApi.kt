@@ -81,6 +81,37 @@ class SupabaseSafarApi(
         }
     }
 
+    override suspend fun loginPassenger(name: String, phone: String): User {
+        ensureAnonymousSession()
+        val authUserId = requireNotNull(client.auth.currentUserOrNull()?.id)
+        return client.postgrest.rpc(
+            "login_passenger",
+            buildJsonObject {
+                put("p_name", name)
+                put("p_phone", phone)
+            },
+        ).decodeAs<UserDto>().toDomain().also { user ->
+            check(user.id == authUserId) { "Passenger login returned an unexpected user id." }
+            check(user.role == UserRole.PASSENGER) { "Passenger login returned an unexpected role." }
+        }
+    }
+
+    override suspend fun loginDriver(name: String, phone: String, vehicleIdentifier: String): User {
+        ensureAnonymousSession()
+        val authUserId = requireNotNull(client.auth.currentUserOrNull()?.id)
+        return client.postgrest.rpc(
+            "login_driver",
+            buildJsonObject {
+                put("p_name", name)
+                put("p_phone", phone)
+                put("p_vehicle_identifier", vehicleIdentifier)
+            },
+        ).decodeAs<UserDto>().toDomain().also { user ->
+            check(user.id == authUserId) { "Driver login returned an unexpected user id." }
+            check(user.role == UserRole.DRIVER) { "Driver login returned an unexpected role." }
+        }
+    }
+
     override suspend fun registerDriver(
         name: String,
         phone: String,

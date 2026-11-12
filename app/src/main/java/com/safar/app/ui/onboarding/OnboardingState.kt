@@ -19,4 +19,6 @@ data class OnboardingState(
     val registrationInProgress: Boolean = false,
     val registrationError: Boolean = false,
     val registrationErrorMessage: String? = null,
+    // true = "Вход" (existing account), false = "Регистрация". Transient.
+    val isLoginMode: Boolean = false,
 )

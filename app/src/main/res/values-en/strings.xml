@@ -141,4 +141,30 @@
     <string name="driver_location_description">Allow location access so passengers can see your vehicle on the map. Location sharing starts automatically after permission is granted.</string>
     <string name="allow_location">Allow</string>
     <string name="driver_route_load_error">Could not load routes.</string>
+    <!-- Permissions -->
+    <string name="background_location_title">Background tracking</string>
+    <string name="background_location_message">To keep your vehicle visible to passengers while the app is minimized or closed, choose "Allow all the time" for Safar location access.</string>
+    <string name="background_location_allow">Allow</string>
+    <string name="background_location_later">Later</string>
+    <string name="background_location_needed">Allow location "All the time" for background tracking</string>
+    <string name="open_settings">Open settings</string>
+    <string name="notifications_enabled">Notifications are enabled.</string>
+    <string name="notifications_denied">Notifications are disabled. You can enable them in Android settings.</string>
+    <!-- Vehicle info on the passenger map -->
+    <string name="vehicle_info_title">Vehicle %1$s</string>
+    <string name="vehicle_info_route">Route: %1$s</string>
+    <string name="vehicle_info_distance">Distance to you: %1$s</string>
+    <string name="vehicle_info_eta">Arrives in about %1$d min</string>
+    <string name="vehicle_info_active">Active now</string>
+    <string name="add_to_favorites">Add to favorites</string>
+    <string name="remove_from_favorites">Remove from favorites</string>
+    <string name="close">Close</string>
+    <string name="in_vehicle_title">You are riding this vehicle</string>
+    <string name="in_vehicle_subtitle">Vehicle %1$s</string>
+    <!-- Login -->
+    <string name="auth_mode_register">Sign up</string>
+    <string name="auth_mode_login">Log in</string>
+    <string name="login_subtitle">Enter the details you registered with</string>
+    <string name="login_button">Log in</string>
+    <string name="login_in_progress">Logging in…</string>
 </resources>
